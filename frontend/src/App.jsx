@@ -231,6 +231,7 @@ function ChatLayout() {
           >
             <ArtifactPanel
               artifact={openArtifact}
+              messages={messages}
               onClose={() => setOpenArtifact(null)}
               onAccept={() => sendArtifactFeedback("accept", "")}
               onRevise={(comment) => sendArtifactFeedback("revise", comment)}
