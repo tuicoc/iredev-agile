@@ -233,7 +233,6 @@ export function RequirementsView({ data }) {
 
 export function InterviewRecordRequirementsView({ data }) {
   const requirements = data?.requirements_identified || [];
-  console.log(requirements);
 
   const PRIORITY_COLORS = {
     high: "bg-red-50 text-red-600 border-red-200",
@@ -252,7 +251,22 @@ export function InterviewRecordRequirementsView({ data }) {
     },
     {
       title: "Answer",
-      displayValue: (dat) => dat.answer,
+      displayValue: (dat) => (
+        <>
+          <div>
+            {`${dat.answer.split(" ").slice(0, 25).join(" ")} ${dat.answer.split(" ").length > 25 ? "…" : ""}`}
+          </div>
+          {dat.answer.split(" ").length > 25 && (
+            <div className="mt-1 text-[11px] text-[#8A7F72] italic leading-relaxed hidden group-hover:block">
+              ↳ {dat.answer.split(" ").slice(25).join(" ")}
+            </div>
+          )}
+        </>
+      ),
+    },
+    {
+      title: "Interviewed Stakeholder Role",
+      displayValue: (dat) => dat.interviewed_stakeholder_role,
     },
     {
       title: "Priority",
