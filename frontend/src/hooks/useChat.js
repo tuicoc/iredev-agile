@@ -9,7 +9,7 @@
 //   artifact_accepted→ mark artifact as accepted, hide feedback bar
 //   error            → show error in bubble
 // =============================================================================
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useWebSocket } from "./useWebSocket";
 import { wsService }    from "../services/websocketService";
 import {
@@ -39,7 +39,45 @@ export function useChat() {
   const activeChatIdRef  = useRef(activeChatId);
   const placeholderIdRef = useRef(null);
 
-  useEffect(() => { activeChatIdRef.current = activeChatId; }, [activeChatId]);
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
+  const placeHolderMessage = useMemo(() => {
+    if (!messages) return null;
+    const artifactList = messages.filter((mess) => !!mess.artifact, []);
+
+    switch (artifactList.length) {
+      case 0:
+        return "Creating Product Vision ...";
+      case 1:
+        return artifactList.at(-1)?.artifact?.accepted
+          ? "Creating Elicitation Agenda ..."
+          : "Waiting for Human Feedback on Product Vision ...";
+      case 2:
+        return artifactList.at(-1)?.artifact?.accepted
+          ? `Interview Process between Interviewer Agent and EndUser Agent is processing ...`
+          : "Waiting for Human Feedback on Elicitation Agenda ...";
+      case 3:
+        return artifactList.at(-1)?.artifact?.accepted
+          ? "Creating Requirement List ..."
+          : "Waiting for Human Feedback on Interview Record ...";
+      case 4:
+        return artifactList.at(-1)?.artifact?.accepted
+          ? "Creating Product Backlog ..."
+          : "Waiting for Human Feedback on Requirement List ...";
+      case 5:
+        return artifactList.at(-1)?.artifact?.accepted
+          ? "Creating Validated Product Backlog ..."
+          : "Waiting for Human Feedback on Product Backlog ...";
+      case 6:
+        return artifactList.at(-1)?.artifact?.accepted
+          ? null
+          : "Waiting for Human Feedback on Validated Product Backlog ...";
+      default:
+        return null;
+    }
+  }, [messages]);
 
   // ── Reset when user logs out ───────────────────────────────────────────────
   useEffect(() => {
@@ -340,6 +378,7 @@ export function useChat() {
   }, []);
 
   return {
+    placeHolderMessage,
     activeChatId,
     activeProjectId,
     subChat,
