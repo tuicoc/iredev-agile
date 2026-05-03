@@ -89,12 +89,23 @@ function useResizable({ defaultRightPct = 40, minRight = 22, maxRight = 68 } = {
 // ── ChatLayout ────────────────────────────────────────────────────────────────
 function ChatLayout() {
   const {
-    activeChatId, subChat, messages, streaming,
-    openArtifact, loadingMessages, error,
-    setOpenArtifact, setError, setSubChat,
-    selectChat, clearActiveChat,
-    sendMessage, cancelStream,
-    sendArtifactFeedback, handleStartProcess,
+    activeChatId,
+    subChat,
+    messages,
+    streaming,
+    openArtifact,
+    loadingMessages,
+    error,
+    setOpenArtifact,
+    setError,
+    setSubChat,
+    selectChat,
+    clearActiveChat,
+    sendMessage,
+    cancelStream,
+    sendArtifactFeedback,
+    handleStartProcess,
+    placeHolderMessage,
   } = useChat();
 
   // Active project — set when user clicks a project folder name in sidebar.
@@ -201,6 +212,14 @@ function ChatLayout() {
                         onOpenArtifact={(art) => setOpenArtifact({ ...art, messageId: msg.id })}
                       />
                     ))}
+                    {placeHolderMessage && (
+                      <div className="flex items-center">
+                        <LoadingSpinner size={22} className="text-[#C96A42]" />
+                        <div className="text-[#C0B8AE] text-[13px] ml-2">
+                          {placeHolderMessage}
+                        </div>
+                      </div>
+                    )}
                     <div ref={bottomRef} />
                   </div>
                 )}
@@ -231,6 +250,7 @@ function ChatLayout() {
           >
             <ArtifactPanel
               artifact={openArtifact}
+              messages={messages}
               onClose={() => setOpenArtifact(null)}
               onAccept={() => sendArtifactFeedback("accept", "")}
               onRevise={(comment) => sendArtifactFeedback("revise", comment)}

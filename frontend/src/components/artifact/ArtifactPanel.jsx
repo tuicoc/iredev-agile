@@ -25,6 +25,7 @@ import {
   ClipboardList,
   CheckSquare,
   Code2,
+  File,
 } from "lucide-react";
 import { Tooltip } from "../ui";
 import { ArtifactFeedbackBar } from "./ArtifactFeedbackBar";
@@ -37,6 +38,7 @@ import { ProductBacklogView } from "./views/ProductBacklogView";
 import { ValidatedBacklogView } from "./views/ValidatedBacklogView";
 import ProductVisionView from "./views/ProductVisionView";
 import { ElicitationAgendaView } from "./views/ElicitationAgendaView";
+import { useChat } from "../../context/ChatContext";
 
 // ── Detect artifact type from content ────────────────────────────────────────
 function detectArtifactType(artifact) {
@@ -89,7 +91,7 @@ function getTabsForType(artifactType) {
 }
 
 // ── Friendly display name per artifact type ──────────────────────────────────
-function getArtifactDisplayName(artifactType) {
+export function getArtifactDisplayName(artifactType) {
   const NAMES = {
     interview_record: "Interview Record",
     product_vision: "Product Vision",
@@ -131,7 +133,20 @@ function JsonView({ content }) {
 }
 
 // ── Main ArtifactPanel ────────────────────────────────────────────────────────
-export function ArtifactPanel({ artifact, onClose, onAccept, onRevise }) {
+export function ArtifactPanel({
+  artifact,
+  onClose,
+  onAccept,
+  onRevise,
+  messages,
+  onOpenArtifact,
+}) {
+  const { setOpenArtifact } = useChat();
+  const artifactList = useMemo(
+    () => messages.filter((mess) => !!mess.artifact, []),
+    [messages],
+  );
+
   const artifactType = useMemo(
     () => detectArtifactType(artifact),
     [artifact?.content],
@@ -258,6 +273,30 @@ export function ArtifactPanel({ artifact, onClose, onAccept, onRevise }) {
           </Tooltip>
         </div>
       </div>
+
+      {artifactList.length > 1 && (
+        <div className="flex gap-1 px-4 border-b border-[#E8E3D9] bg-[#F9F7F3] flex-shrink-0 overflow-y-auto w-full">
+          {artifactList.map((tab, idx) => {
+            return (
+              <button
+                key={idx}
+                onClick={() =>
+                  setOpenArtifact({ ...tab.artifact, messageId: tab.id })
+                }
+                className={`whitespace-nowrap flex items-center gap-1.5 px-3 py-2.5 text-[12px] font-medium
+                            border-b-2 -mb-px transition-colors ${
+                              tab.artifact.type === artifact.type
+                                ? "border-[#C96A42] text-[#C96A42]"
+                                : "border-transparent text-[#8A7F72] hover:text-[#1A1410]"
+                            }`}
+              >
+                <File size={12} />
+                {getArtifactDisplayName(tab.artifact.type)}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* ── Tab bar ─────────────────────────────────────────────────────── */}
       {tabs.length > 1 && (

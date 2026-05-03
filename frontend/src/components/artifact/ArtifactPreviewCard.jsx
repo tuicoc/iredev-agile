@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Check,
 } from "lucide-react";
+import { getArtifactDisplayName } from "./ArtifactPanel";
 
 const TYPE_ICONS = {
   react: Code2,
@@ -52,7 +53,7 @@ export function ArtifactPreviewCard({ artifact, onOpen }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-[13px] font-semibold text-[#1A1410] truncate leading-snug">
-            {artifact.title}
+            {getArtifactDisplayName(artifact.type)}
           </span>
           {artifact.iteration && (
             <span className="text-[10px] text-[#B5ADA4] flex-shrink-0">
