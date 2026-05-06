@@ -12,7 +12,7 @@
 # idempotently — creates tables/indexes/seed data only if not already present.
 #
 # Environment variables (add to .env):
-#   DATABASE_URL  — full DSN, e.g.
+#   IREDEV_PG_CONNECTION  — full DSN, e.g.
 #       postgresql://user:pass@localhost:5432/iredev
 #   DB_MIN_CONN   — pool minimum (default 1)
 #   DB_MAX_CONN   — pool maximum (default 10)
@@ -25,37 +25,40 @@ import os
 from contextlib import contextmanager
 from pathlib import Path
 
-import psycopg2
-from psycopg2 import pool as pg_pool
-from psycopg2.extras import RealDictCursor
+import psycopg
+from psycopg_pool import ConnectionPool
+from psycopg.rows import dict_row
 
 log = logging.getLogger(__name__)
 
 # ── Read config ───────────────────────────────────────────────────────────────
-_DATABASE_URL = os.getenv(
-    "IREDEV_PG_CONNECTION",
-    # "postgresql://postgres:postgres@localhost:5432/iredev",
-)
+_DATABASE_URL = os.getenv("IREDEV_PG_CONNECTION")
 _MIN_CONN = int(os.getenv("DB_MIN_CONN", "1"))
 _MAX_CONN = int(os.getenv("DB_MAX_CONN", "10"))
 
-# init_db.sql lives at the project root (two levels up from this file:
-#   backend/src/server/data/connection.py → project root)
+# init_db.sql lives in the same directory as this file
 _SCHEMA_PATH = Path(__file__).parent / "init_db.sql"
 
 # ── Pool (initialised lazily on first use) ────────────────────────────────────
-_pool: pg_pool.ThreadedConnectionPool | None = None
+_pool: ConnectionPool | None = None
 
 
-def _get_pool() -> pg_pool.ThreadedConnectionPool:
+def _get_pool() -> ConnectionPool:
     global _pool
     if _pool is None:
-        log.info(_DATABASE_URL)
-        log.info("[DB] Creating connection pool  dsn=%s", _DATABASE_URL.split("@")[-1])
-        _pool = pg_pool.ThreadedConnectionPool(
-            _MIN_CONN,
-            _MAX_CONN,
-            dsn=_DATABASE_URL,
+        if not _DATABASE_URL:
+            raise RuntimeError(
+                "IREDEV_PG_CONNECTION environment variable is not set."
+            )
+        masked = _DATABASE_URL.split("@")[-1] if "@" in _DATABASE_URL else _DATABASE_URL
+        log.info("[DB] Creating connection pool  dsn=%s", masked)
+        dsn = _DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")
+        _pool = ConnectionPool(
+            conninfo=dsn,
+            min_size=_MIN_CONN,
+            max_size=_MAX_CONN,
+            kwargs={"row_factory": dict_row},
+            open=True,
         )
         log.info("[DB] Pool ready  min=%d  max=%d", _MIN_CONN, _MAX_CONN)
     return _pool
@@ -64,7 +67,7 @@ def _get_pool() -> pg_pool.ThreadedConnectionPool:
 @contextmanager
 def get_conn():
     """
-    Yield a psycopg2 connection from the pool.
+    Yield a psycopg v3 connection from the pool.
     The connection is returned to the pool when the `with` block exits.
     Rolls back automatically on exception.
 
@@ -73,21 +76,20 @@ def get_conn():
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
     """
-    p    = _get_pool()
-    conn = p.getconn()
-    try:
+    pool = _get_pool()
+    with pool.connection() as conn:
         yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        p.putconn(conn)
 
 
 def dict_cursor(conn):
-    """Return a cursor that yields rows as plain dicts."""
-    return conn.cursor(cursor_factory=RealDictCursor)
+    """
+    Return a cursor that yields rows as plain dicts.
+
+    psycopg v3: the row_factory is set at pool level (dict_row), so every
+    cursor on pooled connections already returns dicts.  This helper is kept
+    for API compatibility with callers that do `with dict_cursor(conn) as cur`.
+    """
+    return conn.cursor()
 
 
 # =============================================================================
@@ -96,7 +98,7 @@ def dict_cursor(conn):
 
 def init_db(schema_path: Path | str | None = None) -> None:
     """
-    Run schema.sql against the database.
+    Run init_db.sql against the database.
 
     The SQL file is fully idempotent:
       • CREATE TABLE IF NOT EXISTS  — skips existing tables
@@ -106,8 +108,7 @@ def init_db(schema_path: Path | str | None = None) -> None:
     Safe to call every time the app starts; nothing is dropped or overwritten.
 
     Args:
-        schema_path: override the default path to schema.sql.
-                     Defaults to <project_root>/schema.sql.
+        schema_path: override the default path to init_db.sql.
     """
     path = Path(schema_path) if schema_path else _SCHEMA_PATH
 
@@ -121,7 +122,7 @@ def init_db(schema_path: Path | str | None = None) -> None:
     log.info("[DB] Running schema from %s …", path)
 
     with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql)
+        conn.execute(sql)
+        conn.commit()
 
     log.info("[DB] Schema applied successfully (tables / indexes / seed data up to date).")
