@@ -12,7 +12,7 @@
 
 import uuid
 from flask import Blueprint, request, jsonify
-from ..data import mock_db
+from ..data import database
 from ..auth.auth_utils import require_auth
 from ..websocket.ws_handler import ws_handler
 import logging
@@ -39,7 +39,7 @@ def list_chats(current_user):
     GET /api/chats
     Return top-level chats (not inside any project) for the authenticated user.
     """
-    chats = mock_db.get_chats_for_user(current_user["id"])
+    chats = database.get_chats_for_user(current_user["id"])
     return jsonify(sorted(chats, key=lambda c: c["createdAt"], reverse=True)), 200
 
 
@@ -59,13 +59,13 @@ def create_chat(current_user):
 
     # If projectId given, verify ownership
     if project_id:
-        project = mock_db.get_project(project_id)
+        project = database.get_project(project_id)
         if not project:
             return jsonify({"error": "Not found", "message": f"Project '{project_id}' not found."}), 404
         if project["userId"] != current_user["id"]:
             return jsonify({"error": "Forbidden", "message": "You don't own this project."}), 403
 
-    chat = mock_db.create_chat(user_id=current_user["id"], title=title, project_id=project_id)
+    chat = database.create_chat(user_id=current_user["id"], title=title, project_id=project_id)
     return jsonify(chat), 201
 
 
@@ -73,13 +73,13 @@ def create_chat(current_user):
 @require_auth
 def delete_chat(current_user, chat_id):
     """DELETE /api/chats/<chat_id>"""
-    chat = mock_db.get_chat(chat_id)
+    chat = database.get_chat(chat_id)
     if not chat:
         return jsonify({"error": "Not found", "message": f"Chat '{chat_id}' does not exist."}), 404
     if chat["userId"] != current_user["id"]:
         return jsonify({"error": "Forbidden", "message": "You don't own this chat."}), 403
 
-    mock_db.delete_chat(chat_id)
+    database.delete_chat(chat_id)
     return jsonify({"ok": True}), 200
 
 
@@ -91,19 +91,19 @@ def delete_chat(current_user, chat_id):
 @chat_bp.route("/<chat_id>/<sub_chat_id>/messages", methods=["GET"])
 @require_auth
 def list_messages(current_user, chat_id, sub_chat_id):
-    chat = mock_db.get_chat(chat_id)
+    chat = database.get_chat(chat_id)
     if not chat:
         return jsonify({"error": "Not found", "message": f"Chat '{chat_id}' does not exist."}), 404
     if chat["userId"] != current_user["id"]:
         return jsonify({"error": "Forbidden", "message": "You don't own this chat."}), 403
 
-    return jsonify(mock_db.get_messages(chat_id, sub_chat_id)), 200
+    return jsonify(database.get_messages(chat_id, sub_chat_id)), 200
 
 
 @chat_bp.route("/<chat_id>/<sub_chat_id>/messages", methods=["POST"])
 @require_auth
 def save_message(current_user, chat_id, sub_chat_id):
-    chat = mock_db.get_chat(chat_id)
+    chat = database.get_chat(chat_id)
     if not chat:
         return jsonify({"error": "Not found", "message": f"Chat '{chat_id}' does not exist."}), 404
     if chat["userId"] != current_user["id"]:
@@ -118,7 +118,7 @@ def save_message(current_user, chat_id, sub_chat_id):
     if not content:
         return jsonify({"error": "Validation error", "message": "content is required."}), 400
 
-    message = mock_db.add_message(chat_id=chat_id, role=role, content=content, subChatID=sub_chat_id)
+    message = database.add_message(chat_id=chat_id, role=role, content=content, subChatID=sub_chat_id)
     return jsonify(message), 201
 
 

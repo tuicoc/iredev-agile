@@ -12,7 +12,7 @@
 
 import logging
 from flask import Blueprint, request, jsonify
-from ..data import mock_db
+from ..data import database
 from ..auth.auth_utils import require_auth
 
 project_bp = Blueprint("project", __name__)
@@ -31,7 +31,7 @@ def list_projects(current_user):
     GET /api/projects
     Return all projects for the authenticated user, newest first.
     """
-    projects = mock_db.get_projects_for_user(current_user["id"])
+    projects = database.get_projects_for_user(current_user["id"])
     return jsonify(projects), 200
 
 
@@ -49,7 +49,7 @@ def create_project(current_user):
     if not name:
         return jsonify({"error": "Validation error", "message": "name is required."}), 400
 
-    project = mock_db.create_project(
+    project = database.create_project(
         user_id=current_user["id"],
         name=name,
         description=description,
@@ -65,7 +65,7 @@ def update_project(current_user, project_id):
     PUT /api/projects/<project_id>
     Body: { "name": "New name", "description": "New desc" }
     """
-    project = mock_db.get_project(project_id)
+    project = database.get_project(project_id)
     if not project:
         return jsonify({"error": "Not found", "message": f"Project '{project_id}' not found."}), 404
     if project["userId"] != current_user["id"]:
@@ -77,7 +77,7 @@ def update_project(current_user, project_id):
     if description is not None:
         description = description.strip()
 
-    updated = mock_db.update_project(project_id, name=name, description=description)
+    updated = database.update_project(project_id, name=name, description=description)
     return jsonify(updated), 200
 
 
@@ -88,13 +88,13 @@ def delete_project(current_user, project_id):
     DELETE /api/projects/<project_id>
     Removes the project and all its chats/messages.
     """
-    project = mock_db.get_project(project_id)
+    project = database.get_project(project_id)
     if not project:
         return jsonify({"error": "Not found", "message": f"Project '{project_id}' not found."}), 404
     if project["userId"] != current_user["id"]:
         return jsonify({"error": "Forbidden", "message": "You don't own this project."}), 403
 
-    mock_db.delete_project(project_id)
+    database.delete_project(project_id)
     log.info("[project] Deleted  user=%s  project=%s", current_user["id"], project_id)
     return jsonify({"ok": True}), 200
 
@@ -111,13 +111,13 @@ def list_project_chats(current_user, project_id):
     GET /api/projects/<project_id>/chats
     Return all chats in the project.
     """
-    project = mock_db.get_project(project_id)
+    project = database.get_project(project_id)
     if not project:
         return jsonify({"error": "Not found", "message": f"Project '{project_id}' not found."}), 404
     if project["userId"] != current_user["id"]:
         return jsonify({"error": "Forbidden", "message": "You don't own this project."}), 403
 
-    chats = mock_db.get_chats_for_project(project_id)
+    chats = database.get_chats_for_project(project_id)
     return jsonify(chats), 200
 
 
@@ -129,7 +129,7 @@ def create_project_chat(current_user, project_id):
     Body: { "title": "Requirement Process #1" }
     Creates a new chat (requirement process run) inside the project.
     """
-    project = mock_db.get_project(project_id)
+    project = database.get_project(project_id)
     if not project:
         return jsonify({"error": "Not found", "message": f"Project '{project_id}' not found."}), 404
     if project["userId"] != current_user["id"]:
@@ -140,7 +140,7 @@ def create_project_chat(current_user, project_id):
     if not title:
         return jsonify({"error": "Validation error", "message": "title is required."}), 400
 
-    chat = mock_db.create_chat(
+    chat = database.create_chat(
         user_id=current_user["id"],
         title=title,
         project_id=project_id,

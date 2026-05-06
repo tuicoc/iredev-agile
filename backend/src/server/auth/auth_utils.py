@@ -29,7 +29,7 @@ from ..config.config import (
     REFRESH_TOKEN_TTL_SECONDS,
     COOKIE_NAME,
 )
-from ..data import mock_db
+from ..data import database
 from ..auth import token_blacklist
 
 log = logging.getLogger(__name__)
@@ -182,7 +182,7 @@ def verify_access_token(token: str) -> str | None:
         return None
 
     # User still exists
-    if not mock_db.find_user_by_id(user_id):
+    if not database.find_user_by_id(user_id):
         log.debug(f"[auth] verify_access_token: user not found  user_id={user_id}")
         return None
 
@@ -211,7 +211,7 @@ def verify_refresh_token(token: str) -> str | None:
         log.debug(f"[auth] verify_refresh_token: blacklisted  user={user_id}")
         return None
 
-    if not mock_db.find_user_by_id(user_id):
+    if not database.find_user_by_id(user_id):
         log.debug(f"[auth] verify_refresh_token: user not found  user_id={user_id}")
         return None
 
@@ -322,11 +322,11 @@ def require_auth(f):
                 401,
             )
 
-        user = mock_db.find_user_by_id(user_id)
+        user = database.find_user_by_id(user_id)
         if not user:
             return jsonify({"error": "User not found"}), 401
 
-        return f(mock_db.safe_user(user), *args, **kwargs)
+        return f(database.safe_user(user), *args, **kwargs)
 
     return wrapper
 

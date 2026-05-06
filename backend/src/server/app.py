@@ -1,22 +1,16 @@
-# backend/app.py
+# backend/src/server/app.py
 # =============================================================================
 # Flask application entry point.
-#
-# FIXES:
-#   1. Added logging configuration so auth rejections print to console.
-#   2. Explicit threaded=True for Flask dev server — required for WebSocket
-#      + REST to work simultaneously without blocking.
-#   3. use_reloader=False prevents the reloader from killing WS connections.
 # =============================================================================
 
-# backend/app.py
 import logging
 from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_sock import Sock
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 from .config.config import PORT, CORS_ORIGINS
 from .routes.auth_routes import auth_bp
@@ -24,6 +18,7 @@ from .routes.chat_routes import chat_bp
 from .routes.project_routes import project_bp
 from .websocket.ws_handler import ws_handler
 from .auth.token_blacklist import start_sweep_thread, size
+from .data.connection import init_db
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -50,7 +45,13 @@ app.register_blueprint(auth_bp,    url_prefix="/api/auth")
 app.register_blueprint(chat_bp,    url_prefix="/api/chats")
 app.register_blueprint(project_bp, url_prefix="/api/projects")
 
-# Start the blacklist sweep background thread
+# ── Database bootstrap ────────────────────────────────────────────────────────
+# Runs schema.sql idempotently:
+#   - creates tables / indexes only if they don't exist yet
+#   - inserts seed rows only if they're not already there
+init_db()
+
+# ── Background threads ────────────────────────────────────────────────────────
 start_sweep_thread()
 
 
@@ -85,18 +86,15 @@ if __name__ == "__main__":
     print(
         f"""
 ╔══════════════════════════════════════════════════════════════╗
-║  Claude UI — Backend  (access_token + refresh_token)        ║
-║  http://localhost:{PORT}                                       ║
+║  CARA — Backend                                              ║
+║  http://localhost:{PORT}                                     ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Auth                                                        ║
 ║    POST  /api/auth/register   → access_token (JSON)          ║
-║                                 refresh_token (HttpOnly cookie)║
 ║    POST  /api/auth/login      → same as register             ║
-║    POST  /api/auth/refresh    → new access_token (cookie auto)║
+║    POST  /api/auth/refresh    → new access_token             ║
 ║    POST  /api/auth/logout     → blacklists both tokens       ║
 ║    GET   /api/auth/me         → current user                 ║
-╠══════════════════════════════════════════════════════════════╣
-║  Chats / Messages / WebSocket — unchanged                    ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Demo accounts                                               ║
 ║    demo@example.com   /  password123                         ║
