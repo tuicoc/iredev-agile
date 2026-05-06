@@ -40,7 +40,7 @@ import uuid
 import logging
 from typing import Any, Dict, Optional
 
-from ..data.mock_db import (
+from ..data.database import (
     add_message,
     update_message_artifact,
 )

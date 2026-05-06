@@ -20,7 +20,7 @@ import time
 import logging
 from flask import Blueprint, request, jsonify, make_response
 
-from ..data import mock_db
+from ..data import database
 from ..auth.auth_utils import (
     create_access_token,
     create_refresh_token,
@@ -130,7 +130,7 @@ def register():
         )
 
     try:
-        user = mock_db.create_user(name=name, email=email, password=password)
+        user = database.create_user(name=name, email=email, password=password)
     except ValueError as e:
         return jsonify({"error": "Conflict", "message": str(e)}), 409
 
@@ -141,7 +141,7 @@ def register():
         jsonify(
             {
                 "access_token": access_token,
-                "user": mock_db.safe_user(user),
+                "user": database.safe_user(user),
             }
         ),
         201,
@@ -182,8 +182,8 @@ def login():
             400,
         )
 
-    user = mock_db.find_user_by_email(email)
-    if not user or not mock_db.check_password(user, password):
+    user = database.find_user_by_email(email)
+    if not user or not database.check_password(user, password):
         return (
             jsonify({"error": "Unauthorized", "message": "Invalid email or password."}),
             401,
@@ -196,7 +196,7 @@ def login():
         jsonify(
             {
                 "access_token": access_token,
-                "user": mock_db.safe_user(user),
+                "user": database.safe_user(user),
             }
         ),
         200,

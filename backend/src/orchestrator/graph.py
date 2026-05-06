@@ -114,14 +114,14 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
 
     # Sent inside review_elicitation_agenda_turn interrupt — alongside the artifact.
     "elicitation_agenda": (
-        "## 📝 Elicitation Agenda Ready for Review\\n\\n"
+        "## 📝 Elicitation Agenda Ready for Review\n\n"
         "The AI Interviewer has built an **Elicitation Agenda** from the approved "
         "Product Vision — the ordered list of topics and questions that will drive "
-        "the requirements interview.\\n\\n"
-        "**What's inside:**\\n"
-        "- Ordered elicitation items derived from epics, assumptions, and constraints\\n"
-        "- Priority and source reference for each item\\n"
-        "- Elicitation goal per item (what information is being sought)\\n\\n"
+        "the requirements interview.\n\n"
+        "**What's inside:**\n"
+        "- Ordered elicitation items derived from epics, assumptions, and constraints\n"
+        "- Priority and source reference for each item\n"
+        "- Elicitation goal per item (what information is being sought)\n\n"
         "**Your action:** Review the agenda below. "
         "If the coverage and order look correct, click **Accept** to start the interview. "
         "If items are missing, wrongly prioritised, or out of scope, click **Request Changes** "
