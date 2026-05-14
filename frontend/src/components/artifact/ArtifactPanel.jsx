@@ -14,7 +14,7 @@
 // validated_product_backlog → tabs: Validated Backlog
 // fallback                  → tabs: JSON (raw view)
 // =============================================================================
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Copy,
   Check,
@@ -42,6 +42,7 @@ import { useChat } from "../../context/ChatContext";
 
 // ── Detect artifact type from content ────────────────────────────────────────
 function detectArtifactType(artifact) {
+  if (artifact?.type) return artifact.type;
   if (!artifact?.content) return "unknown";
 
   let data = null;
@@ -55,8 +56,6 @@ function detectArtifactType(artifact) {
   }
 
   if (!data) return "unknown";
-
-  if (artifact.type) return artifact.type;
 
   return "json";
 }
@@ -102,26 +101,29 @@ export function getArtifactDisplayName(artifactType) {
     product_backlog: "Product Backlog",
     validated_product_backlog: "Validated Product Backlog",
   };
-  return NAMES[artifactType] || artifactType.replace(/_/g, " ");
+  return NAMES[artifactType] || String(artifactType || "artifact").replace(/_/g, " ");
 }
 
 // ── JSON fallback view ────────────────────────────────────────────────────────
 function JsonView({ content }) {
-  let pretty = content;
+  let pretty =
+    typeof content === "string"
+      ? content
+      : JSON.stringify(content ?? "", null, 2);
   try {
-    pretty = JSON.stringify(JSON.parse(content), null, 2);
+    pretty = JSON.stringify(JSON.parse(pretty), null, 2);
   } catch {}
 
   const lines = (pretty || "").split("\n");
   return (
-    <div className="h-full bg-[#F5F1EA] p-4 overflow-auto">
-      <pre className="text-[11.5px] font-mono text-[#2D2820] leading-relaxed">
+    <div className="h-full bg-[#F6F1E8] p-4 overflow-auto">
+      <pre className="text-[11.5px] font-mono text-[#302822] leading-relaxed">
         {lines.map((line, i) => (
           <div
             key={i}
             className="flex gap-4 hover:bg-black/[0.025] px-1 rounded"
           >
-            <span className="select-none text-[#C0B8AE] text-right w-6 flex-shrink-0">
+            <span className="select-none text-[#B0A49A] text-right w-6 flex-shrink-0">
               {i + 1}
             </span>
             <span>{line || " "}</span>
@@ -143,21 +145,21 @@ export function ArtifactPanel({
 }) {
   const { setOpenArtifact } = useChat();
   const artifactList = useMemo(
-    () => messages.filter((mess) => !!mess.artifact, []),
+    () => messages.filter((mess) => !!mess.artifact?.content),
     [messages],
   );
 
   const artifactType = useMemo(
     () => detectArtifactType(artifact),
-    [artifact?.content],
+    [artifact?.content, artifact?.type],
   );
   const tabs = useMemo(() => getTabsForType(artifactType), [artifactType]);
 
   const [activeTab, setActiveTab] = useState(() => tabs[0]?.id);
   const [copied, setCopied] = useState(false);
 
-  // When artifact changes, reset tab if current tab doesn't exist in new tabs
-  useMemo(() => {
+  // When artifact changes, reset tab if current tab doesn't exist in new tabs.
+  useEffect(() => {
     if (!tabs.find((t) => t.id === activeTab)) {
       setActiveTab(tabs[0]?.id);
     }
@@ -176,17 +178,25 @@ export function ArtifactPanel({
   }, [artifact?.content]);
 
   function handleCopy() {
-    navigator.clipboard?.writeText(artifact.content);
+    navigator.clipboard?.writeText(
+      typeof artifact?.content === "string"
+        ? artifact.content
+        : JSON.stringify(artifact?.content ?? "", null, 2),
+    );
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
 
   function handleDownload() {
-    const blob = new Blob([artifact.content], { type: "application/json" });
+    const content =
+      typeof artifact?.content === "string"
+        ? artifact.content
+        : JSON.stringify(artifact?.content ?? {}, null, 2);
+    const blob = new Blob([content], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = Object.assign(document.createElement("a"), {
       href: url,
-      download: `${(artifact.title || "artifact").replace(/\s+/g, "-").toLowerCase()}.json`,
+      download: `${(artifact?.title || "artifact").replace(/\s+/g, "-").toLowerCase()}.json`,
     });
     a.click();
     URL.revokeObjectURL(url);
@@ -194,10 +204,14 @@ export function ArtifactPanel({
 
   const iconBtn =
     "w-7 h-7 flex items-center justify-center rounded-md " +
-    "text-[#8A7F72] hover:text-[#1A1410] hover:bg-[#EAE6DC] transition-colors";
+    "text-[#776B60] hover:text-[#211914] hover:bg-[#ECE3D6] transition-colors";
 
   // ── Render active tab content ───────────────────────────────────────────────
   function renderTabContent() {
+    if (!parsedData && activeTab !== "json") {
+      return <JsonView content={artifact?.content || ""} />;
+    }
+
     switch (activeTab) {
       case "transcript":
         return <TranscriptView data={parsedData} />;
@@ -220,23 +234,23 @@ export function ArtifactPanel({
   }
 
   return (
-    <div className="flex flex-col h-full bg-white panel-enter">
+    <div className="flex flex-col h-full bg-[#FFFDF8] panel-enter">
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div
         className="flex items-center gap-3 px-4 h-[52px]
-                      border-b border-[#E8E3D9] bg-[#F9F7F3] flex-shrink-0"
+                      border-b border-[#E2D6C5] bg-[#FBF7F0] flex-shrink-0"
       >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-[13px] font-semibold text-[#1A1410] truncate leading-tight">
-              {artifact.title || "Artifact"}
+            <span className="text-[13px] font-semibold text-[#211914] truncate leading-tight">
+              {artifact?.title || "Artifact"}
             </span>
-            {artifact.iteration && (
-              <span className="px-1.5 py-0.5 bg-[#EAE6DC] rounded text-[10px] font-medium text-[#8A7F72] flex-shrink-0">
+            {artifact?.iteration && (
+              <span className="px-1.5 py-0.5 bg-[#ECE3D6] rounded text-[10px] font-medium text-[#776B60] flex-shrink-0">
                 v{artifact.iteration}
               </span>
             )}
-            {artifact.accepted && (
+            {artifact?.accepted && (
               <span
                 className="flex items-center gap-1 px-1.5 py-0.5
                                bg-green-50 border border-green-200
@@ -246,10 +260,10 @@ export function ArtifactPanel({
               </span>
             )}
           </div>
-          <div className="text-[10.5px] text-[#8A7F72] capitalize leading-tight">
+          <div className="text-[10.5px] text-[#776B60] capitalize leading-tight">
             {getArtifactDisplayName(artifactType)}
-            {artifact.awaitingFeedback && (
-              <span className="ml-1.5 text-[#C96A42]">· awaiting feedback</span>
+            {artifact?.awaitingFeedback && (
+              <span className="ml-1.5 text-[#B86F50]">· awaiting feedback</span>
             )}
           </div>
         </div>
@@ -265,7 +279,7 @@ export function ArtifactPanel({
               <Download size={14} />
             </button>
           </Tooltip>
-          <div className="w-px h-4 bg-[#E8E3D9] mx-0.5" />
+          <div className="w-px h-4 bg-[#E2D6C5] mx-0.5" />
           <Tooltip text="Close">
             <button onClick={onClose} className={iconBtn}>
               <X size={14} />
@@ -275,8 +289,12 @@ export function ArtifactPanel({
       </div>
 
       {artifactList.length > 1 && (
-        <div className="flex gap-1 px-4 border-b border-[#E8E3D9] bg-[#F9F7F3] flex-shrink-0 overflow-y-auto w-full">
+        <div className="flex gap-1 px-4 border-b border-[#E2D6C5] bg-[#FBF7F0] flex-shrink-0 overflow-y-auto w-full">
           {artifactList.map((tab, idx) => {
+            const isActive =
+              tab.id === artifact?.messageId ||
+              (tab.artifact.type === artifact?.type &&
+                tab.artifact.iteration === artifact?.iteration);
             return (
               <button
                 key={idx}
@@ -285,13 +303,23 @@ export function ArtifactPanel({
                 }
                 className={`whitespace-nowrap flex items-center gap-1.5 px-3 py-2.5 text-[12px] font-medium
                             border-b-2 -mb-px transition-colors ${
-                              tab.artifact.type === artifact.type
-                                ? "border-[#C96A42] text-[#C96A42]"
-                                : "border-transparent text-[#8A7F72] hover:text-[#1A1410]"
+                              isActive
+                                ? "border-[#B86F50] text-[#B86F50]"
+                                : "border-transparent text-[#776B60] hover:text-[#211914]"
                             }`}
               >
                 <File size={12} />
                 {getArtifactDisplayName(tab.artifact.type)}
+                {tab.artifact.iteration && (
+                  <span className="text-[10px] font-semibold text-inherit opacity-75">
+                    v{tab.artifact.iteration}
+                  </span>
+                )}
+                {tab.artifact.accepted && (
+                  <span className="text-[10px] font-medium text-green-700">
+                    Accepted
+                  </span>
+                )}
               </button>
             );
           })}
@@ -300,7 +328,7 @@ export function ArtifactPanel({
 
       {/* ── Tab bar ─────────────────────────────────────────────────────── */}
       {tabs.length > 1 && (
-        <div className="flex gap-1 px-4 border-b border-[#E8E3D9] bg-[#F9F7F3] flex-shrink-0">
+        <div className="flex gap-1 px-4 border-b border-[#E2D6C5] bg-[#FBF7F0] flex-shrink-0">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             return (
@@ -310,8 +338,8 @@ export function ArtifactPanel({
                 className={`flex items-center gap-1.5 px-3 py-2.5 text-[12px] font-medium
                             border-b-2 -mb-px transition-colors ${
                               tab.id === activeTab
-                                ? "border-[#C96A42] text-[#C96A42]"
-                                : "border-transparent text-[#8A7F72] hover:text-[#1A1410]"
+                                ? "border-[#B86F50] text-[#B86F50]"
+                                : "border-transparent text-[#776B60] hover:text-[#211914]"
                             }`}
               >
                 <Icon size={12} />
@@ -326,8 +354,8 @@ export function ArtifactPanel({
       <div className="flex-1 overflow-hidden">{renderTabContent()}</div>
 
       {/* ── Feedback bar ────────────────────────────────────────────────── */}
-      {artifact.awaitingFeedback &&
-        !artifact.accepted &&
+      {artifact?.awaitingFeedback &&
+        !artifact?.accepted &&
         onAccept &&
         onRevise && (
           <ArtifactFeedbackBar

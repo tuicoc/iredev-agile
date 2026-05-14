@@ -27,8 +27,8 @@ export function ArtifactPreviewCard({ artifact, onOpen }) {
     <button
       onClick={onOpen}
       className="flex items-center gap-3 pl-3 pr-2.5 py-2.5
-                 bg-white border border-[#E8E3D9] rounded-xl
-                 hover:border-[#D9D3C8] hover:bg-[#FAF8F4]
+                 bg-[#FFFDF8] border border-[#E2D6C5] rounded-xl
+                 hover:border-[#CEC0AE] hover:bg-[#FCF8F1]
                  shadow-[0_1px_3px_rgba(0,0,0,0.05)]
                  hover:shadow-[0_2px_6px_rgba(0,0,0,0.07)]
                  transition-all duration-150 text-left w-full max-w-[320px] group"
@@ -39,24 +39,24 @@ export function ArtifactPreviewCard({ artifact, onOpen }) {
                        border ${
                          artifact.accepted
                            ? "bg-green-50 border-green-200"
-                           : "bg-[#F5EDE8] border-[#EDD9CE]"
+                           : "bg-[#F4E4D9] border-[#E6CABB]"
                        }`}
       >
         {artifact.accepted ? (
           <Check size={16} className="text-green-600" />
         ) : (
-          <Icon size={16} className="text-[#C96A42]" />
+          <Icon size={16} className="text-[#B86F50]" />
         )}
       </div>
 
       {/* Text */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[13px] font-semibold text-[#1A1410] truncate leading-snug">
+          <span className="text-[13px] font-semibold text-[#211914] truncate leading-snug">
             {getArtifactDisplayName(artifact.type)}
           </span>
           {artifact.iteration && (
-            <span className="text-[10px] text-[#B5ADA4] flex-shrink-0">
+            <span className="text-[10px] text-[#A89C91] flex-shrink-0">
               v{artifact.iteration}
             </span>
           )}
@@ -65,11 +65,11 @@ export function ArtifactPreviewCard({ artifact, onOpen }) {
           {artifact.accepted ? (
             <span className="text-green-600 font-medium">Accepted</span>
           ) : artifact.awaitingFeedback ? (
-            <span className="text-[#C96A42] font-medium">
+            <span className="text-[#B86F50] font-medium">
               Awaiting your review
             </span>
           ) : (
-            <span className="text-[#8A7F72] capitalize">
+            <span className="text-[#776B60] capitalize">
               {artifact.type} · Click to open
             </span>
           )}
@@ -78,7 +78,7 @@ export function ArtifactPreviewCard({ artifact, onOpen }) {
 
       <ChevronRight
         size={14}
-        className="text-[#C0B8AE] group-hover:text-[#8A7F72]
+        className="text-[#B0A49A] group-hover:text-[#776B60]
                                           group-hover:translate-x-0.5 transition-all flex-shrink-0"
       />
     </button>

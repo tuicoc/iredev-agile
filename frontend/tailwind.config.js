@@ -4,33 +4,33 @@ export default {
   theme: {
     extend: {
       colors: {
-        // ── Exact Claude.ai colour tokens ──────────────────────────────────
+        // ── Warm Claude-inspired colour tokens ─────────────────────────────
         claude: {
           // Page backgrounds
-          bg:          '#F4F0E6',   // warm parchment — main page background
-          sidebar:     '#F4F0E6',   // sidebar matches page (no heavy contrast)
+          bg:          '#F7F3EA',   // warm parchment — main page background
+          sidebar:     '#EFE8DC',   // quietly separated sidebar
           
           // Surfaces
-          surface:     '#FFFFFF',   // cards, input, artifact panel
-          'surface-2': '#F9F7F3',   // slightly elevated surface (header bars)
+          surface:     '#FFFDF8',   // cards, input, artifact panel
+          'surface-2': '#FBF7F0',   // slightly elevated surface (header bars)
 
           // Borders
-          border:      '#E8E3D9',   // standard divider
-          'border-2':  '#D9D3C8',   // stronger divider / focus ring base
+          border:      '#E2D6C5',   // standard divider
+          'border-2':  '#CEC0AE',   // stronger divider / focus ring base
 
           // Brand
-          orange:      '#C96A42',   // Claude's terracotta send-button orange
-          'orange-dim':'#E8D5C8',   // very light orange tint for hover states
+          orange:      '#B86F50',   // Claude's terracotta send-button orange
+          'orange-dim':'#F4DED1',   // very light orange tint for hover states
 
           // Text hierarchy
-          dark:        '#1A1410',   // primary text — near-black warm
-          body:        '#3D3530',   // body / secondary text
-          muted:       '#8A7F72',   // muted / meta text
-          placeholder: '#B5ADA4',   // input placeholder
+          dark:        '#211914',   // primary text — near-black warm
+          body:        '#4A4038',   // body / secondary text
+          muted:       '#776B60',   // muted / meta text
+          placeholder: '#A89C91',   // input placeholder
 
           // Interactive states
-          hover:       '#EEEAD E',  // subtle hover (used inline, see below)
-          active:      '#E8E3D9',   // active / selected row
+          hover:       '#ECE3D6',  // subtle hover (used inline, see below)
+          active:      '#E5D9C9',   // active / selected row
         },
       },
       // Use exact pixel values to match Claude's spacing feel
@@ -57,7 +57,7 @@ export default {
       boxShadow: {
         'xs':    '0 1px 2px rgba(0,0,0,0.05)',
         'sm':    '0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04)',
-        'input': '0 0 0 3px rgba(201,106,66,0.12)',
+        'input': '0 0 0 3px rgba(184,111,80,0.12)',
       },
       // Claude uses SF Pro / system font stack with geometric proportions
       fontFamily: {

@@ -34,8 +34,8 @@ export function Modal({ open, onClose, title, children, width = "max-w-lg" }) {
     >
       {/* Modal card — stop clicks from bubbling to backdrop */}
       <div
-        className={`relative w-full ${width} max-h-[100vh] overflow-y-auto bg-white rounded-2xl
-                    border border-[#E8E3D9]
+        className={`relative w-full ${width} max-h-[100vh] overflow-y-auto bg-[#FFFDF8] rounded-2xl
+                    border border-[#E2D6C5]
                     shadow-[0_24px_48px_rgba(0,0,0,0.14)]
                     animate-[modalIn_0.18s_cubic-bezier(0.16,1,0.3,1)_both]`}
         onClick={(e) => e.stopPropagation()}
@@ -45,15 +45,15 @@ export function Modal({ open, onClose, title, children, width = "max-w-lg" }) {
         {title && (
           <div
             className="flex items-center justify-between px-5 py-4
-                          border-b border-[#F0ECE6]"
+                          border-b border-[#E9DFD1]"
           >
-            <h2 className="text-[15px] font-semibold text-[#1A1410]">
+            <h2 className="text-[15px] font-semibold text-[#211914]">
               {title}
             </h2>
             <button
               onClick={onClose}
               className="w-7 h-7 flex items-center justify-center rounded-lg
-                         text-[#8A7F72] hover:text-[#1A1410] hover:bg-[#EAE6DC]
+                         text-[#776B60] hover:text-[#211914] hover:bg-[#ECE3D6]
                          transition-colors"
             >
               <X size={15} />

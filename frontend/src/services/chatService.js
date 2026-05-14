@@ -69,4 +69,6 @@ export const createChat   = (title, projectId = null)   => post("/api/chats", { 
 export const deleteChat   = (chatId)                    => del(`/api/chats/${chatId}`);
 export const fetchMessages = (chatId, newSubChat)       => get(`/api/chats/${chatId}/${newSubChat}/messages`);
 export const sendMessage   = (chatId, content, subChat) => post(`/api/chats/${chatId}/${subChat}/messages`, { role: "user", content });
+export const saveAssistantMessage = (chatId, content, subChat = 0) =>
+  post(`/api/chats/${chatId}/${subChat}/messages`, { role: "assistant", content });
 export const startReq      = (config, chat_id)          => post(`/api/chats/process/start/${chat_id}`, { ...config });

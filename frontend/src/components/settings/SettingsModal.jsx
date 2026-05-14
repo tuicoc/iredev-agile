@@ -8,7 +8,7 @@ import { Modal }       from '../ui/Modal'
 import { useAuth }     from '../../context/AuthContext'
 import { LoadingSpinner } from '../ui/LoadingSpinner'
 
-const TABS = ['Profile', 'Appearance', 'API']
+const TABS = ['Profile', 'Appearance', 'Process', 'API']
 
 export function SettingsModal({ open, onClose }) {
   const [activeTab, setActiveTab] = useState('Profile')
@@ -16,15 +16,15 @@ export function SettingsModal({ open, onClose }) {
   return (
     <Modal open={open} onClose={onClose} title="Settings" width="max-w-[520px]">
       {/* Tab bar */}
-      <div className="flex gap-1 mb-5 -mx-5 px-5 border-b border-[#F0ECE6] pb-0">
+      <div className="flex gap-1 mb-5 -mx-5 px-5 border-b border-[#E9DFD1] pb-0">
         {TABS.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`px-3 py-2 text-[13px] font-medium border-b-2 -mb-px transition-colors ${
               tab === activeTab
-                ? 'border-[#C96A42] text-[#C96A42]'
-                : 'border-transparent text-[#8A7F72] hover:text-[#1A1410]'
+                ? 'border-[#B86F50] text-[#B86F50]'
+                : 'border-transparent text-[#776B60] hover:text-[#211914]'
             }`}
           >
             {tab}
@@ -35,6 +35,7 @@ export function SettingsModal({ open, onClose }) {
       {/* Tab content */}
       {activeTab === 'Profile'    && <ProfileTab />}
       {activeTab === 'Appearance' && <AppearanceTab />}
+      {activeTab === 'Process'    && <ProcessTab />}
       {activeTab === 'API'        && <ApiTab />}
     </Modal>
   )
@@ -58,16 +59,16 @@ function ProfileTab() {
     <div className="space-y-5">
       {/* Avatar */}
       <div className="flex items-center gap-4">
-        <div className="w-14 h-14 rounded-full bg-[#8A7F72] flex items-center justify-center">
+        <div className="w-14 h-14 rounded-full bg-[#776B60] flex items-center justify-center">
           <span className="text-white text-lg font-semibold">
             {(user?.name || user?.email || 'U')[0].toUpperCase()}
           </span>
         </div>
         <div>
-          <div className="text-[13px] font-medium text-[#1A1410]">
+          <div className="text-[13px] font-medium text-[#211914]">
             {user?.name || 'User'}
           </div>
-          <div className="text-[12px] text-[#8A7F72]">{user?.email}</div>
+          <div className="text-[12px] text-[#776B60]">{user?.email}</div>
         </div>
       </div>
 
@@ -78,7 +79,7 @@ function ProfileTab() {
         <div className="flex items-center justify-between pt-1">
           <button
             type="submit"
-            className="h-8 px-4 bg-[#C96A42] hover:bg-[#B85E38] text-white
+            className="h-8 px-4 bg-[#B86F50] hover:bg-[#A76145] text-white
                        text-[12px] font-semibold rounded-lg transition-colors"
           >
             {saved ? '✓ Saved' : 'Save changes'}
@@ -108,7 +109,7 @@ function AppearanceTab() {
     <div className="space-y-5">
       {/* Theme */}
       <div>
-        <div className="text-[12px] font-medium text-[#3D3530] mb-2">Theme</div>
+        <div className="text-[12px] font-medium text-[#4A4038] mb-2">Theme</div>
         <div className="flex gap-2">
           {['light', 'dark', 'system'].map((t) => (
             <button
@@ -117,22 +118,22 @@ function AppearanceTab() {
               className={`flex-1 h-8 rounded-lg text-[12px] font-medium capitalize
                           border transition-colors ${
                             theme === t
-                              ? 'border-[#C96A42] bg-[#FDF0EA] text-[#C96A42]'
-                              : 'border-[#E8E3D9] text-[#8A7F72] hover:border-[#D9D3C8]'
+                              ? 'border-[#B86F50] bg-[#F5E3D7] text-[#B86F50]'
+                              : 'border-[#E2D6C5] text-[#776B60] hover:border-[#CEC0AE]'
                           }`}
             >
               {t}
             </button>
           ))}
         </div>
-        <p className="text-[11px] text-[#B5ADA4] mt-1.5">
+        <p className="text-[11px] text-[#A89C91] mt-1.5">
           Dark mode applies on next page load.
         </p>
       </div>
 
       {/* Font size */}
       <div>
-        <div className="text-[12px] font-medium text-[#3D3530] mb-2">Font size</div>
+        <div className="text-[12px] font-medium text-[#4A4038] mb-2">Font size</div>
         <div className="flex gap-2">
           {['small', 'default', 'large'].map((s) => (
             <button
@@ -141,8 +142,8 @@ function AppearanceTab() {
               className={`flex-1 h-8 rounded-lg text-[12px] font-medium capitalize
                           border transition-colors ${
                             fontSize === s
-                              ? 'border-[#C96A42] bg-[#FDF0EA] text-[#C96A42]'
-                              : 'border-[#E8E3D9] text-[#8A7F72] hover:border-[#D9D3C8]'
+                              ? 'border-[#B86F50] bg-[#F5E3D7] text-[#B86F50]'
+                              : 'border-[#E2D6C5] text-[#776B60] hover:border-[#CEC0AE]'
                           }`}
             >
               {s}
@@ -151,6 +152,57 @@ function AppearanceTab() {
         </div>
       </div>
     </div>
+  )
+}
+
+// ── Process tab ──────────────────────────────────────────────────────────────
+function ProcessTab() {
+  const [maxTurns, setMaxTurns] = useState(() => {
+    const saved = Number(localStorage.getItem('requirement_max_turns'))
+    return Number.isFinite(saved) && saved > 0
+      ? Math.min(Math.max(Math.round(saved), 5), 200)
+      : 150
+  })
+  const [saved, setSaved] = useState(false)
+
+  function handleSave(e) {
+    e.preventDefault()
+    localStorage.setItem('requirement_max_turns', String(maxTurns))
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  return (
+    <form onSubmit={handleSave} className="space-y-4">
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="text-[12px] font-medium text-[#4A4038]">
+            Interview turns
+          </label>
+          <span className="text-[12px] font-mono text-[#776B60]">{maxTurns}</span>
+        </div>
+        <input
+          type="range"
+          min={5}
+          max={200}
+          step={1}
+          value={maxTurns}
+          onChange={e => setMaxTurns(Number(e.target.value))}
+          className="w-full accent-[#B86F50]"
+        />
+        <div className="flex justify-between text-[10px] text-[#B0A49A] mt-0.5">
+          <span>5</span><span>200</span>
+        </div>
+      </div>
+
+      <button
+        type="submit"
+        className="h-8 px-4 bg-[#B86F50] hover:bg-[#A76145] text-white
+                   text-[12px] font-semibold rounded-lg transition-colors"
+      >
+        {saved ? '✓ Saved' : 'Save process settings'}
+      </button>
+    </form>
   )
 }
 
@@ -173,8 +225,8 @@ function ApiTab() {
     <form onSubmit={handleSave} className="space-y-4">
       {/* API Key */}
       <div>
-        <label className="block text-[12px] font-medium text-[#3D3530] mb-1.5">
-          API Key <span className="text-[#B5ADA4] font-normal">(optional — uses server key if blank)</span>
+        <label className="block text-[12px] font-medium text-[#4A4038] mb-1.5">
+          API Key <span className="text-[#A89C91] font-normal">(optional — uses server key if blank)</span>
         </label>
         <input
           type="password"
@@ -187,7 +239,7 @@ function ApiTab() {
 
       {/* Model selector */}
       <div>
-        <label className="block text-[12px] font-medium text-[#3D3530] mb-1.5">Model</label>
+        <label className="block text-[12px] font-medium text-[#4A4038] mb-1.5">Model</label>
         <select
           value={model}
           onChange={e => setModel(e.target.value)}
@@ -202,8 +254,8 @@ function ApiTab() {
       {/* Max tokens */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <label className="text-[12px] font-medium text-[#3D3530]">Max tokens</label>
-          <span className="text-[12px] font-mono text-[#8A7F72]">{maxTokens.toLocaleString()}</span>
+          <label className="text-[12px] font-medium text-[#4A4038]">Max tokens</label>
+          <span className="text-[12px] font-mono text-[#776B60]">{maxTokens.toLocaleString()}</span>
         </div>
         <input
           type="range"
@@ -212,16 +264,16 @@ function ApiTab() {
           step={256}
           value={maxTokens}
           onChange={e => setMaxTokens(Number(e.target.value))}
-          className="w-full accent-[#C96A42]"
+          className="w-full accent-[#B86F50]"
         />
-        <div className="flex justify-between text-[10px] text-[#C0B8AE] mt-0.5">
+        <div className="flex justify-between text-[10px] text-[#B0A49A] mt-0.5">
           <span>256</span><span>8192</span>
         </div>
       </div>
 
       <button
         type="submit"
-        className="h-8 px-4 bg-[#C96A42] hover:bg-[#B85E38] text-white
+        className="h-8 px-4 bg-[#B86F50] hover:bg-[#A76145] text-white
                    text-[12px] font-semibold rounded-lg transition-colors"
       >
         {saved ? '✓ Saved' : 'Save settings'}
@@ -234,7 +286,7 @@ function ApiTab() {
 function SettingsField({ label, type = 'text', value, onChange }) {
   return (
     <div>
-      <label className="block text-[12px] font-medium text-[#3D3530] mb-1.5">{label}</label>
+      <label className="block text-[12px] font-medium text-[#4A4038] mb-1.5">{label}</label>
       <input
         type={type}
         value={value}
@@ -246,7 +298,7 @@ function SettingsField({ label, type = 'text', value, onChange }) {
 }
 
 const settingsInputClass =
-  'w-full h-9 px-3 bg-[#FAF8F5] border border-[#E8E3D9] rounded-lg ' +
-  'text-[13px] text-[#1A1410] placeholder:text-[#C0B8AE] ' +
-  'focus:outline-none focus:ring-2 focus:ring-[#C96A42]/20 ' +
-  'focus:border-[#C96A42]/60 transition-all'
+  'w-full h-9 px-3 bg-[#FCF8F1] border border-[#E2D6C5] rounded-lg ' +
+  'text-[13px] text-[#211914] placeholder:text-[#B0A49A] ' +
+  'focus:outline-none focus:ring-2 focus:ring-[#B86F50]/20 ' +
+  'focus:border-[#B86F50]/60 transition-all'

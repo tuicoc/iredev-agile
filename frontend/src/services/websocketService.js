@@ -12,6 +12,7 @@
 //   { type: "ping" }
 //   { type: "chat_message", chatId, messageId, content }
 //   { type: "stop_stream",  chatId }
+//   { type: "retry_workflow", chatId }
 //
 // Server → Client frames:
 //   { type: "connected",  userId }
@@ -128,6 +129,10 @@ export class WebSocketService {
 
   stopStream(chatId) {
     this.send({ type: "stop_stream", chatId });
+  }
+
+  retryWorkflow(chatId) {
+    this.send({ type: "retry_workflow", chatId });
   }
 
   ping() {

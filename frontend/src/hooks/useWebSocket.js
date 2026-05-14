@@ -24,6 +24,7 @@ export function useWebSocket({
   onError,
   onArtifact,
   onArtifactAccepted,
+  onWorkflowStatus,
   onConnected,
   onDisconnected,
 }) {
@@ -33,6 +34,7 @@ export function useWebSocket({
     onError:            useRef(onError),
     onArtifact:         useRef(onArtifact),
     onArtifactAccepted: useRef(onArtifactAccepted),
+    onWorkflowStatus:   useRef(onWorkflowStatus),
     onConnected:        useRef(onConnected),
     onDisconnected:     useRef(onDisconnected),
   }
@@ -40,7 +42,7 @@ export function useWebSocket({
   // Sync refs on every render so handlers always call latest version
   Object.entries({
     onToken, onDone, onError,
-    onArtifact, onArtifactAccepted,
+    onArtifact, onArtifactAccepted, onWorkflowStatus,
     onConnected, onDisconnected,
   }).forEach(([k, v]) => { refs[k].current = v })
 
@@ -51,6 +53,7 @@ export function useWebSocket({
       wsService.on('error',             (m) => refs.onError.current?.(m)),
       wsService.on('artifact',          (m) => refs.onArtifact.current?.(m)),
       wsService.on('artifact_accepted', (m) => refs.onArtifactAccepted.current?.(m)),
+      wsService.on('workflow_status',   (m) => refs.onWorkflowStatus.current?.(m)),
       wsService.on('connected',         (m) => refs.onConnected.current?.(m)),
       wsService.on('_connected',        (m) => refs.onConnected.current?.(m)),
       wsService.on('_disconnected',     (m) => refs.onDisconnected.current?.(m)),

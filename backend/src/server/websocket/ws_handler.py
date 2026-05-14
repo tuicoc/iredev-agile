@@ -42,6 +42,7 @@ from typing import Any, Dict, Optional
 
 from ..data.database import (
     add_message,
+    get_messages,
     update_message_artifact,
 )
 from ..auth.auth_utils import get_user_id_for_token_ws
@@ -81,6 +82,51 @@ _AGENT_NODE_NAMES = {
     "analyst_estimation_turn",
 }
 
+REVIEW_AGENT_NAMES = {
+    "product_vision": "Visionary Agent",
+    "elicitation_agenda": "Agenda Agent",
+    "interview_record": "Interviewer Agent",
+    "requirement_list": "Distiller Agent",
+    "product_backlog": "Sprint Agent",
+    "validated_product_backlog": "Analyst Agent",
+}
+
+NODE_STATUS = {
+    "visionary_turn": {
+        "agentName": "Visionary Agent",
+        "message": "Visionary Agent is shaping the Product Vision...",
+    },
+    "agenda_turn": {
+        "agentName": "Agenda Agent",
+        "message": "Agenda Agent is building the elicitation agenda...",
+    },
+    "interviewer_turn": {
+        "agentName": "Interviewer Agent",
+        "message": "Interviewer Agent and EndUser Agent are discussing requirements...",
+    },
+    "distiller_turn": {
+        "agentName": "Distiller Agent",
+        "message": "Distiller Agent is synthesising the Requirement List...",
+    },
+    "sprint_agent_turn": {
+        "agentName": "Sprint Agent",
+        "message": "Sprint Agent is turning requirements into backlog items...",
+    },
+    "analyst_estimation_turn": {
+        "agentName": "Analyst Agent",
+        "message": "Analyst Agent is estimating stories and checking INVEST...",
+    },
+    "analyst_turn": {
+        "agentName": "Analyst Agent",
+        "message": "Analyst Agent is writing acceptance criteria...",
+    },
+}
+
+WORKFLOW_COMPLETE_MESSAGE = (
+    "Backlog refinement is complete. The Validated Product Backlog has been "
+    "accepted and the ready stories are available for Sprint planning."
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WSHandler
@@ -99,6 +145,9 @@ class WSHandler:
         # with the last artifact that was emitted.
         # { chat_id → {review_type, artifact_id, message_id} }
         self._artifact_ctx: Dict[str, Dict] = {}
+        self._pending_interrupts: Dict[str, Any] = {}
+        self._completion_sent: set[str] = set()
+        self._conversation_ctx: Dict[str, Dict[str, Any]] = {}
 
         self.graph = build_graph()
 
@@ -118,11 +167,25 @@ class WSHandler:
                 delay = 0.025
             yield word, delay
 
-    def _send_token_stream(self, ws, lock, chat_id: str, mess_id: str,
-                            text: str, role: str) -> str:
+    def _send_token_stream(
+        self,
+        ws,
+        lock,
+        chat_id: str,
+        mess_id: str,
+        text: str,
+        role: str,
+        stop_event: Optional[threading.Event] = None,
+        agent_name: Optional[str] = None,
+        message_meta: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Stream text token-by-token; return accumulated string."""
         accum = ""
         for token, delay in self._stream_tokens(text):
+            if stop_event and stop_event.is_set():
+                log.info("[WS] token stream stopped chat=%s message=%s", chat_id, mess_id)
+                break
+
             accum += token
             ok = self._send(ws, lock, {
                 "type": "token",
@@ -130,12 +193,20 @@ class WSHandler:
                 "messageId": mess_id,
                 "token": token,
                 "role": role,
+                "agentName": agent_name,
+                "messageMeta": message_meta or {},
             })
             if not ok:
                 break
             time.sleep(delay)
 
-        self._send(ws, lock, {"type": "done", "chatId": chat_id, "messageId": mess_id})
+        self._send(ws, lock, {
+            "type": "done",
+            "chatId": chat_id,
+            "messageId": mess_id,
+            "agentName": agent_name,
+            "messageMeta": message_meta or {},
+        })
         return accum
 
     # =========================================================================
@@ -153,34 +224,42 @@ class WSHandler:
         ws_entry = self.active_ws.get(user_id, {})
         ws = ws_entry.get("ws")
         lock = ws_entry.get("lock")
+        ws_id = ws_entry.get("ws_id")
         if not ws or not lock:
             log.warning("[WS] run_iredev_workflow: no active ws for user=%s", user_id)
             return
 
-        config = {"configurable": {"thread_id": chat_id}}
+        if (
+            isinstance(initial_state, dict)
+            and initial_state.get("session_id")
+            and not (initial_state.get("artifacts") or {})
+        ):
+            self._completion_sent.discard(chat_id)
 
-        # Init workflow message
-        if isinstance(initial_state, dict) and initial_state.get("_workflow_started_message") is not True :
-            mess_id = str(uuid.uuid4())
-            self._send_token_stream(ws, lock, chat_id, mess_id, ARTIFACT_SUMMARIES.get("workflow_started"), "assistant")
-            add_message(chat_id, role="assistant", content=ARTIFACT_SUMMARIES.get("workflow_started"), messID=mess_id)
-            initial_state["_workflow_started_message"] = True
+        stop_event = self._reset_stop(ws_id, chat_id) if ws_id else None
+        config = {"configurable": {"thread_id": chat_id}}
 
         try:
             for step_output in self.graph.stream(initial_state, config=config):
+                if stop_event and stop_event.is_set():
+                    log.info("[WS] workflow stopped before dispatch chat=%s", chat_id)
+                    return
 
                 # ── Graph paused at interrupt() ────────────────────────────
                 if "__interrupt__" in step_output:
                     interrupt_data = step_output["__interrupt__"]
-                    self._on_graph_interrupt(interrupt_data, chat_id, ws, lock)
+                    self._on_graph_interrupt(interrupt_data, chat_id, ws, lock, stop_event)
                     break
 
                 # ── Normal node output ─────────────────────────────────────
                 for node_name, updates in step_output.items():
+                    if stop_event and stop_event.is_set():
+                        log.info("[WS] workflow stopped before node=%s chat=%s", node_name, chat_id)
+                        return
                     if not updates:
                         continue
                     log.debug("[WS] node=%s updates=%s", node_name, list(updates.keys()))
-                    self._dispatch_node(node_name, updates, chat_id, ws, lock)
+                    self._dispatch_node(node_name, updates, chat_id, ws, lock, stop_event)
 
         except Exception as exc:
             log.error("[WS] workflow error user=%s chat=%s: %s",
@@ -191,7 +270,14 @@ class WSHandler:
                 "error": str(exc),
             })
 
-    def _on_graph_interrupt(self, interrupt_data: Any, chat_id: str, ws, lock):
+    def _on_graph_interrupt(
+        self,
+        interrupt_data: Any,
+        chat_id: str,
+        ws,
+        lock,
+        stop_event: Optional[threading.Event] = None,
+    ):
         """
         Called when graph.stream() yields __interrupt__.
  
@@ -207,6 +293,7 @@ class WSHandler:
           }
         """
         log.info("[WS] Graph interrupted (review gate) chat=%s", chat_id)
+        self._pending_interrupts[chat_id] = interrupt_data
 
         # Extract artifact from interrupt payload
         payloads = interrupt_data[0].value
@@ -220,20 +307,37 @@ class WSHandler:
         text_mess_id = str(uuid.uuid4())
 
         # ── 1. Emit summary message ────────────────────────────────────────
-        ui_summary = payloads.get("ui_summary", ARTIFACT_SUMMARIES.get(payloads.get("review_type"), ""))
-        self._send_token_stream(ws, lock, chat_id, text_mess_id, ui_summary, "assistant")
+        review_type = payloads.get("review_type")
+        ui_summary = payloads.get("ui_summary", ARTIFACT_SUMMARIES.get(review_type, ""))
+        agent_name = REVIEW_AGENT_NAMES.get(review_type, "CARA")
+        self._send_token_stream(
+            ws,
+            lock,
+            chat_id,
+            text_mess_id,
+            ui_summary,
+            "assistant",
+            stop_event,
+            agent_name,
+        )
+        if stop_event and stop_event.is_set():
+            log.info("[WS] workflow stopped during review summary chat=%s", chat_id)
+            return
         add_message(chat_id, role="assistant", content=ui_summary, messID=text_mess_id)
 
         # ── 2. Emit artifact card ──────────────────────────────────────────
         artifact_mess_id = str(uuid.uuid4())
         artifact_id = record_content.get("id", f"interview_record_{chat_id}")
+        artifact_iteration = self._next_artifact_iteration(chat_id, review_type)
 
         # Build display artifact from the review payload
         artifact_display = {
             "id": artifact_id,
             "content": json.dumps(record_content, indent=2, ensure_ascii=False),
             "language": "json",
-            "type": payloads.get("review_type"),
+            "type": review_type,
+            "agentName": agent_name,
+            "iteration": artifact_iteration,
         }
 
 
@@ -245,29 +349,69 @@ class WSHandler:
             "messageId": artifact_mess_id,
             "artifact": artifact_display,
             "awaitingFeedback": True,
-            "iteration": 1, # TODO: track version number across revisions
+            "iteration": artifact_iteration,
         }
 
         self._send(ws, lock, ws_payload)
 
         # Update context
         self._artifact_ctx[chat_id] = {
-            "review_type": payloads.get("review_type"),
+            "review_type": review_type,
             "artifact_id": artifact_id,
-            "message_id": artifact_mess_id
+            "message_id": artifact_mess_id,
+            "iteration": artifact_iteration,
+            "artifact": enriched,
         }
 
         # Persist
         add_message(chat_id=chat_id, role="assistant", content="", messID=artifact_mess_id, artifact=enriched)
+        self._pending_interrupts.pop(chat_id, None)
 
-    def _dispatch_node(self, node_name: str, updates: Dict, chat_id: str, ws, lock):
+    def _next_artifact_iteration(self, chat_id: str, review_type: Optional[str]) -> int:
+        if not review_type:
+            return 1
+        try:
+            messages = get_messages(chat_id, 0)
+        except Exception as exc:
+            log.warning("[WS] could not read artifact versions chat=%s type=%s: %s", chat_id, review_type, exc)
+            return 1
+
+        matching_count = 0
+        max_seen = 0
+        for message in messages:
+            artifact = message.get("artifact") or {}
+            if artifact.get("type") != review_type:
+                continue
+            matching_count += 1
+            try:
+                max_seen = max(max_seen, int(artifact.get("iteration") or 0))
+            except (TypeError, ValueError):
+                pass
+        return max(max_seen, matching_count) + 1
+
+    def _dispatch_node(
+        self,
+        node_name: str,
+        updates: Dict,
+        chat_id: str,
+        ws,
+        lock,
+        stop_event: Optional[threading.Event] = None,
+    ):
         """Route node output to the correct handler."""
+        if stop_event and stop_event.is_set():
+            log.info("[WS] node dispatch skipped after stop node=%s chat=%s", node_name, chat_id)
+            return
 
         if node_name == "supervisor":
-            return  # routing only, nothing to emit
+            self._handle_supervisor_status(updates, chat_id, ws, lock, stop_event)
+            return
 
-        if node_name in ("interviewer_turn", "enduser_turn"):
-            self._handle_conversation_turn(updates, chat_id, ws, lock)
+        if node_name == "interviewer_turn":
+            self._handle_conversation_turn(updates, chat_id, ws, lock, stop_event)
+
+        elif node_name == "enduser_turn":
+            self._handle_conversation_turn(updates, chat_id, ws, lock, stop_event)
 
         elif node_name in _REVIEW_NODE_NAMES:
             # This fires AFTER interrupt resumes — contains approve/reject result
@@ -281,7 +425,103 @@ class WSHandler:
         else:
             log.debug("[WS] Unhandled node: %s", node_name)
 
-    def _handle_conversation_turn(self, updates: Dict, chat_id: str, ws, lock):
+    def _handle_supervisor_status(
+        self,
+        updates: Dict,
+        chat_id: str,
+        ws,
+        lock,
+        stop_event: Optional[threading.Event] = None,
+    ):
+        """Emit lightweight workflow status frames for long silent agent steps."""
+        next_node = updates.get("next_node")
+        if not next_node:
+            return
+
+        if next_node == "__end__":
+            self._send(ws, lock, {
+                "type": "workflow_status",
+                "chatId": chat_id,
+                "running": False,
+                "complete": True,
+            })
+            if chat_id in self._completion_sent:
+                return
+            self._completion_sent.add(chat_id)
+
+            mess_id = str(uuid.uuid4())
+            accum = self._send_token_stream(
+                ws,
+                lock,
+                chat_id,
+                mess_id,
+                WORKFLOW_COMPLETE_MESSAGE,
+                "assistant",
+                stop_event,
+                "CARA",
+            )
+            if accum.strip():
+                add_message(chat_id=chat_id, role="assistant", content=accum, messID=mess_id)
+            return
+
+        status = NODE_STATUS.get(next_node)
+        if not status:
+            return
+
+        self._send(ws, lock, {
+            "type": "workflow_status",
+            "chatId": chat_id,
+            "running": True,
+            "node": next_node,
+            **status,
+        })
+
+    def _extract_agenda_message_meta(self, updates: Dict, chat_id: str) -> Dict[str, Any]:
+        """Read current agenda context for UI display without altering workflow state."""
+        agenda = updates.get("elicitation_agenda") or {}
+        item = None
+        current_index = None
+        total_items = None
+
+        if isinstance(agenda, dict):
+            items = agenda.get("items") or []
+            total_items = len(items) if isinstance(items, list) else None
+            raw_index = agenda.get("current_index", 0)
+            try:
+                current_index = int(raw_index)
+            except (TypeError, ValueError):
+                current_index = 0
+            if isinstance(items, list) and 0 <= current_index < len(items):
+                item = items[current_index]
+
+        if not item:
+            cached = self._conversation_ctx.get(chat_id) or {}
+            return dict(cached)
+
+        meta = {
+            "agendaItemId": item.get("id"),
+            "agendaItemIndex": (current_index + 1) if current_index is not None else None,
+            "agendaTotalItems": total_items,
+            "stakeholderRole": item.get("role"),
+            "entity": item.get("entity"),
+            "step": item.get("step"),
+            "aspect": item.get("aspect"),
+            "kind": item.get("kind"),
+            "trap": item.get("trap"),
+            "close": item.get("close"),
+            "risk": item.get("risk"),
+            "source": item.get("source"),
+        }
+        return {k: v for k, v in meta.items() if v not in (None, "")}
+
+    def _handle_conversation_turn(
+        self,
+        updates: Dict,
+        chat_id: str,
+        ws,
+        lock,
+        stop_event: Optional[threading.Event] = None,
+    ):
         """Stream the last conversation turn (interviewer or enduser)."""
         conversation = updates.get("conversation") or []
         if not conversation:
@@ -294,7 +534,28 @@ class WSHandler:
             return
 
         mess_id = str(uuid.uuid4())
-        accum = self._send_token_stream(ws, lock, chat_id, mess_id, content, role)
+        message_meta = self._extract_agenda_message_meta(updates, chat_id)
+        if message_meta:
+            self._conversation_ctx[chat_id] = message_meta
+
+        stakeholder_role = (message_meta.get("stakeholderRole") or "").strip()
+        if role == "interviewer":
+            agent_name = "Interviewer Agent"
+        elif stakeholder_role:
+            agent_name = f"{stakeholder_role} (EndUser Agent)"
+        else:
+            agent_name = "EndUser Agent"
+        accum = self._send_token_stream(
+            ws,
+            lock,
+            chat_id,
+            mess_id,
+            content,
+            role,
+            stop_event,
+            agent_name,
+            message_meta,
+        )
         if accum.strip():
             add_message(chat_id=chat_id, role=role, content=accum, messID=mess_id)
 
@@ -331,6 +592,8 @@ class WSHandler:
                 "content": json.dumps(artifacts.get(review_file), indent=2, ensure_ascii=False),
                 "language": "json",
                 "type": review_type,
+                "agentName": REVIEW_AGENT_NAMES.get(review_type, "CARA"),
+                "iteration": ctx.get("iteration", 1),
             }
 
             # Mark artifact as accepted in DB
@@ -350,6 +613,17 @@ class WSHandler:
 
         else:
             log.info("[WS] Revise %s chat=%s", review_type, chat_id)
+            current_artifact = ctx.get("artifact") or {}
+            if current_artifact:
+                update_message_artifact(
+                    mess_id,
+                    {
+                        **current_artifact,
+                        "accepted": False,
+                        "awaitingFeedback": False,
+                        "revisionRequested": True,
+                    },
+                )
 
     # =========================================================================
     # Per-connection state
@@ -358,7 +632,7 @@ class WSHandler:
     def _init(self, ws_id: int, lock: threading.Lock, user_id: str, ws: Any):
         with self._state_lock:
             self._state[ws_id] = {"lock": lock, "stop": {}}
-            self.active_ws[user_id] = {"ws": ws, "lock": lock}
+            self.active_ws[user_id] = {"ws": ws, "lock": lock, "ws_id": ws_id}
 
     def _cleanup(self, ws_id: int):
         with self._state_lock:
@@ -367,19 +641,23 @@ class WSHandler:
     def _get(self, ws_id: int) -> Optional[dict]:
         return self._state.get(ws_id)
 
-    def _reset_stop(self, ws_id: int, chat_id: str):
-        s = self._get(ws_id)
-        if s:
-            with self._state_lock:
-                if chat_id in s["stop"]:
-                    s["stop"][chat_id].clear()
+    def _reset_stop(self, ws_id: int, chat_id: str) -> Optional[threading.Event]:
+        with self._state_lock:
+            s = self._state.get(ws_id)
+            if not s:
+                return None
+            stop_event = threading.Event()
+            s["stop"][chat_id] = stop_event
+            return stop_event
 
-    def _set_stop(self, ws_id: int, chat_id: str):
-        s = self._get(ws_id)
-        if s:
-            with self._state_lock:
-                if chat_id in s["stop"]:
-                    s["stop"][chat_id].set()
+    def _set_stop(self, ws_id: int, chat_id: str) -> bool:
+        with self._state_lock:
+            s = self._state.get(ws_id)
+            if not s:
+                return False
+            stop_event = s["stop"].setdefault(chat_id, threading.Event())
+            stop_event.set()
+            return True
 
     # =========================================================================
     # Thread-safe send
@@ -471,7 +749,18 @@ class WSHandler:
                 role = "interviewer" if sub_chat == 1 else "enduser"
                 mess_id = str(uuid.uuid4())
                 resp = f"Hello from {role.capitalize()}"
-                accum = self._send_token_stream(ws, lock, chat_id, mess_id, resp, role)
+                stop_event = self._reset_stop(ws_id, chat_id)
+                agent_name = "Interviewer Agent" if role == "interviewer" else "EndUser Agent"
+                accum = self._send_token_stream(
+                    ws,
+                    lock,
+                    chat_id,
+                    mess_id,
+                    resp,
+                    role,
+                    stop_event,
+                    agent_name,
+                )
                 if accum.strip():
                     add_message(chat_id=chat_id, role=role, content=accum,
                                 messID=mess_id, subChatID=sub_chat)
@@ -479,7 +768,23 @@ class WSHandler:
         elif ftype == "stop_stream":
             chat_id = frame.get("chatId", "").strip()
             if chat_id:
-                self._set_stop(ws_id, chat_id)
+                stopped = self._set_stop(ws_id, chat_id)
+                log.info("[WS] stop_stream chat=%s stopped=%s", chat_id, stopped)
+
+        elif ftype == "retry_workflow":
+            chat_id = frame.get("chatId", "").strip()
+            if not chat_id:
+                self._send(ws, lock, {
+                    "type": "error",
+                    "error": "retry_workflow requires chatId",
+                })
+                return
+            t = threading.Thread(
+                target=self.retry_iredev_workflow,
+                args=(user_id, chat_id),
+                daemon=True,
+            )
+            t.start()
 
         elif ftype == "artifact_feedback":
             self._on_artifact_feedback(ws, lock, user_id, frame)
@@ -524,6 +829,47 @@ class WSHandler:
             daemon=True,
         )
         t.start()
+
+    def retry_iredev_workflow(self, user_id: str, chat_id: str):
+        """Retry the current workflow step from the latest LangGraph checkpoint."""
+        ws_entry = self.active_ws.get(user_id, {})
+        ws = ws_entry.get("ws")
+        lock = ws_entry.get("lock")
+        ws_id = ws_entry.get("ws_id")
+        if not ws or not lock:
+            log.warning("[WS] retry_iredev_workflow: no active ws for user=%s", user_id)
+            return
+
+        pending_interrupt = self._pending_interrupts.get(chat_id)
+        if pending_interrupt is not None:
+            stop_event = self._reset_stop(ws_id, chat_id) if ws_id else None
+            log.info("[WS] retrying pending interrupt chat=%s", chat_id)
+            self._on_graph_interrupt(pending_interrupt, chat_id, ws, lock, stop_event)
+            return
+
+        config = {"configurable": {"thread_id": chat_id}}
+        try:
+            snapshot = self.graph.get_state(config)
+            state_values = dict(snapshot.values or {})
+        except Exception as exc:
+            log.error("[WS] retry state lookup failed chat=%s: %s", chat_id, exc, exc_info=True)
+            self._send(ws, lock, {
+                "type": "error",
+                "chatId": chat_id,
+                "error": "Could not find the current workflow state to retry.",
+            })
+            return
+
+        if not state_values:
+            self._send(ws, lock, {
+                "type": "error",
+                "chatId": chat_id,
+                "error": "No workflow state is available to retry.",
+            })
+            return
+
+        log.info("[WS] retrying workflow from latest state chat=%s", chat_id)
+        self.run_iredev_workflow(state_values, user_id, chat_id)
 
 
 ws_handler = WSHandler()

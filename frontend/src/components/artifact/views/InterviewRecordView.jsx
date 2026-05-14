@@ -1,320 +1,432 @@
-// src/components/artifact/views/InterviewRecordView.jsx
-// Hiển thị interview record với 2 tab: Transcript và Requirements
+import {
+  ClipboardList,
+  FileCheck2,
+  FileText,
+  MessageSquareText,
+  ShieldAlert,
+  Target,
+} from "lucide-react";
+import {
+  asArray,
+  EmptyState,
+  MetaPill,
+  Section,
+  Tag,
+  text,
+} from "./viewUtils";
 
-import { FormattedText } from "../../chat/FormattedText";
-import { ArtifactTable } from "../ArtifactTable";
+function typeTone(type) {
+  if (type === "functional") return "warm";
+  if (type === "non_functional") return "blue";
+  if (type === "out_of_scope" || type === "constraint") return "purple";
+  return "default";
+}
 
-// ── Tab: Transcript ──────────────────────────────────────────────────────────
-export function TranscriptView({ data }) {
-  const conversation = data?.conversation || [];
+function priorityTone(priority) {
+  if (priority === "high") return "red";
+  if (priority === "medium") return "amber";
+  if (priority === "low") return "green";
+  return "default";
+}
 
-  if (!conversation.length) {
-    return (
-      <div className="flex items-center justify-center h-full text-[#B5ADA4] text-[13px]">
-        No conversation recorded.
-      </div>
-    );
+function statusTone(status) {
+  if (status === "confirmed" || status === "answered" || status === "ready") {
+    return "green";
   }
+  if (status === "excluded" || status === "skipped") return "amber";
+  return "default";
+}
+
+function getRequirementItems(data) {
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.requirements)) return data.requirements;
+  if (Array.isArray(data?.requirements_identified)) return data.requirements_identified;
+  return [];
+}
+
+function getInterviewItems(data) {
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.elicitation_items)) return data.elicitation_items;
+  if (Array.isArray(data?.requirements_identified)) return data.requirements_identified;
+  return [];
+}
+
+function metaText(item) {
+  return [item.entity, item.step, item.aspect].filter(Boolean).join(" / ");
+}
+
+function ChatBubble({ side, speaker, topic, content, closeRule }) {
+  const isLeft = side === "left";
 
   return (
-    <div className="h-full overflow-auto p-5 space-y-4">
-      {/* Header */}
-      <div className="pb-3 border-b border-[#E8E3D9]">
-        <h3 className="text-[13px] font-semibold text-[#1A1410]">
-          Interview Transcript
-        </h3>
-        <p className="text-[11px] text-[#8A7F72] mt-0.5">
-          {conversation.length} turns · Completeness:{" "}
-          {((data?.completeness_score || 0) * 100).toFixed(0)}%
+    <div className={`flex ${isLeft ? "justify-start" : "justify-end"}`}>
+      <div
+        className={`max-w-[82%] rounded-2xl border px-3 py-2.5 ${
+          isLeft
+            ? "rounded-tl-sm border-[#E2D6C5] bg-[#F6F1E8]"
+            : "rounded-tr-sm border-[#D8CBBB] bg-[#ECE3D6]"
+        }`}
+      >
+        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-semibold text-[#211914]">{speaker}</span>
+          {topic && <span className="text-[9.5px] text-[#A89C91]">{topic}</span>}
+        </div>
+        <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-[#302822]">
+          {content || "-"}
         </p>
-      </div>
-
-      {/* Messages */}
-      {conversation.map((turn, i) => {
-        const isInterviewer = turn.role === "interviewer";
-        return (
-          <div
-            key={i}
-            className={`flex gap-3 ${isInterviewer ? "" : "justify-end"}`}
-          >
-            {isInterviewer && (
-              <div className="w-7 h-7 rounded-full bg-[#C96A42] flex items-center justify-center flex-shrink-0 mt-0.5">
-                <span className="text-white text-[9px] font-bold">AI</span>
-              </div>
-            )}
-            <div
-              className={`max-w-[80%] rounded-xl px-3.5 py-2.5 text-[12.5px] leading-relaxed ${
-                isInterviewer
-                  ? "bg-[#F5F1EA] text-[#1A1410] border border-[#E8E3D9]"
-                  : "bg-[#EAE6DC] text-[#1A1410]"
-              }`}
-            >
-              <div className="font-semibold text-[10px] uppercase tracking-wide mb-1 opacity-60">
-                {isInterviewer ? "Interviewer" : "Stakeholder"}
-              </div>
-              {turn.content}
-            </div>
-            {!isInterviewer && (
-              <div className="w-7 h-7 rounded-full bg-[#8A7F72] flex items-center justify-center flex-shrink-0 mt-0.5">
-                <span className="text-white text-[9px] font-bold">S</span>
-              </div>
-            )}
+        {closeRule && (
+          <div className="mt-1.5 text-[9.5px] leading-relaxed text-[#776B60]">
+            Discussing: {closeRule}
           </div>
-        );
-      })}
+        )}
+      </div>
     </div>
   );
 }
 
-// ── Tab: Requirements ────────────────────────────────────────────────────────
-export function RequirementsView({ data }) {
-  const requirements = data?.requirements || [];
+function InterviewItem({ item, index }) {
+  const turns = asArray(item.talk);
+  const topic = metaText(item);
+  const stakeholder = item.role || item.stakeholder || "Stakeholder";
 
-  const byType = {
-    functional: requirements.filter((r) => r.req_type === "functional"),
-    non_functional: requirements.filter((r) => r.req_type === "non_functional"),
-    constraint: requirements.filter((r) => r.req_type === "constraint"),
-  };
+  return (
+    <article className="rounded-xl border border-[#E2D6C5] bg-[#FFFDF8]">
+      <div className="px-3 py-2.5 border-b border-[#E9DFD1] bg-[#FCF8F1]">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-mono text-[10px] text-[#B86F50]">
+            {item.id || item.item || `EL-${index + 1}`}
+          </span>
+          <Tag tone={typeTone(item.kind)}>{item.kind}</Tag>
+          <Tag>{String(item.trap || "").replace(/_/g, " ")}</Tag>
+          <Tag tone={statusTone(item.status)}>{item.status}</Tag>
+          <span className="ml-auto text-[10px] text-[#A89C91]">{stakeholder}</span>
+        </div>
+        <div className="mt-1 text-[12px] font-semibold text-[#211914]">
+          {topic || "Interview topic"}
+        </div>
+        {(item.risk || item.close || item.rule) && (
+          <p className="mt-1 text-[10.5px] leading-relaxed text-[#776B60]">
+            {item.rule || item.close || item.risk}
+          </p>
+        )}
+      </div>
 
-  const PRIORITY_COLORS = {
-    high: "bg-red-50 text-red-600 border-red-200",
-    medium: "bg-amber-50 text-amber-600 border-amber-200",
-    low: "bg-green-50 text-green-600 border-green-200",
-  };
+      <div className="space-y-2 px-3 py-3">
+        {turns.length > 0 ? (
+          turns.map((turn, turnIndex) => (
+            <div key={turnIndex} className="space-y-2">
+              <ChatBubble
+                side="left"
+                speaker="Interviewer Agent"
+                topic={topic}
+                closeRule={item.close}
+                content={turn.question}
+              />
+              <ChatBubble
+                side="right"
+                speaker={`${stakeholder} (Enduser Agent)`}
+                topic={topic}
+                closeRule={item.close}
+                content={turn.answer}
+              />
+            </div>
+          ))
+        ) : item.answer ? (
+          <pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-[#4A4038] font-sans">
+            {item.answer}
+          </pre>
+        ) : (
+          <EmptyState label="No dialogue captured for this agenda item." />
+        )}
+      </div>
 
-  const TYPE_LABELS = {
-    functional: {
-      label: "Functional",
-      color: "bg-[#F5EDE8] text-[#C96A42] border-[#EDD9CE]",
-    },
-    non_functional: {
-      label: "Non-Functional",
-      color: "bg-blue-50 text-blue-600 border-blue-200",
-    },
-    constraint: {
-      label: "Constraint",
-      color: "bg-purple-50 text-purple-600 border-purple-200",
-    },
-    out_of_scope: {
-      label: "Out of Scope",
-      color: "bg-purple-50 text-purple-600 border-purple-200",
-    },
-  };
+      {(asArray(item.signals).length > 0 || item.source || item.concern_ref) && (
+        <details className="border-t border-[#E9DFD1] px-3 py-2 text-[10.5px] text-[#776B60]">
+          <summary className="cursor-pointer font-semibold text-[#4A4038]">
+            Evidence and trace
+          </summary>
+          <div className="mt-2 space-y-1.5">
+            {item.source && <p>Source: {item.source}</p>}
+            {item.concern_ref && (
+              <p>
+                Concern: {item.concern_ref}
+                {item.concern_theme ? ` - ${item.concern_theme}` : ""}
+              </p>
+            )}
+            {asArray(item.signals).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {asArray(item.signals).map((signal, signalIndex) => (
+                  <Tag key={signalIndex}>{signal}</Tag>
+                ))}
+              </div>
+            )}
+          </div>
+        </details>
+      )}
+    </article>
+  );
+}
 
-  if (!requirements.length) {
+function RequirementCard({ requirement, index }) {
+  const acceptanceCriteria = asArray(requirement.acceptance_criteria);
+  const reqType = requirement.type || requirement.req_type;
+  const reqId = requirement.id || requirement.req_id || `REQ-${index + 1}`;
+  const topic = [requirement.entity, requirement.step, requirement.aspect]
+    .filter(Boolean)
+    .join(" / ");
+
+  return (
+    <article className="rounded-xl border border-[#E2D6C5] bg-[#FFFDF8]">
+      <div className="px-3 py-2.5 border-b border-[#E9DFD1] bg-[#FCF8F1]">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-mono text-[10px] text-[#B86F50]">{reqId}</span>
+          <Tag tone={typeTone(reqType)}>{String(reqType || "").replace(/_/g, " ")}</Tag>
+          <Tag tone={priorityTone(requirement.priority)}>{requirement.priority}</Tag>
+          <Tag tone={statusTone(requirement.status)}>{requirement.status}</Tag>
+          {requirement.requires_threshold && <Tag tone="amber">threshold needed</Tag>}
+        </div>
+        <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#211914]">
+          {requirement.statement || requirement.description || requirement.question}
+        </p>
+        {topic && (
+          <div className="mt-1 text-[10px] text-[#A89C91]">{topic}</div>
+        )}
+      </div>
+
+      <div className="px-3 py-2.5 space-y-1.5">
+        {requirement.rationale && (
+          <p className="text-[10.5px] leading-relaxed text-[#776B60]">
+            <span className="font-semibold text-[#4A4038]">Why: </span>
+            {requirement.rationale}
+          </p>
+        )}
+        <div className="flex flex-wrap gap-1.5 text-[10px] text-[#A89C91]">
+          {requirement.stakeholder && <span>stakeholder: {requirement.stakeholder}</span>}
+          {requirement.category && <span>category: {requirement.category}</span>}
+          {requirement.concern_theme && <span>concern: {requirement.concern_theme}</span>}
+          {(requirement.source || requirement.origin) && (
+            <span>source: {requirement.source || requirement.origin}</span>
+          )}
+        </div>
+      </div>
+
+      {acceptanceCriteria.length > 0 && (
+        <details className="border-t border-[#E9DFD1] px-3 py-2 text-[10.5px] text-[#776B60]">
+          <summary className="cursor-pointer font-semibold text-[#4A4038]">
+            Acceptance criteria ({acceptanceCriteria.length})
+          </summary>
+          <ul className="mt-2 space-y-1">
+            {acceptanceCriteria.map((criterion, criterionIndex) => (
+              <li key={criterionIndex} className="flex gap-2">
+                <span>-</span>
+                <span>{text(criterion)}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </article>
+  );
+}
+
+function ConflictList({ conflicts }) {
+  if (!conflicts.length) return null;
+
+  return (
+    <Section title="Conflicts Require Resolution" icon={ShieldAlert}>
+      <div className="space-y-2">
+        {conflicts.map((conflict, index) => (
+          <article
+            key={conflict.id || index}
+            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5"
+          >
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-mono text-[10px] text-amber-800">
+                {conflict.id || `CF-${index + 1}`}
+              </span>
+              <Tag tone="amber">{conflict.kind}</Tag>
+              <span className="text-[10.5px] text-amber-900">
+                {text(conflict.left)} vs {text(conflict.right)}
+              </span>
+            </div>
+            {conflict.issue && (
+              <p className="mt-1.5 text-[10.5px] leading-relaxed text-amber-900">
+                {conflict.issue}
+              </p>
+            )}
+            {asArray(conflict.paths).length > 0 && (
+              <p className="mt-1 text-[10px] leading-relaxed text-amber-800">
+                Paths: {asArray(conflict.paths).join("; ")}
+              </p>
+            )}
+          </article>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+export function TranscriptView({ data }) {
+  const conversation = asArray(data?.conversation);
+
+  if (!conversation.length) {
     return (
-      <div className="flex items-center justify-center h-full text-[#B5ADA4] text-[13px]">
-        No requirements extracted yet.
+      <div className="h-full overflow-auto bg-[#FFFDF8] p-4">
+        <EmptyState label="No conversation recorded." />
       </div>
     );
   }
 
   return (
-    <div className="h-full overflow-auto">
-      {/* Stats bar */}
-      <div className="sticky top-0 bg-[#FAF7F3] border-b border-[#E8E3D9] px-4 py-2.5 flex items-center gap-4 z-10">
-        <span className="text-[11px] text-[#8A7F72]">
-          <span className="font-semibold text-[#1A1410]">
-            {requirements.length}
-          </span>{" "}
-          total
-        </span>
-        {Object.entries(byType).map(
-          ([type, reqs]) =>
-            reqs.length > 0 && (
-              <span key={type} className="text-[11px] text-[#8A7F72]">
-                <span className="font-semibold text-[#1A1410]">
-                  {reqs.length}
-                </span>{" "}
-                {TYPE_LABELS[type]?.label}
-              </span>
-            ),
-        )}
-        <span className="ml-auto text-[11px] text-[#8A7F72]">
-          Completeness:{" "}
-          <span className="font-semibold text-[#C96A42]">
-            {((data?.completeness_score || 0) * 100).toFixed(0)}%
-          </span>
-        </span>
-      </div>
+    <div className="h-full overflow-auto bg-[#FFFDF8]">
+      <Section title="Transcript" icon={MessageSquareText}>
+        <div className="space-y-3">
+          {conversation.map((turn, index) => (
+            <ChatBubble
+              key={index}
+              side={turn.role === "interviewer" ? "left" : "right"}
+              speaker={turn.role === "interviewer" ? "Interviewer Agent" : "Enduser Agent"}
+              content={turn.content}
+            />
+          ))}
+        </div>
+      </Section>
+    </div>
+  );
+}
 
-      {/* Requirements table */}
-      <div className="px-4 py-3">
-        <table className="w-full text-[12px] border-collapse">
-          <thead>
-            <tr className="text-left border-b border-[#E8E3D9]">
-              <th className="py-2 pr-3 font-semibold text-[#8A7F72] w-[72px]">
-                ID
-              </th>
-              <th className="py-2 pr-3 font-semibold text-[#8A7F72] w-[100px]">
-                Type
-              </th>
-              <th className="py-2 pr-3 font-semibold text-[#8A7F72]">
-                Description
-              </th>
-              <th className="py-2 pr-3 font-semibold text-[#8A7F72] w-[72px]">
-                Priority
-              </th>
-              <th className="py-2 font-semibold text-[#8A7F72] w-[80px]">
-                Status
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {requirements.map((req) => (
-              <tr
-                key={req.req_id}
-                className="border-b border-[#F0ECE6] hover:bg-[#FAF8F4] group"
-              >
-                <td className="py-2.5 pr-3 font-mono text-[11px] text-[#8A7F72] align-top">
-                  {req.req_id}
-                </td>
-                <td className="py-2.5 pr-3 align-top">
-                  <span
-                    className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium border ${TYPE_LABELS[req.type]?.color}`}
-                  >
-                    {TYPE_LABELS[req.req_type]?.label || req.req_type}
-                  </span>
-                </td>
-                <td className="py-2.5 pr-3 text-[#1A1410] leading-relaxed align-top">
-                  <div>{req.statement}</div>
-                  {req.rationale && (
-                    <div className="mt-1 text-[11px] text-[#8A7F72] italic leading-relaxed hidden group-hover:block">
-                      ↳ {req.rationale.slice(0, 200)}
-                      {req.rationale.length > 200 ? "…" : ""}
-                    </div>
-                  )}
-                </td>
-                <td className="py-2.5 pr-3 align-top">
-                  <span
-                    className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium border ${PRIORITY_COLORS[req.priority] || "bg-gray-50 text-gray-500 border-gray-200"}`}
-                  >
-                    {req.priority}
-                  </span>
-                </td>
-                <td className="py-2.5 align-top">
-                  <span
-                    className={`text-[10px] font-medium ${
-                      req.status === "confirmed"
-                        ? "text-green-600"
-                        : req.status === "ambiguous"
-                          ? "text-amber-600"
-                          : "text-[#8A7F72]"
-                    }`}
-                  >
-                    {req.status}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+export function RequirementsView({ data }) {
+  const requirements = getRequirementItems(data);
+  const conflicts = asArray(data?.conflicts);
+  const gaps = asArray(data?.gaps || data?.gaps_identified);
+  const byType = data?.by_type || requirements.reduce((acc, req) => {
+    const type = req.type || req.req_type || "unknown";
+    acc[type] = (acc[type] || 0) + 1;
+    return acc;
+  }, {});
 
-      {/* Gaps */}
-      {data?.gaps_identified?.length > 0 && (
-        <div className="px-4 pb-4">
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-            <div className="text-[11px] font-semibold text-amber-700 mb-1.5">
-              ⚠ Identified Gaps
-            </div>
-            {data.gaps_identified.map((gap, i) => (
-              <div key={i} className="text-[11px] text-amber-600 flex gap-2">
-                <span>•</span>
-                <span>{gap}</span>
-              </div>
+  return (
+    <div className="h-full overflow-auto bg-[#FFFDF8]">
+      <div className="p-4 space-y-3">
+        <div className="rounded-xl border border-[#E2D6C5] bg-[#FBF7F0] p-3">
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-[#211914]">
+            <FileCheck2 size={14} className="text-[#B86F50]" />
+            Requirement List
+          </div>
+          {data?.notes && (
+            <p className="mt-2 text-[11px] leading-relaxed text-[#776B60]">
+              {data.notes}
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <MetaPill label="Requirements" value={data?.total_requirements ?? requirements.length} />
+            {Object.entries(byType).map(([key, value]) => (
+              <MetaPill key={key} label={key.replace(/_/g, " ")} value={value} />
             ))}
+            <MetaPill label="Conflicts" value={conflicts.length} tone={conflicts.length ? "amber" : "green"} />
+            <MetaPill label="Gaps" value={gaps.length} tone={gaps.length ? "amber" : "default"} />
           </div>
         </div>
+      </div>
+
+      <Section title="Requirements" icon={ClipboardList}>
+        {requirements.length ? (
+          <div className="grid gap-3">
+            {requirements.map((requirement, index) => (
+              <RequirementCard
+                key={requirement.id || requirement.req_id || index}
+                requirement={requirement}
+                index={index}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState label="No requirements extracted yet." />
+        )}
+      </Section>
+
+      <ConflictList conflicts={conflicts} />
+
+      {gaps.length > 0 && (
+        <Section title="Gaps" icon={Target}>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <ul className="space-y-1.5 text-[10.5px] leading-relaxed text-amber-900">
+              {gaps.map((gap, index) => (
+                <li key={index} className="flex gap-2">
+                  <span>-</span>
+                  <span>{text(gap)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Section>
       )}
+
+      <Section title="Notes" icon={FileText}>
+        {data?.notes ? (
+          <pre
+            className="whitespace-pre-wrap rounded-xl border border-[#E2D6C5] bg-[#F6F1E8]
+                       p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
+          >
+            {data.notes}
+          </pre>
+        ) : (
+          <EmptyState label="No notes found." />
+        )}
+      </Section>
     </div>
   );
 }
 
 export function InterviewRecordRequirementsView({ data }) {
-  const requirements = data?.requirements_identified || [];
-
-  const PRIORITY_COLORS = {
-    high: "bg-red-50 text-red-600 border-red-200",
-    medium: "bg-amber-50 text-amber-600 border-amber-200",
-    low: "bg-green-50 text-green-600 border-green-200",
-  };
-  const reqColums = [
-    {
-      title: "ID",
-      displayValue: (dat) => dat.id,
-      rowStyle: "py-2.5 pr-3 font-mono text-[11px] text-[#8A7F72] align-top",
-    },
-    {
-      title: "Question",
-      displayValue: (dat) => dat.question,
-    },
-    {
-      title: "Answer",
-      displayValue: (dat) => (
-        <>
-          <div>
-            {`${dat.answer.split(" ").slice(0, 25).join(" ")} ${dat.answer.split(" ").length > 25 ? "…" : ""}`}
-          </div>
-          {dat.answer.split(" ").length > 25 && (
-            <div className="mt-1 text-[11px] text-[#8A7F72] italic leading-relaxed hidden group-hover:block">
-              ↳ {dat.answer.split(" ").slice(25).join(" ")}
-            </div>
-          )}
-        </>
-      ),
-    },
-    {
-      title: "Interviewed Stakeholder Role",
-      displayValue: (dat) => dat.interviewed_stakeholder_role,
-    },
-    {
-      title: "Priority",
-      displayValue: (dat) => (
-        <span
-          className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium border ${PRIORITY_COLORS[dat.priority] || "bg-gray-50 text-gray-500 border-gray-200"}`}
-        >
-          {dat.priority}
-        </span>
-      ),
-    },
-  ];
-
-  if (!requirements.length) {
-    return (
-      <div className="flex items-center justify-center h-full text-[#B5ADA4] text-[13px]">
-        No requirements extracted yet.
-      </div>
-    );
-  }
+  const items = getInterviewItems(data);
+  const answeredCount = items.filter((item) => item.status === "answered" || item.answer).length;
 
   return (
-    <div className="h-full overflow-auto">
-      {/* Stats bar */}
-      <div className="sticky top-0 bg-[#FAF7F3] border-b border-[#E8E3D9] px-4 py-2.5 flex items-center gap-4 z-10">
-        <span className="text-[11px] text-[#8A7F72]">
-          <span className="font-semibold text-[#1A1410]">
-            {requirements.length}
-          </span>{" "}
-          total
-        </span>
-      </div>
-
-      {/* Requirements table */}
-      <ArtifactTable column={reqColums} data={requirements} />
-
-      {data?.elicitation_notes && (
-        <div className="px-4 pb-4">
-          <div className="bg-[#F5F1EA] border border-[#E8E3D9] rounded-xl p-3">
-            <div className="text-[10.5px] font-semibold text-[#8A7F72] mb-1">
-              📝 Elicitation Notes
-            </div>
-            <div className="text-[10.5px] text-[#8A7F72] leading-relaxed">
-              {data.elicitation_notes}
-            </div>
+    <div className="h-full overflow-auto bg-[#FFFDF8]">
+      <div className="p-4 space-y-3">
+        <div className="rounded-xl border border-[#E2D6C5] bg-[#FBF7F0] p-3">
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-[#211914]">
+            <MessageSquareText size={14} className="text-[#B86F50]" />
+            Interview Record
+          </div>
+          {data?.project_description && (
+            <p className="mt-2 text-[11px] leading-relaxed text-[#776B60]">
+              {data.project_description}
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <MetaPill label="Items" value={data?.total_items ?? items.length} />
+            <MetaPill label="Answered" value={answeredCount} tone="green" />
+            <MetaPill label="Pending" value={Math.max(items.length - answeredCount, 0)} tone="amber" />
           </div>
         </div>
-      )}
+      </div>
+
+      <Section title="Conversation By Agenda Item" icon={ClipboardList}>
+        {items.length ? (
+          <div className="grid gap-3">
+            {items.map((item, index) => (
+              <InterviewItem key={item.id || item.item || index} item={item} index={index} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState label="No interview records found." />
+        )}
+      </Section>
+
+      <Section title="Notes" icon={FileText}>
+        {data?.notes || data?.elicitation_notes ? (
+          <pre
+            className="whitespace-pre-wrap rounded-xl border border-[#E2D6C5] bg-[#F6F1E8]
+                       p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
+          >
+            {data.notes || data.elicitation_notes}
+          </pre>
+        ) : (
+          <EmptyState label="No elicitation notes found." />
+        )}
+      </Section>
     </div>
   );
 }

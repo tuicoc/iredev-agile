@@ -27,16 +27,16 @@ export function Button({
   const variants = {
     // Solid terracotta — send button, primary CTAs
     primary:
-      'bg-[#C96A42] hover:bg-[#B85E38] text-white',
+      'bg-[#B86F50] hover:bg-[#A76145] text-white',
 
     // No background, subtle hover fill — icon buttons, nav items
     ghost:
-      'text-[#3D3530] hover:bg-[#EAE6DC] hover:text-[#1A1410]',
+      'text-[#4A4038] hover:bg-[#ECE3D6] hover:text-[#211914]',
 
     // Light border — secondary actions
     outline:
-      'border border-[#E8E3D9] text-[#3D3530] ' +
-      'hover:bg-[#EAE6DC] hover:border-[#D9D3C8]',
+      'border border-[#E2D6C5] text-[#4A4038] ' +
+      'hover:bg-[#ECE3D6] hover:border-[#CEC0AE]',
   }
 
   const sizes = {
