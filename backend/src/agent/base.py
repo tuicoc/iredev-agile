@@ -79,6 +79,98 @@ class BaseAgent(ABC):
         calls that do not need conversation history.
     """
 
+    @staticmethod
+    def _merge_llm_config(
+        base: Optional[Dict[str, Any]],
+        override: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Merge one LLM provider config over another without mutating either."""
+        merged = dict(base or {})
+        for key, value in (override or {}).items():
+            if value is not None:
+                merged[key] = value
+        return merged
+
+    @classmethod
+    def _resolve_llm_config(cls, raw_config: Dict[str, Any], name: str) -> Dict[str, Any]:
+        """Return the provider config for one agent.
+
+        Supported deployment shapes:
+
+        1. Legacy single-model config:
+           llm: { type, model, api_key, ... }
+
+        2. Profiled config:
+           llm:
+             default: { type, model, api_key, ... }
+             interview: { model, temperature, ... }
+             agents:
+               interviewer: interview
+               enduser: interview
+
+        Profiles inherit from ``llm.default`` when present, or from the legacy
+        flat provider keys otherwise. Per-agent ``iredev.agents.<name>.llm`` can
+        still override the resolved provider config.
+        """
+        llm_root = raw_config.get("llm") or {}
+        if not isinstance(llm_root, dict):
+            return {}
+
+        reserved = {"default", "profiles", "agents", "routing", "interview"}
+        default_cfg = llm_root.get("default")
+        if isinstance(default_cfg, dict):
+            base_cfg = dict(default_cfg)
+        else:
+            base_cfg = {
+                key: value
+                for key, value in llm_root.items()
+                if key not in reserved
+            }
+
+        agent_section = raw_config.get("iredev", {}).get("agents", {}).get(name, {})
+        profile_name = agent_section.get("llm_profile")
+        direct_override: Optional[Dict[str, Any]] = None
+
+        agent_routes = llm_root.get("agents") or {}
+        if not profile_name and isinstance(agent_routes, dict):
+            route = agent_routes.get(name)
+            if isinstance(route, str):
+                profile_name = route
+            elif isinstance(route, dict):
+                direct_override = route
+
+        if not profile_name and not direct_override:
+            if name in {"interviewer", "enduser"} and isinstance(llm_root.get("interview"), dict):
+                profile_name = "interview"
+
+        profile_cfg: Dict[str, Any] = {}
+        if profile_name:
+            profiles = llm_root.get("profiles") or {}
+            if isinstance(profiles, dict) and isinstance(profiles.get(profile_name), dict):
+                profile_cfg = profiles[profile_name]
+            elif isinstance(llm_root.get(profile_name), dict):
+                profile_cfg = llm_root[profile_name]
+            else:
+                logger.warning(
+                    "Agent '%s': LLM profile '%s' not found; using default profile.",
+                    name,
+                    profile_name,
+                )
+
+        resolved = cls._merge_llm_config(base_cfg, profile_cfg)
+        resolved = cls._merge_llm_config(resolved, direct_override)
+
+        agent_llm_override = agent_section.get("llm")
+        if isinstance(agent_llm_override, dict):
+            resolved = cls._merge_llm_config(resolved, agent_llm_override)
+
+        # Backward compatibility for mixed configs that keep provider type at
+        # the top level while moving model settings into profiles.
+        if not resolved.get("type") and llm_root.get("type"):
+            resolved["type"] = llm_root.get("type")
+
+        return resolved
+
     def __init__(self, name: str):
         self.name = name
 
@@ -88,7 +180,7 @@ class BaseAgent(ABC):
         self._raw_config = raw_config
 
         agent_section = raw_config.get("iredev", {}).get("agents", {}).get(name, {})
-        llm_cfg       = raw_config.get("llm", {})
+        llm_cfg       = self._resolve_llm_config(raw_config, name)
 
         # ── LLM ─────────────────────────────────────────────────────────
         from .llm.factory import LLMFactory
@@ -101,9 +193,8 @@ class BaseAgent(ABC):
         # ── Module 2: Memory ─────────────────────────────────────────────
         from ..memory.memory_module import MemoryModule
         from ..memory.types import MemoryType
-        self.memory = MemoryModule(
-            memory_type=MemoryType(str(agent_section.get("memory_type")))
-        )
+        memory_type = str(agent_section.get("memory_type", "short_term")).lower()
+        self.memory = MemoryModule(memory_type=MemoryType(memory_type))
 
         # ── Module 3: Knowledge ──────────────────────────────────────────
         # Kept as a reference so subclasses can use it inside tool functions.
@@ -269,3 +360,10 @@ class BaseAgent(ABC):
         Receives the current WorkflowState, returns a partial dict of
         state keys to update.
         """
+
+    def clear_memory(self) -> None:
+        """Reset the short-term conversation memory of this agent."""
+        try:
+            self.memory.refresh()
+        except Exception as exc:
+            logger.warning("Agent '%s': memory refresh failed: %s", self.name, exc)

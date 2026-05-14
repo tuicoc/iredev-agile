@@ -325,48 +325,36 @@ def build_artifacts(
 # ---------------------------------------------------------------------------
 def display_product_vision(vision: dict) -> None:
     section("ARTIFACT: product_vision")
-    stakeholders = vision.get("target_audiences") or []
-    assumptions  = vision.get("assumptions") or []
-    print(f"  Core Problem    : {vision.get('core_problem', '?')}")
-    print(f"  Value Prop.     : {vision.get('value_proposition', '?')}")
-    constraints = vision.get("project_constraints") or []
-    nfrs = vision.get("non_functional_requirements") or []
-    combined_constraints = constraints + nfrs
-    print(f"  Constraints & NFRs ({len(combined_constraints)}) :")
-    for c in combined_constraints:
-        print(f"    • {c}")
+    print(f"  Description     : {vision.get('description', '?')}")
 
-    eval_criteria = vision.get("evaluation_criteria") or []
-    if eval_criteria:
-        print(f"  Evaluation Criteria ({len(eval_criteria)}) :")
-        for e in eval_criteria:
-            print(f"    • {e}")
+    flow = vision.get("flow") or {}
+    entities = flow.get("entities") or []
+    print(f"  Entities        : {len(entities)}")
+    for entity in entities:
+        print(f"    • {entity.get('name', '')}")
 
-    oos = vision.get("out_of_scope") or []
-    print(f"  Out-of-Scope ({len(oos)}):")
-    for o in oos:
-        print(f"    • {o}")
-    if stakeholders:
-        print(f"\n  Stakeholders ({len(stakeholders)}):")
-        for s in stakeholders:
+    scope = vision.get("scope") or []
+    print(f"  Scope           : {len(scope)}")
+    for item in scope:
+        print(f"    • {item.get('item', '')}")
+
+    roles = vision.get("roles") or []
+    if roles:
+        print(f"\n  Roles ({len(roles)}):")
+        for role in roles:
+            duties = role.get("duties") or []
             print(
-                f"    [{s.get('type','?')}] {s.get('role','?')} "
-                f"(influence={s.get('influence_level','?')}) - {s.get('key_concern','')[:80]}"
+                f"    [{role.get('kind','?')}] {role.get('name','?')} "
+                f"- {len(duties)} duty(s)"
             )
-    if assumptions:
-        needs_val = [a for a in assumptions if a.get("needs_validation")]
-        print(f"\n  Assumptions: {len(assumptions)} total, {len(needs_val)} need validation")
-        for a in needs_val[:5]:
-            print(f"    [WARNING] {a.get('statement','')[:100]}")
-        if len(needs_val) > 5:
-            print(f"    ... (+{len(needs_val) - 5} more)")
 
 def display_requirement_list(rl: dict) -> None:
     section("ARTIFACT: requirement_list")
-    reqs = rl.get("requirements") or []
+    reqs = rl.get("items") or []
+    conflicts = rl.get("conflicts") or []
     by_type: Dict[str, int] = {}
     for r in reqs:
-        rt = r.get("req_type", "unknown")
+        rt = r.get("type", "unknown")
         by_type[rt] = by_type.get(rt, 0) + 1
     print(f"  Synthesised at  : {rl.get('synthesised_at', '?')}")
     print(f"  Total           : {len(reqs)}")
@@ -377,11 +365,36 @@ def display_requirement_list(rl: dict) -> None:
         for r in reqs:
             icon = {"confirmed": "*", "inferred": "~", "excluded": "x"}.get(r.get("status", ""), ".")
             print(
-                f"    {icon} [{r.get('req_id','?')}] "
-                f"({r.get('req_type','?')}, prio={r.get('priority','?')}) "
+                f"    {icon} [{r.get('id','?')}] "
+                f"({r.get('type','?')}, prio={r.get('priority','?')}) "
                 f"[{r.get('epic','?')}] "
                 f"{r.get('statement','')}"
             )
+    if conflicts:
+        print(f"\n  Conflicts blocking approval ({len(conflicts)}):")
+        for conflict in conflicts:
+            display_conflict(conflict, indent=4)
+
+
+def display_conflict(conflict: dict, indent: int = 2) -> None:
+    pad = " " * indent
+    conflict_id = conflict.get("id", "?")
+    left = conflict.get("left", "?")
+    right = conflict.get("right", "?")
+    kind = conflict.get("kind", "?")
+    scope = conflict.get("scope", "(scope not specified)")
+    issue = conflict.get("issue", "(no issue text)")
+    print(f"{pad}• [{conflict_id}] {kind}: {left} ↔ {right}")
+    print(wrap(f"Scope: {scope}", indent=indent + 2))
+    print(wrap(f"Issue: {issue}", indent=indent + 2))
+    paths = conflict.get("paths") or []
+    if paths:
+        print(f"{pad}  Resolution options:")
+        for path in paths:
+            print(wrap(f"- {path}", indent=indent + 4))
+    refs = conflict.get("refs") or []
+    if refs:
+        print(f"{pad}  Refs: {', '.join(refs)}")
 
 def display_product_backlog(artifact: dict) -> None:
     section("ARTIFACT: product_backlog")
@@ -410,6 +423,7 @@ def display_product_backlog(artifact: dict) -> None:
 # HITL interactive / auto-approve handler
 # ---------------------------------------------------------------------------
 def collect_review_decision(updates: tuple, auto_approve: bool) -> Dict[str, Any]:
+    conflict_payload: Optional[Dict[str, Any]] = None
     for interrupt_obj in updates:
         payload = interrupt_obj.value if hasattr(interrupt_obj, "value") else interrupt_obj
         if not isinstance(payload, dict):
@@ -421,11 +435,23 @@ def collect_review_decision(updates: tuple, auto_approve: bool) -> Dict[str, Any
 
         artifact_data = payload.get("artifact_data") or {}
         if review_type == "requirement_list":
-            reqs = artifact_data.get("requirements") or []
+            reqs = artifact_data.get("items") or []
+            conflicts = payload.get("conflict_data") or artifact_data.get("conflicts") or []
             by_type: Dict[str, int] = {}
             for r in reqs:
-                by_type[r.get("req_type", "?")] = by_type.get(r.get("req_type", "?"), 0) + 1
+                by_type[r.get("type", "?")] = by_type.get(r.get("type", "?"), 0) + 1
             print(f"\n  {len(reqs)} requirements (FR={by_type.get('functional',0)} ... )")
+            if conflicts:
+                conflict_payload = payload
+                print(f"\n  {len(conflicts)} conflict(s) block approval:")
+                for conflict in conflicts:
+                    display_conflict(conflict, indent=4)
+        elif review_type == "elicitation_agenda":
+            summary = artifact_data.get("summary") or {}
+            print(
+                f"\n  {summary.get('total', 0)} agenda item(s) "
+                f"({summary.get('needs', 0)} need, {summary.get('conflicts', 0)} conflict hook)"
+            )
         elif review_type == "product_backlog":
             items = artifact_data.get("items") or []
             print(f"\n  {len(items)} user stories")
@@ -433,6 +459,39 @@ def collect_review_decision(updates: tuple, auto_approve: bool) -> Dict[str, Any
             items = artifact_data.get("items") or []
             print(f"\n  {len(items)} validated PBIs")
         # other types can be added similarly
+
+    if conflict_payload is not None:
+        conflicts = (
+            conflict_payload.get("conflict_data")
+            or (conflict_payload.get("artifact_data") or {}).get("conflicts")
+            or []
+        )
+        print(f"\n{'─'*70}  CONFLICT RESOLUTION REQUIRED")
+        print(
+            "  Requirement List approval is disabled until these conflicts are resolved."
+        )
+        if auto_approve:
+            print("  [auto-approve] Skipped: conflict gate requires resolution feedback.")
+            return {
+                "approved": False,
+                "feedback": "No specific conflict resolution provided in auto-approve mode.",
+            }
+
+        print("\n  Provide resolution feedback for the conflict(s) above.")
+        print("  Mention the conflict id and the decision to apply. Blank line to finish:")
+        lines = []
+        while True:
+            line = input("  > ")
+            if not line:
+                break
+            lines.append(line)
+        feedback = " ".join(lines).strip()
+        if not feedback:
+            feedback = (
+                "No specific conflict resolution provided. Re-run synthesis and keep "
+                f"{len(conflicts)} conflict(s) visible for reviewer resolution."
+            )
+        return {"approved": False, "feedback": feedback}
 
     if auto_approve:
         print("\n  [auto-approve] Approved")
@@ -486,8 +545,19 @@ def build_initial_state(args, preloaded_artifacts=None):
         # Seed the agent’s own state fields so it doesn’t re‑run bootstrap steps
         if "product_vision" in artifacts:
             state["product_vision"] = artifacts["product_vision"]
-        if "elicitation_agenda_artifact" in artifacts:
-            state["elicitation_agenda"] = artifacts["elicitation_agenda_artifact"]
+        raw_agenda = (
+            artifacts.get("reviewed_elicitation_agenda")
+            or artifacts.get("elicitation_agenda_artifact")
+        )
+        if raw_agenda:
+            try:
+                from src.agent.agenda import AgendaRuntime
+                state["elicitation_agenda"] = (
+                    AgendaRuntime.from_agenda_artifact(raw_agenda).model_dump()
+                )
+            except Exception as exc:
+                print(f"[WARNING] Could not normalise elicitation agenda: {exc}")
+                state["elicitation_agenda"] = raw_agenda
 
         needs_srs = (args.start_at == "requirement_list")
         interview_complete = True if needs_srs else False
@@ -545,22 +615,21 @@ def run_workflow(initial_state, config, args):
                     else:
                         print(f"\n{'─'*70}\n  NODE: {node_name.upper()}\n{'─'*70}")
 
-                        if node_name == "interviewer_turn":
-                            question = updates.get("current_question")
-                            if question:
-                                print(f"\n  [INTERVIEWER] {question}\n")
-
-                        if node_name == "enduser_turn":
+                        if isinstance(updates, dict):
                             conv = updates.get("conversation")
-                            if conv:
+                            if conv and isinstance(conv, list):
+                                # Conversation is intentionally flushed on agenda advance.
+                                # Reset the print cursor when buffer shrinks to avoid
+                                # skipping the first turns of a new agenda item.
+                                if len(conv) < last_printed_turn:
+                                    last_printed_turn = 0
                                 new_turns = conv[last_printed_turn:]
                                 for turn in new_turns:
-                                    role = turn.get("role", "enduser")
+                                    role = turn.get("role", "system")
                                     content = turn.get("content", "")
                                     print(f"\n  [{role.upper()}] {content}\n")
                                 last_printed_turn = len(conv)
 
-                        if isinstance(updates, dict):
                             next_node = updates.get("next_node")
                             if next_node:
                                 dest = "END" if next_node == "__end__" else next_node

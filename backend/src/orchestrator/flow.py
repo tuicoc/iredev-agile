@@ -4,13 +4,15 @@ flow.py – Workflow phase and step definitions.
 Artifact chain
 ──────────────
 Phase 1 — Sprint Zero (sprint_zero_planning):
-  Step 1  – extract_product_vision         → product_vision
+  Step 1  – extract_product_vision         → product_vision               (VisionaryAgent)
   Step 2  – review_product_vision          → reviewed_product_vision      (HITL)
-  Step 3  – build_elicitation_agenda       → elicitation_agenda_artifact
+  Step 3  – build_elicitation_agenda       → elicitation_agenda_artifact  (AgendaAgent 4-pass)
+              Pass A/B/C → aspect_map_artifact (duty mapping + NFR concerns + conflict hooks)
+              Pass D     → elicitation_agenda_artifact (trap-driven item construction + sort)
   Step 4  – review_elicitation_agenda      → reviewed_elicitation_agenda  (HITL)
-  Step 5  – conduct_requirements_interview → interview_record
+  Step 5  – conduct_requirements_interview → interview_record             (InterviewerAgent)
   Step 6  – review_interview_record        → reviewed_interview_record    (HITL — approve-only)
-  Step 7  – synthesise_requirement_list    → requirement_list
+  Step 7  – synthesise_requirement_list    → requirement_list             (DistillerAgent)
   Step 8  – review_requirement_list        → requirement_list_approved    (HITL)
   Step 9a – create_user_stories            → user_story_draft
   Step 9c – estimate_and_validate_stories  → analyst_estimation
@@ -103,17 +105,18 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
             "Product Backlog of user stories ready for Product Owner sign-off."
         ),
         steps=[
-            # 1. Extract the initial vision (Node: interviewer_turn)
+            # 1. Extract the initial vision (Node: visionary_turn)
             ArtifactStep(
                 step_name="extract_product_vision",
-                node_name="interviewer_turn",
+                node_name="visionary_turn",
                 requires_artifacts=[],
                 produces_artifact="product_vision",
-                agent_name="interviewer",
+                agent_name="visionary",
                 description=(
-                    "InterviewerAgent reads project_description and extracts a "
-                    "ProductVision (stakeholders, core problem, value proposition, "
-                    "epics, constraints, assumptions) via structured extraction."
+                    "VisionaryAgent reads project_description and extracts a "
+                    "ProductVision with reader description, flow, roles, duties, NFR concerns, and scope "
+                    "via a structured multi-pass pipeline. "
+                    "Re-runs with product_vision_feedback when HITL rejects the artifact."
                 ),
             ),
             # 2. Human reviews the vision (Node: review_product_vision_turn)
@@ -127,22 +130,27 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                     "Human reviewer inspects the ProductVision. "
                     "• Approved → reviewed_product_vision written. "
                     "• Rejected → product_vision removed, product_vision_feedback injected; "
-                    "  InterviewerAgent re-extracts vision with feedback."
+                    "  VisionaryAgent re-extracts vision with feedback."
                 ),
             ),
-            # 3. Build elicitation agenda (Node: interviewer_turn)
+            # 3. Build elicitation agenda (Node: agenda_turn)
             ArtifactStep(
                 step_name="build_elicitation_agenda",
-                node_name="interviewer_turn",
+                node_name="agenda_turn",
                 requires_artifacts=["reviewed_product_vision"],
                 produces_artifact="elicitation_agenda_artifact",
-                agent_name="interviewer",
+                agent_name="agenda",
                 description=(
-                    "InterviewerAgent reads reviewed_product_vision and builds the "
-                    "ElicitationAgenda: an ordered list of elicitation items derived "
-                    "from epics, assumptions, constraints, and stakeholder concerns. "
-                    "Any elicitation_agenda_feedback from a prior HITL rejection is "
-                    "injected so the agent rebuilds with reviewer comments."
+                    "AgendaAgent builds the ElicitationAgenda in structured passes:\n"
+                    "  Pass A maps reviewed duties to agenda-ready map entries.\n"
+                    "  Pass B maps reviewed NFR concerns to quality-probe entries.\n"
+                    "  Pass C adds conflict hooks only where duties or concerns may need "
+                    "precedence, scope split, tradeoff boundary, or escalation clarified in dialogue.\n"
+                    "  Combined output: aspect_map_artifact.\n"
+                    "  Pass D constructs scene/probe/gap/close agenda items and orders them by the reviewed flow.\n"
+                    "  Combined output: elicitation_agenda_artifact.\n"
+                    "Any elicitation_agenda_feedback from a prior HITL rejection is injected "
+                    "so the agent rebuilds from Pass A with reviewer comments."
                 ),
             ),
             # 4. Human reviews the elicitation agenda (Node: review_elicitation_agenda_turn)
@@ -154,11 +162,13 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 agent_name="human_reviewer",
                 description=(
                     "Human reviewer inspects the ElicitationAgenda before the interview "
-                    "begins — verifying coverage, priority, and scope. "
+                    "begins — verifying duty coverage, conflict hooks, and item quality. "
+                    "The review shows: the AspectMap, possible conflict entries, "
+                    "and agenda items with entity+step+trap+scene+probe+gap+close. "
                     "• Approved → reviewed_elicitation_agenda written; interview starts. "
-                    "• Rejected → elicitation_agenda_artifact removed, "
-                    "  elicitation_agenda_feedback injected; InterviewerAgent rebuilds "
-                    "  the agenda using reviewed_product_vision + feedback."
+                    "• Rejected → aspect_map_artifact and elicitation_agenda_artifact removed, "
+                    "  elicitation_agenda_feedback injected; AgendaAgent rebuilds "
+                    "  all passes using reviewed_product_vision + feedback."
                 ),
             ),
             # 5. Conduct the interview loop (Node: interviewer_turn)
@@ -190,20 +200,21 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                     "• Approved → reviewed_interview_record written; synthesis begins."
                 ),
             ),
-            # 7. Synthesise requirement list (Node: interviewer_turn)
+            # 7. Synthesise requirement list (Node: distiller_turn)
             ArtifactStep(
                 step_name="synthesise_requirement_list",
-                node_name="interviewer_turn",
+                node_name="distiller_turn",
                 requires_artifacts=["reviewed_interview_record"],
                 produces_artifact="requirement_list",
-                agent_name="interviewer",
+                agent_name="distiller",
                 description=(
-                    "InterviewerAgent runs the 4-pass SRS synthesis pipeline: "
-                    "Pass 1 FR extraction → Pass 2 NFR/CON/OOS extraction → "
-                    "Pass 3 coverage check → Pass 4 quality gate + assembly. "
-                    "Output: structured requirement_list (FR, NFR, CON, OOS). "
+                    "DistillerAgent runs the synthesis pipeline: "
+                    "Pass 1 interview-grounded requirements → "
+                    "Pass 2 baseline and scope items → "
+                    "Pass 3 final list plus unresolved conflicts. "
+                    "Output: structured requirement_list (FR, NFR, OOS). "
                     "Any requirement_list_feedback from a prior HITL rejection is "
-                    "injected into all four passes."
+                    "injected into all passes."
                 ),
             ),
             # 8. Human reviews requirement list (Node: review_requirement_list_turn)
@@ -284,7 +295,7 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                     "      dependencies { blocked_by, blocks }\n"
                     "      planning { status, target_sprint, tags }\n"
                     "      quality { invest_pass, invest_flags, acceptance_criteria: [] }\n"
-                    "    enrichment block and top-level INVEST booleans are NOT included.\n"
+                    "    requirement_trace is preserved on every PBI for review and AC generation.\n"
                     "Any product_backlog_feedback from a prior PO rejection is injected "
                     "into all passes so the backlog is rebuilt with reviewer comments."
                 ),
@@ -318,7 +329,7 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
         description=(
             "AnalystAgent writes 2–5 Given-When-Then Acceptance Criteria per PBI, "
             "derived from the user story capability clause and the original requirement "
-            "fields (statement, context, rationale, original AC) carried in analyst_estimation. "
+            "fields carried in requirement_trace on each approved PBI. "
             "INVEST validation and story point estimation are already complete from Phase 1 "
             "and are NOT repeated here. "
             "Output: validated_product_backlog — every PBI enriched with AC, status='ready'."
@@ -334,8 +345,8 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                     "AnalystAgent runs a single AC-generation pass (Pass 3) against the "
                     "approved product_backlog. For every PBI:\n"
                     "  • Writes 2–5 Given-When-Then criteria (happy_path, edge_case, error_case).\n"
-                    "  • Sources: analyst_estimation enrichment data (original statement,\n"
-                    "    context, rationale, original AC from elicitation) + user story text.\n"
+                    "  • Sources: requirement_trace data (original statement, rationale,\n"
+                    "    source acceptance criteria, trace fields) + user story text.\n"
                     "  • Sets status='ready' for every PBI with AC written.\n"
                     "INVEST and estimation from Phase 1 are preserved unchanged.\n"
                     "Any analyst_feedback from a prior HITL rejection is injected so\n"

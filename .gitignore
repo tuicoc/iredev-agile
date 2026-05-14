@@ -219,3 +219,7 @@ __marimo__/
 # Artifacts
 artifacts
 checkpoints.db
+
+# Document
+backend/document
+.DS_Store
