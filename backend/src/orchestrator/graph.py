@@ -106,7 +106,7 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
 
     # Sent by interviewer_turn_fn on the very first turn — no artifact yet.
     "workflow_started": (
-        "## 🚀 Requirements Interview Started\n\n"
+        "## Requirements Interview Started\n\n"
         "The AI Interviewer has begun a structured requirements discovery session "
         "with the virtual stakeholder.\n\n"
         "**What's happening:** The interviewer will ask a series of targeted questions "
@@ -119,14 +119,14 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
 
     # Sent inside review_elicitation_agenda_turn interrupt — alongside the artifact.
     "elicitation_agenda": (
-        "## 📝 Elicitation Agenda Ready for Review\\n\\n"
+        "## Elicitation Agenda Ready for Review\n\n"
         "AgendaAgent has built an **Elicitation Agenda** from the approved "
-        "Product Vision using structured mapping passes.\\n\\n"
-        "**What's inside:**\\n"
-        "- **Aspect Map** — duty-to-agenda entries plus possible conflict hooks\\n"
-        "- **Conflict hooks** — places where precedence, scope split, or escalation needs dialogue\\n"
-        "- **Concern items** — quality probes derived from reviewed NFR concerns\\n"
-        "- **Agenda items** — one scene/probe/gap/close bundle per entry, sorted by flow order\\n\\n"
+        "Product Vision using structured mapping passes.\n\n"
+        "**What's inside:**\n"
+        "- **Aspect Map** — duty-to-agenda entries plus possible conflict hooks\n"
+        "- **Conflict hooks** — places where precedence, scope split, or escalation needs dialogue\n"
+        "- **Concern items** — quality probes derived from reviewed NFR concerns\n"
+        "- **Agenda items** — one scene/probe/gap/close bundle per entry, sorted by flow order\n\n"
         "**Your action:** Review the agenda below. "
         "If duty coverage, conflict hooks, and item quality look correct, click **Accept** "
         "to start the interview. If entries are missing or items are too generic, "
@@ -135,7 +135,7 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
 
     # Sent inside review_product_vision_turn interrupt — alongside the artifact.
     "product_vision": (
-        "## 🔭 Product Vision Ready for Review\n\n"
+        "## Product Vision Ready for Review\n\n"
         "VisionaryAgent has analysed your project description and produced a "
         "**Product Vision** — the entity flow spine that drives all downstream "
         "agenda building, elicitation, and requirement synthesis.\n\n"
@@ -153,7 +153,7 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
 
     # Sent inside review_interview_record_turn interrupt — alongside the artifact.
     "interview_record": (
-        "## 📋 Requirements Interview Complete\n\n"
+        "## Requirements Interview Complete\n\n"
         "The AI Interviewer has finished the discovery session and compiled the "
         "stakeholder dialogue into an **Interview Record**.\n\n"
         "**What's inside:**\n"
@@ -167,18 +167,18 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
 
     # Sent inside review_requirement_list_turn interrupt — alongside the artifact.
     "requirement_list": (
-        "## 📄 Requirement List Ready for Review\n\n"
+        "## Requirement List Ready for Review\n\n"
         "DistillerAgent has synthesised all elicitation answers into a structured "
         "**Requirement List** — the authoritative specification used to build the "
         "Product Backlog.\n\n"
         "**What's inside:**\n"
-        "- Functional Requirements (FR) — grounded in interview evidence or clear product baselines\\n"
-        "- Non-Functional Requirements (NFR) — explicit quality boundaries only\\n"
-        "- Out-of-Scope items (OOS) — reviewed Product Vision scope boundaries\\n"
-        "- Traceability: entity, step, aspect, and source per requirement\\n"
-        "- Acceptance criteria (≥1 per FR/NFR)\\n"
-        "- Conflicts (if any) — semantic contradictions requiring reviewer resolution\\n\\n"
-        "**Note:** No CON type — constraints were removed (design_decisions no longer exist in ProductVision).\\n\\n"
+        "- Functional Requirements (FR) — grounded in interview evidence or clear product baselines\n"
+        "- Non-Functional Requirements (NFR) — explicit quality boundaries only\n"
+        "- Out-of-Scope items (OOS) — reviewed Product Vision scope boundaries\n"
+        "- Traceability: entity, step, aspect, and source per requirement\n"
+        "- Acceptance criteria (≥1 per FR/NFR)\n"
+        "- Conflicts (if any) — semantic contradictions requiring reviewer resolution\n\n"
+        "**Note:** No CON type — constraints were removed (design_decisions no longer exist in ProductVision).\n\n"
         "**Your action:** Review the requirement list below. "
         "If conflicts are present, provide resolutions in your feedback — synthesis will re-run. "
         "Once conflict-free, click **Accept** to hand it to the Sprint Agent. "

@@ -38,13 +38,13 @@ function ResizableDivider({ onMouseDown }) {
       className="relative flex-shrink-0 w-[6px] h-full cursor-col-resize group z-10 select-none"
     >
       <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px
-                      bg-[#E2DCCF] group-hover:bg-[#C96A42] transition-colors duration-150" />
+                      bg-[#D8CBBB] group-hover:bg-[#B86F50] transition-colors duration-150" />
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
                       flex items-center justify-center w-5 h-9 rounded-full
-                      bg-[#EDEADF] border border-[#E2DCCF]
-                      group-hover:bg-[#FDF0EA] group-hover:border-[#C96A42]
+                      bg-[#EFE8DC] border border-[#D8CBBB]
+                      group-hover:bg-[#F5E3D7] group-hover:border-[#B86F50]
                       shadow-sm transition-all duration-150 opacity-0 group-hover:opacity-100">
-        <GripVertical size={11} className="text-[#C0B8AE] group-hover:text-[#C96A42]" />
+        <GripVertical size={11} className="text-[#B0A49A] group-hover:text-[#B86F50]" />
       </div>
     </div>
   );
@@ -93,6 +93,7 @@ function ChatLayout() {
     subChat,
     messages,
     streaming,
+    workflowRunning,
     openArtifact,
     loadingMessages,
     error,
@@ -101,10 +102,11 @@ function ChatLayout() {
     setSubChat,
     selectChat,
     clearActiveChat,
+    createRequirementChat,
     sendMessage,
+    retryMessage,
     cancelStream,
     sendArtifactFeedback,
-    handleStartProcess,
     placeHolderMessage,
   } = useChat();
 
@@ -131,16 +133,17 @@ function ChatLayout() {
     selectChat(chatId, 0, projectId);
   }, [activeProject, selectChat]);
 
-  // Called from ProjectHomeScreen "Start new process" → start + open chat
-  const handleStartFromProject = useCallback(async (config, projectId) => {
-    const chatId = await handleStartProcess(config, projectId);
-    return chatId;
-  }, [handleStartProcess]);
+  const handleCreateProjectChat = useCallback(async (projectId, projectName) => {
+    return createRequirementChat(projectId, projectName);
+  }, [createRequirementChat]);
 
   // ── Decide what to show in the center area ──────────────────────────────
   const showProjectHome = activeProject && !activeChatId;
   const showMessages    = !!activeChatId;
   const showGlobalHome  = !activeProject && !activeChatId;
+  const showStopButton  = streaming || (workflowRunning && !!placeHolderMessage);
+  const requirementProcessStarted =
+    subChat === 0 && messages.some((msg) => msg.role === "user");
 
   return (
     <MainLayout>
@@ -156,28 +159,28 @@ function ChatLayout() {
 
         {/* Center column */}
         <div
-          className="flex flex-col h-full min-w-0 bg-[#F4F0E6]"
+          className="flex flex-col h-full min-w-0 bg-[#F7F3EA]"
           style={openArtifact ? { width: `${100 - rightPct}%` } : { flex: 1 }}
         >
           {/* Header — only when a chat is open */}
           {showMessages && (
             <header className="flex items-center justify-between h-[52px] px-4
-                               border-b border-[#E8E3D9] bg-[#F4F0E6] flex-shrink-0">
+                               border-b border-[#E2D6C5] bg-[#F7F3EA] flex-shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 {activeProject && (
-                  <span className="text-[12px] text-[#8A7F72] flex-shrink-0">
+                  <span className="text-[12px] text-[#776B60] flex-shrink-0">
                     {activeProject.name} /
                   </span>
                 )}
-                <span className="text-[14px] font-semibold text-[#1A1410] truncate">
+                <span className="text-[14px] font-semibold text-[#211914] truncate">
                   Requirement Process
                 </span>
               </div>
               <select
                 value={subChat ?? 0}
                 onChange={(e) => setSubChat(Number(e.target.value))}
-                className="pl-2.5 pr-1.5 py-1 text-[12px] text-[#8A7F72] font-medium
-                           bg-[#EAE6DC] hover:bg-[#E2DCCF] rounded-full border border-[#DDD8CC]
+                className="pl-2.5 pr-1.5 py-1 text-[12px] text-[#776B60] font-medium
+                           bg-[#ECE3D6] hover:bg-[#D8CBBB] rounded-full border border-[#D8CBBB]
                            transition-colors flex-shrink-0"
               >
                 <option value={0}>Requirement Process</option>
@@ -195,13 +198,13 @@ function ChatLayout() {
               <ProjectHomeScreen
                 project={activeProject}
                 onOpenChat={(chatId, projId) => handleSelectChat(chatId, projId)}
-                onStartProcess={handleStartFromProject}
+                onCreateChat={handleCreateProjectChat}
               />
             ) : showMessages ? (
               <div className="h-full overflow-y-auto">
                 {loadingMessages ? (
                   <div className="flex items-center justify-center h-full">
-                    <LoadingSpinner size={22} className="text-[#C96A42]" />
+                    <LoadingSpinner size={22} className="text-[#B86F50]" />
                   </div>
                 ) : (
                   <div className="max-w-[720px] mx-auto px-6 py-8 space-y-7">
@@ -210,12 +213,13 @@ function ChatLayout() {
                         key={msg.id}
                         message={msg}
                         onOpenArtifact={(art) => setOpenArtifact({ ...art, messageId: msg.id })}
+                        onRetry={retryMessage}
                       />
                     ))}
                     {placeHolderMessage && (
                       <div className="flex items-center">
-                        <LoadingSpinner size={22} className="text-[#C96A42]" />
-                        <div className="text-[#C0B8AE] text-[13px] ml-2">
+                        <LoadingSpinner size={22} className="text-[#B86F50]" />
+                        <div className="text-[#B0A49A] text-[13px] ml-2">
                           {placeHolderMessage}
                         </div>
                       </div>
@@ -233,7 +237,8 @@ function ChatLayout() {
           {showMessages && (
             <ChatInput
               onSend={sendMessage}
-              disabled={streaming || subChat === 0}
+              disabled={streaming || (subChat === 0 && requirementProcessStarted)}
+              isStreaming={showStopButton}
               onCancel={cancelStream}
             />
           )}
@@ -245,7 +250,7 @@ function ChatLayout() {
         {/* Artifact panel */}
         {openArtifact && (
           <div
-            className="h-full flex-shrink-0 border-l border-[#E8E3D9] overflow-hidden"
+            className="h-full flex-shrink-0 border-l border-[#E2D6C5] overflow-hidden"
             style={{ width: `${rightPct}%` }}
           >
             <ArtifactPanel

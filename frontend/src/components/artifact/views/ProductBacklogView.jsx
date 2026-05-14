@@ -1,242 +1,318 @@
-// src/components/artifact/views/ProductBacklogView.jsx
-// Hiển thị product backlog dạng bảng
-// Aligned with nested PBI schema: estimation, prioritization, planning, quality, dependencies
+import { ClipboardList, FileText, Gauge, ListChecks, ShieldCheck } from "lucide-react";
+import {
+  asArray,
+  EmptyState,
+  MetaPill,
+  Section,
+  Tag,
+  text,
+} from "./viewUtils";
 
-export function ProductBacklogView({ data }) {
-  const items = data?.items || []
+const INVEST_KEYS = ["independent", "negotiable", "valuable", "estimable", "small", "testable"];
+const INVEST_SHORT = ["I", "N", "V", "E", "S", "T"];
+const INVEST_LABELS = {
+  independent: "Independent",
+  negotiable: "Negotiable",
+  valuable: "Valuable",
+  estimable: "Estimable",
+  small: "Small",
+  testable: "Testable",
+};
 
-  const INVEST_SHORT = ['I', 'N', 'V', 'E', 'S', 'T']
-  const INVEST_FULL  = ['Independent', 'Negotiable', 'Valuable', 'Estimable', 'Small', 'Testable']
-  const INVEST_KEYS  = ['independent', 'negotiable', 'valuable', 'estimable', 'small', 'testable']
+function getItems(data) {
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.stories)) return data.stories;
+  if (Array.isArray(data?.pbis)) return data.pbis;
+  return [];
+}
 
-  const TYPE_COLORS = {
-    functional:     'bg-[#F5EDE8] text-[#C96A42] border-[#EDD9CE]',
-    non_functional: 'bg-blue-50 text-blue-600 border-blue-200',
-    constraint:     'bg-purple-50 text-purple-600 border-purple-200',
+function pointsTone(points) {
+  if (Number(points) <= 3) return "green";
+  if (Number(points) <= 8) return "amber";
+  return "red";
+}
+
+function statusTone(status) {
+  if (status === "ready") return "green";
+  if (status === "needs_refinement" || status === "oversized") return "amber";
+  if (status === "invest_failed") return "red";
+  return "default";
+}
+
+function typeTone(type) {
+  if (type === "functional") return "warm";
+  if (type === "non_functional") return "blue";
+  if (type === "constraint") return "purple";
+  return "default";
+}
+
+function pbiParts(item) {
+  return {
+    estimation: item.estimation || {},
+    prioritization: item.prioritization || {},
+    dependencies: item.dependencies || {},
+    planning: item.planning || {},
+    quality: item.quality || {},
+    analysis: item.analysis || {},
+    trace: item.requirement_trace || {},
+  };
+}
+
+function investReason(key, item) {
+  const { analysis, quality } = pbiParts(item);
+  const notes = analysis.invest_notes || analysis.estimation_reasoning || "";
+  const flags = asArray(quality.invest_flags ?? item.invest_flags);
+  if (!flags.includes(key)) return `${INVEST_LABELS[key]} passed.`;
+  return (
+    notes ||
+    `${INVEST_LABELS[key]} failed. This PBI needs refinement before it is ready.`
+  );
+}
+
+function InvestScore({ item }) {
+  const { quality } = pbiParts(item);
+  const failed = asArray(quality.invest_flags ?? item.invest_flags);
+  const hasResult = quality.invest_pass !== undefined || failed.length > 0;
+
+  if (!hasResult) {
+    return <span className="text-[10px] text-[#A89C91]">INVEST not evaluated</span>;
   }
-
-  const POINTS_COLOR = (pts) => {
-    if (pts <= 3) return 'text-green-600 bg-green-50'
-    if (pts <= 8) return 'text-amber-600 bg-amber-50'
-    return 'text-red-600 bg-red-50'
-  }
-
-  const STATUS_COLORS = {
-    ready:            'bg-green-50 text-green-600 border-green-200',
-    needs_refinement: 'bg-amber-50 text-amber-600 border-amber-200',
-  }
-
-  if (!items.length) {
-    return (
-      <div className="flex items-center justify-center h-full text-[#B5ADA4] text-[13px]">
-        No backlog items found.
-      </div>
-    )
-  }
-
-  // Compute totals from nested estimation fields, falling back to flat fields
-  const totalPoints = items.reduce((sum, item) => {
-    const pts = item.estimation?.story_points ?? item.story_points ?? 0
-    return sum + pts
-  }, 0)
 
   return (
-    <div className="h-full overflow-auto">
-      {/* Stats bar */}
-      <div className="sticky top-0 bg-[#FAF7F3] border-b border-[#E8E3D9] px-4 py-2.5 flex items-center gap-4 z-10 flex-wrap">
-        <span className="text-[11px] text-[#8A7F72]">
-          <span className="font-semibold text-[#1A1410]">{items.length}</span> stories
-        </span>
-        <span className="text-[11px] text-[#8A7F72]">
-          <span className="font-semibold text-[#1A1410]">{totalPoints}</span> total pts
-        </span>
-        {data?.ready_count !== undefined && (
-          <span className="text-[11px] text-[#8A7F72]">
-            <span className="font-semibold text-green-600">{data.ready_count}</span> ready
+    <div className="flex items-center gap-1.5">
+      <span className="text-[9.5px] font-semibold uppercase text-[#A89C91]">INVEST</span>
+      {INVEST_KEYS.map((key, index) => {
+        const ok = !failed.includes(key);
+        return (
+          <span
+            key={key}
+            title={investReason(key, item)}
+            className={`inline-flex h-5 w-5 cursor-help items-center justify-center rounded text-[9px] font-bold
+                        ${ok ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600 ring-1 ring-red-200"}`}
+          >
+            {INVEST_SHORT[index]}
           </span>
-        )}
-        {data?.needs_refinement_count > 0 && (
-          <span className="text-[11px] text-amber-600">
-            ⚠ <span className="font-semibold">{data.needs_refinement_count}</span> needs refinement
-          </span>
-        )}
-        <span className="text-[11px] text-[#8A7F72] ml-auto font-mono">
-          WSJF = (BV + TC + RR) / SP
-        </span>
-      </div>
-
-      {/* Table */}
-      <div className="px-4 py-3 overflow-x-auto">
-        <table className="w-full text-[12px] border-collapse min-w-[700px]">
-          <thead>
-            <tr className="text-left border-b border-[#E8E3D9]">
-              <th className="py-2 pr-2 font-semibold text-[#8A7F72] w-[44px]">#</th>
-              <th className="py-2 pr-2 font-semibold text-[#8A7F72] w-[60px]">ID</th>
-              <th className="py-2 pr-3 font-semibold text-[#8A7F72]">User Story</th>
-              <th className="py-2 pr-2 font-semibold text-[#8A7F72] w-[44px] text-center">SP</th>
-              <th className="py-2 pr-2 font-semibold text-[#8A7F72] w-[60px] text-center">WSJF</th>
-              <th className="py-2 pr-2 font-semibold text-[#8A7F72] w-[80px]">Type</th>
-              <th className="py-2 pr-2 font-semibold text-[#8A7F72] w-[80px]">Status</th>
-              <th className="py-2 font-semibold text-[#8A7F72] w-[70px] text-center">INVEST</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => {
-              // Support both nested (actual artifact) and flat (review payload) schemas
-              const estimation    = item.estimation || {}
-              const prioritization = item.prioritization || {}
-              const planning      = item.planning || {}
-              const quality       = item.quality || {}
-
-              const storyPoints  = estimation.story_points ?? item.story_points ?? 0
-              const priorityRank = prioritization.priority_rank ?? item.priority_rank
-              const wsjfScore    = prioritization.wsjf_score ?? item.wsjf_score
-              const status       = planning.status ?? item.status ?? '—'
-              const investPass   = quality.invest_pass ?? item.invest_pass
-              const investFlags  = quality.invest_flags ?? item.invest_flags ?? []
-
-              // Build INVEST status: if invest_flags lists failed criteria, mark those
-              const invest = {}
-              INVEST_KEYS.forEach(k => {
-                invest[k] = !investFlags.includes(k)
-              })
-              const failed = INVEST_KEYS.filter(k => !invest[k])
-
-              return (
-                <tr key={item.id} className="border-b border-[#F0ECE6] hover:bg-[#FAF8F4] group">
-                  {/* Rank */}
-                  <td className="py-2.5 pr-2 text-center align-top">
-                    <span className="inline-flex w-5 h-5 rounded-full bg-[#EAE6DC] text-[#8A7F72] text-[10px] font-semibold items-center justify-center">
-                      {priorityRank || '—'}
-                    </span>
-                  </td>
-
-                  {/* ID */}
-                  <td className="py-2.5 pr-2 font-mono text-[10.5px] text-[#8A7F72] align-top">
-                    {item.id}
-                  </td>
-
-                  {/* User Story */}
-                  <td className="py-2.5 pr-3 align-top">
-                    <div className="font-medium text-[#1A1410] leading-snug mb-0.5">
-                      {item.title}
-                    </div>
-                    <div className="text-[11px] text-[#8A7F72] leading-relaxed hidden group-hover:block">
-                      {item.description}
-                    </div>
-                    {item.domain && (
-                      <div className="text-[10px] text-[#B5ADA4] mt-0.5 hidden group-hover:block">
-                        Domain: {item.domain}
-                      </div>
-                    )}
-                  </td>
-
-                  {/* Story Points */}
-                  <td className="py-2.5 pr-2 text-center align-top">
-                    <span className={`inline-flex w-7 h-7 rounded-lg text-[11px] font-bold items-center justify-center ${POINTS_COLOR(storyPoints)}`}>
-                      {storyPoints}
-                    </span>
-                  </td>
-
-                  {/* WSJF */}
-                  <td className="py-2.5 pr-2 text-center align-top">
-                    <span className="font-mono text-[11px] text-[#3D3530] font-semibold">
-                      {wsjfScore?.toFixed(1) || '—'}
-                    </span>
-                  </td>
-
-                  {/* Type */}
-                  <td className="py-2.5 pr-2 align-top">
-                    <span className={`inline-flex px-1.5 py-0.5 rounded text-[9.5px] font-medium border ${TYPE_COLORS[item.type] || 'bg-gray-50 text-gray-500 border-gray-200'}`}>
-                      {item.type === 'non_functional' ? 'NFR' : item.type === 'functional' ? 'FR' : 'CON'}
-                    </span>
-                  </td>
-
-                  {/* Status */}
-                  <td className="py-2.5 pr-2 align-top">
-                    <span className={`inline-flex px-1.5 py-0.5 rounded text-[9.5px] font-medium border ${STATUS_COLORS[status] || 'bg-[#EAE6DC] text-[#8A7F72] border-[#E2DCCF]'}`}>
-                      {status.replace(/_/g, ' ')}
-                    </span>
-                  </td>
-
-                  {/* INVEST */}
-                  <td className="py-2.5 text-center align-top">
-                    {investPass !== undefined ? (
-                      <>
-                        <div className="flex gap-[2px] justify-center" title={INVEST_FULL.join(', ')}>
-                          {INVEST_KEYS.map((k, i) => (
-                            <span
-                              key={k}
-                              title={`${INVEST_FULL[i]}: ${invest[k] ? 'Pass' : 'Fail'}`}
-                              className={`inline-flex w-4 h-4 rounded text-[8px] font-bold items-center justify-center
-                                ${invest[k]
-                                  ? 'bg-green-100 text-green-600'
-                                  : 'bg-red-100 text-red-500'
-                                }`}
-                            >
-                              {INVEST_SHORT[i]}
-                            </span>
-                          ))}
-                        </div>
-                        {failed.length > 0 && (
-                          <div className="text-[9px] text-red-400 mt-0.5 text-center hidden group-hover:block">
-                            Fail: {failed.join(', ')}
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-[10px] text-[#B5ADA4]">—</span>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Quality warnings */}
-      {data?.quality_warnings && (
-        <div className="px-4 pb-3">
-          {data.quality_warnings.invest?.length > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-2">
-              <div className="text-[10.5px] font-semibold text-amber-700 mb-1.5">⚠ INVEST Warnings</div>
-              {data.quality_warnings.invest.map((w, i) => (
-                <div key={i} className="text-[10.5px] text-amber-600 flex gap-2">
-                  <span>•</span><span>{w}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Methodology footer */}
-      {data?.methodology && (
-        <div className="px-4 pb-4">
-          <div className="bg-[#F5F1EA] border border-[#E8E3D9] rounded-xl p-3">
-            <div className="text-[10.5px] font-semibold text-[#8A7F72] mb-1.5">Methodology</div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-              {Object.entries(data.methodology).map(([k, v]) => (
-                <div key={k} className="text-[10px] text-[#8A7F72]">
-                  <span className="font-medium capitalize">{k.replace(/_/g, ' ')}: </span>
-                  <span>{v}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Pass notes */}
-      {data?.pass_notes && (
-        <div className="px-4 pb-4">
-          <div className="bg-[#F5F1EA] border border-[#E8E3D9] rounded-xl p-3">
-            <div className="text-[10.5px] font-semibold text-[#8A7F72] mb-1">📝 Notes</div>
-            <div className="text-[10.5px] text-[#8A7F72] leading-relaxed">{data.pass_notes}</div>
-          </div>
-        </div>
-      )}
+        );
+      })}
     </div>
-  )
+  );
+}
+
+function ScoreRail({ item }) {
+  const { estimation, prioritization, planning } = pbiParts(item);
+  const storyPoints = estimation.story_points ?? item.story_points ?? 0;
+  const rank = prioritization.priority_rank ?? item.priority_rank;
+  const wsjf = prioritization.wsjf_score ?? item.wsjf_score;
+  const status = planning.status ?? item.status;
+
+  return (
+    <div className="mt-2 grid gap-x-4 gap-y-1 text-[10.5px] text-[#776B60] sm:grid-cols-2">
+      <span>
+        <span className="font-semibold text-[#4A4038]">Story points:</span>{" "}
+        <span className={pointsTone(storyPoints) === "red" ? "text-red-600 font-semibold" : ""}>
+          {storyPoints}
+        </span>
+      </span>
+      <span><span className="font-semibold text-[#4A4038]">Priority rank:</span> {rank || "-"}</span>
+      <span>
+        <span className="font-semibold text-[#4A4038]">WSJF score:</span>{" "}
+        {wsjf === undefined ? "-" : Number(wsjf).toFixed(2)}
+      </span>
+      <span>
+        <span className="font-semibold text-[#4A4038]">Planning:</span>{" "}
+        <span className={statusTone(status) === "amber" ? "text-amber-700 font-medium" : ""}>
+          {String(status || "-").replace(/_/g, " ")}
+        </span>
+      </span>
+      <span><span className="font-semibold text-[#4A4038]">Business value:</span> {prioritization.business_value ?? "-"}</span>
+      <span><span className="font-semibold text-[#4A4038]">Time criticality:</span> {prioritization.time_criticality ?? "-"}</span>
+      <span><span className="font-semibold text-[#4A4038]">Risk reduction:</span> {prioritization.risk_reduction ?? "-"}</span>
+    </div>
+  );
+}
+
+function PbiCard({ item, index }) {
+  const { dependencies, planning, analysis, trace } = pbiParts(item);
+  const itemId = item.id || item.pbi_id || `PBI-${index + 1}`;
+  const traceTopic = [trace.requirement_id, trace.entity, trace.step, trace.aspect]
+    .filter(Boolean)
+    .join(" / ");
+
+  return (
+    <article className="rounded-xl border border-[#E2D6C5] bg-[#FFFDF8]">
+      <div className="px-3 py-2.5 border-b border-[#E9DFD1] bg-[#FCF8F1]">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-mono text-[10px] text-[#B86F50]">{itemId}</span>
+          <Tag tone={typeTone(item.type)}>{String(item.type || "").replace(/_/g, " ")}</Tag>
+          {item.domain && <Tag>{item.domain}</Tag>}
+          {asArray(planning.tags).map((tag) => (
+            <Tag key={tag}>{tag}</Tag>
+          ))}
+        </div>
+        <h4 className="mt-2 text-[12.5px] font-semibold leading-snug text-[#211914]">
+          {item.title || item.description || itemId}
+        </h4>
+        {item.description && (
+          <p className="mt-1 text-[10.5px] leading-relaxed text-[#776B60]">
+            {item.description}
+          </p>
+        )}
+        <ScoreRail item={item} />
+      </div>
+
+      <div className="px-3 py-2.5 space-y-2">
+        <InvestScore item={item} />
+        {traceTopic && (
+          <p className="text-[10.5px] leading-relaxed text-[#776B60]">
+            <span className="font-semibold text-[#4A4038]">Trace: </span>
+            {traceTopic}
+          </p>
+        )}
+        {(asArray(dependencies.blocked_by).length > 0 || asArray(dependencies.blocks).length > 0) && (
+          <p className="text-[10.5px] leading-relaxed text-[#776B60]">
+            <span className="font-semibold text-[#4A4038]">Dependencies: </span>
+            {asArray(dependencies.blocked_by).map((dep) => `blocked by ${dep}`).join(", ")}
+            {asArray(dependencies.blocked_by).length > 0 && asArray(dependencies.blocks).length > 0 ? "; " : ""}
+            {asArray(dependencies.blocks).map((dep) => `blocks ${dep}`).join(", ")}
+          </p>
+        )}
+        {(analysis.feasibility_notes || analysis.estimation_reasoning || trace.statement) && (
+          <details className="text-[10.5px] leading-relaxed text-[#776B60]">
+            <summary className="cursor-pointer font-semibold text-[#4A4038]">
+              Analysis and requirement trace
+            </summary>
+            <div className="mt-2 space-y-1.5">
+              {analysis.feasibility_notes && <p>{analysis.feasibility_notes}</p>}
+              {analysis.estimation_reasoning && <p>{analysis.estimation_reasoning}</p>}
+              {trace.statement && <p>Requirement: {trace.statement}</p>}
+              {trace.rationale && <p>Rationale: {trace.rationale}</p>}
+              {asArray(trace.acceptance_criteria).length > 0 && (
+                <p>Source AC: {asArray(trace.acceptance_criteria).map(text).join("; ")}</p>
+              )}
+            </div>
+          </details>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function QualityWarnings({ warnings }) {
+  const entries = Object.entries(warnings || {}).filter(([, value]) => asArray(value).length > 0);
+  if (!entries.length) return null;
+
+  return (
+    <Section title="Quality Warnings" icon={ShieldCheck}>
+      <div className="grid gap-2">
+        {entries.map(([key, values]) => (
+          <div key={key} className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <div className="text-[10px] font-semibold uppercase text-amber-700">
+              {key.replace(/_/g, " ")}
+            </div>
+            <ul className="mt-1.5 space-y-1 text-[10.5px] leading-relaxed text-amber-900">
+              {asArray(values).map((value, index) => (
+                <li key={index} className="flex gap-2">
+                  <span>-</span>
+                  <span>{text(value)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+export function ProductBacklogView({ data }) {
+  const items = getItems(data);
+  const totalPoints =
+    data?.total_story_points ??
+    items.reduce((sum, item) => sum + Number(item.estimation?.story_points ?? item.story_points ?? 0), 0);
+  const readyCount =
+    data?.ready_count ??
+    items.filter((item) => (item.planning?.status ?? item.status) === "ready").length;
+  const needsRefinement =
+    data?.needs_refinement_count ??
+    items.filter((item) => (item.planning?.status ?? item.status) === "needs_refinement").length;
+
+  return (
+    <div className="h-full overflow-auto bg-[#FFFDF8]">
+      <div className="p-4 space-y-3">
+        <div className="rounded-xl border border-[#E2D6C5] bg-[#FBF7F0] p-3">
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-[#211914]">
+            <ClipboardList size={14} className="text-[#B86F50]" />
+            Product Backlog
+          </div>
+          {data?.pass_notes && (
+            <p className="mt-2 text-[11px] leading-relaxed text-[#776B60]">
+              {data.pass_notes}
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            <MetaPill label="Stories" value={data?.total_items ?? data?.total_stories ?? items.length} />
+            <MetaPill label="Story Points" value={totalPoints} />
+            <MetaPill label="Ready" value={readyCount} tone="green" />
+            <MetaPill label="Needs Refinement" value={needsRefinement} tone={needsRefinement ? "amber" : "default"} />
+          </div>
+        </div>
+      </div>
+
+      <Section title="Backlog Items" icon={ListChecks}>
+        {items.length ? (
+          <div className="grid gap-3">
+            {items.map((item, index) => (
+              <PbiCard key={item.id || item.pbi_id || index} item={item} index={index} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState label="No backlog items found." />
+        )}
+      </Section>
+
+      {(data?.methodology || asArray(data?.source_artifacts).length > 0) && (
+        <Section title="Methodology" icon={Gauge}>
+          <div className="rounded-xl border border-[#E2D6C5] bg-[#FFFDF8] p-3 text-[10.5px] leading-relaxed text-[#776B60]">
+            {Object.entries(data?.methodology || {}).map(([key, value]) => (
+              <p key={key}>
+                <span className="font-semibold text-[#4A4038]">{key.replace(/_/g, " ")}: </span>
+                {value}
+              </p>
+            ))}
+            {asArray(data?.source_artifacts).length > 0 && (
+              <p>
+                <span className="font-semibold text-[#4A4038]">Source artifacts: </span>
+                {asArray(data.source_artifacts).join(", ")}
+              </p>
+            )}
+          </div>
+        </Section>
+      )}
+
+      <QualityWarnings warnings={data?.quality_warnings} />
+
+      <Section title="Notes" icon={FileText}>
+        {data?.notes || data?.pass_notes || data?.rebuild_feedback ? (
+          <div className="space-y-2">
+            {(data?.notes || data?.pass_notes) && (
+              <pre
+                className="whitespace-pre-wrap rounded-xl border border-[#E2D6C5] bg-[#F6F1E8]
+                           p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
+              >
+                {data.notes || data.pass_notes}
+              </pre>
+            )}
+            {data?.rebuild_feedback && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[10.5px] leading-relaxed text-amber-900">
+                <span className="font-semibold">Rebuild feedback:</span>{" "}
+                {data.rebuild_feedback}
+              </div>
+            )}
+          </div>
+        ) : (
+          <EmptyState label="No backlog notes found." />
+        )}
+      </Section>
+    </div>
+  );
 }

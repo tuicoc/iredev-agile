@@ -17,25 +17,25 @@ export function CodeBlock({ language, code }) {
   }
 
   return (
-    <div className="rounded-xl overflow-hidden border border-[#E2DCCF] my-1">
+    <div className="rounded-xl overflow-hidden border border-[#D8CBBB] my-1">
       {/* Header bar */}
       <div className="flex items-center justify-between px-4 py-2
-                      bg-[#EAE5DA] border-b border-[#E2DCCF]">
-        <span className="text-[11px] font-mono text-[#8A7F72] font-medium">
+                      bg-[#ECE3D6] border-b border-[#D8CBBB]">
+        <span className="text-[11px] font-mono text-[#776B60] font-medium">
           {language || 'code'}
         </span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1.5 text-[11px] text-[#8A7F72]
-                     hover:text-[#1A1410] transition-colors"
+          className="flex items-center gap-1.5 text-[11px] text-[#776B60]
+                     hover:text-[#211914] transition-colors"
         >
           {copied ? <><Check size={11}/> Copied</> : <><Copy size={11}/> Copy</>}
         </button>
       </div>
 
       {/* Code */}
-      <pre className="px-4 py-3.5 bg-[#F5F1EA] text-[12.5px] font-mono
-                      text-[#2D2820] leading-relaxed overflow-x-auto">
+      <pre className="px-4 py-3.5 bg-[#F6F1E8] text-[12.5px] font-mono
+                      text-[#302822] leading-relaxed overflow-x-auto">
         {code}
       </pre>
     </div>

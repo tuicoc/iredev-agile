@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { Copy, Check, ThumbsUp, ThumbsDown, RotateCcw } from 'lucide-react'
 import { Tooltip } from '../ui'
 
-export function MessageActions({ content }) {
+export function MessageActions({ content, onRetry }) {
   const [copied, setCopied] = useState(false)
   const [rating, setRating] = useState(null) // 'up' | 'down' | null
 
@@ -65,14 +65,17 @@ export function MessageActions({ content }) {
       </Tooltip>
 
       {/* Retry */}
-      <Tooltip text="Retry">
-        <button
-          className="p-1.5 rounded-md text-claude-muted hover:text-claude-dark
-                     hover:bg-black/[0.06] transition-colors"
-        >
-          <RotateCcw size={13} />
-        </button>
-      </Tooltip>
+      {onRetry && (
+        <Tooltip text="Retry current step">
+          <button
+            onClick={onRetry}
+            className="p-1.5 rounded-md text-claude-muted hover:text-claude-dark
+                       hover:bg-black/[0.06] transition-colors"
+          >
+            <RotateCcw size={13} />
+          </button>
+        </Tooltip>
+      )}
 
     </div>
   )

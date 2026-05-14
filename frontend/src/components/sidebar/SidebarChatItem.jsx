@@ -18,8 +18,8 @@ export function SidebarChatItem({ chat, isActive, onSelect, onDelete }) {
         group flex items-center gap-2 px-2.5 py-[7px] rounded-lg
         cursor-pointer text-[13px] transition-colors duration-100
         ${isActive
-          ? 'bg-[#E2DDD0] text-[#1A1410]'
-          : 'text-[#3D3530] hover:bg-[#E4E0D5]'}
+          ? 'bg-[#E5D9C9] text-[#211914]'
+          : 'text-[#4A4038] hover:bg-[#E7DDCF]'}
       `}
     >
       <span className="flex-1 truncate leading-snug">{chat.title}</span>
@@ -28,7 +28,7 @@ export function SidebarChatItem({ chat, isActive, onSelect, onDelete }) {
       {hovered && (
         <button
           onClick={e => { e.stopPropagation(); onDelete() }}
-          className="p-0.5 rounded text-[#B5ADA4] hover:text-[#C96A42] transition-colors flex-shrink-0"
+          className="p-0.5 rounded text-[#A89C91] hover:text-[#B86F50] transition-colors flex-shrink-0"
         >
           <Trash2 size={12} />
         </button>

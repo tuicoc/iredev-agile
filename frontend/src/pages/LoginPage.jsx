@@ -46,20 +46,20 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F4F0E6] flex items-center justify-center px-4">
+    <div className="min-h-screen bg-[#F7F3EA] flex items-center justify-center px-4">
       <div className="w-full max-w-[380px]">
         {/* Logo + heading */}
         <div className="flex flex-col items-center mb-8">
           <div
-            className="w-11 h-11 rounded-2xl bg-[#C96A42] flex items-center
+            className="w-11 h-11 rounded-2xl bg-[#B86F50] flex items-center
                           justify-center mb-4 shadow-sm"
           >
             <span className="text-white text-lg font-semibold">C</span>
           </div>
-          <h1 className="text-[22px] font-semibold text-[#1A1410] tracking-[-0.02em]">
+          <h1 className="text-[22px] font-semibold text-[#211914]">
             {mode === "login" ? "Welcome back" : "Create your account"}
           </h1>
-          <p className="text-[13px] text-[#8A7F72] mt-1">
+          <p className="text-[13px] text-[#776B60] mt-1">
             {mode === "login"
               ? "Sign in to continue to CARA"
               : "Start chatting with CARA today"}
@@ -68,7 +68,7 @@ export function LoginPage() {
 
         {/* Form card */}
         <div
-          className="bg-white rounded-2xl border border-[#E8E3D9]
+          className="bg-[#FFFDF8] rounded-2xl border border-[#E2D6C5]
                         shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-6"
         >
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -108,7 +108,7 @@ export function LoginPage() {
                 {mode === "login" && (
                   <button
                     type="button"
-                    className="text-[11px] text-[#C96A42] hover:underline"
+                    className="text-[11px] text-[#B86F50] hover:underline"
                   >
                     Forgot password?
                   </button>
@@ -143,7 +143,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={authLoading}
-              className="w-full h-10 bg-[#C96A42] hover:bg-[#B85E38]
+              className="w-full h-10 bg-[#B86F50] hover:bg-[#A76145]
                          text-white text-[13px] font-semibold rounded-xl
                          transition-colors flex items-center justify-center gap-2
                          disabled:opacity-60 disabled:cursor-not-allowed mt-1"
@@ -155,8 +155,8 @@ export function LoginPage() {
 
           {/* Mode toggle */}
           <div
-            className="mt-5 pt-4 border-t border-[#F0ECE6]
-                          text-center text-[12px] text-[#8A7F72]"
+            className="mt-5 pt-4 border-t border-[#E9DFD1]
+                          text-center text-[12px] text-[#776B60]"
           >
             {mode === "login" ? (
               <>
@@ -166,7 +166,7 @@ export function LoginPage() {
                     setMode("register");
                     clearAuthError();
                   }}
-                  className="text-[#C96A42] font-medium hover:underline"
+                  className="text-[#B86F50] font-medium hover:underline"
                 >
                   Sign up
                 </button>
@@ -179,7 +179,7 @@ export function LoginPage() {
                     setMode("login");
                     clearAuthError();
                   }}
-                  className="text-[#C96A42] font-medium hover:underline"
+                  className="text-[#B86F50] font-medium hover:underline"
                 >
                   Sign in
                 </button>
@@ -190,16 +190,16 @@ export function LoginPage() {
 
         {/* Demo credentials hint */}
         <div
-          className="mt-4 p-3 bg-white/60 rounded-xl border border-[#E8E3D9]
-                        text-[11px] text-[#8A7F72] text-center"
+          className="mt-4 p-3 bg-[#FFFDF8]/60 rounded-xl border border-[#E2D6C5]
+                        text-[11px] text-[#776B60] text-center"
         >
           Demo:{" "}
-          <span className="font-mono text-[#3D3530]">demo@example.com</span>
+          <span className="font-mono text-[#4A4038]">demo@example.com</span>
           {" / "}
-          <span className="font-mono text-[#3D3530]">password123</span>
+          <span className="font-mono text-[#4A4038]">password123</span>
         </div>
 
-        <p className="text-center text-[11px] text-[#C0B8AE] mt-4">
+        <p className="text-center text-[11px] text-[#B0A49A] mt-4">
           By continuing you agree to our{" "}
           <span className="underline cursor-pointer">Terms</span> and{" "}
           <span className="underline cursor-pointer">Privacy Policy</span>
@@ -209,9 +209,9 @@ export function LoginPage() {
   );
 }
 
-const labelClass = "block text-[12px] font-medium text-[#3D3530] mb-1.5";
+const labelClass = "block text-[12px] font-medium text-[#4A4038] mb-1.5";
 const inputClass =
-  "w-full h-9 px-3 bg-[#FAF8F5] border border-[#E8E3D9] rounded-lg " +
-  "text-[13px] text-[#1A1410] placeholder:text-[#C0B8AE] " +
-  "focus:outline-none focus:ring-2 focus:ring-[#C96A42]/20 " +
-  "focus:border-[#C96A42]/60 transition-all";
+  "w-full h-9 px-3 bg-[#FCF8F1] border border-[#E2D6C5] rounded-lg " +
+  "text-[13px] text-[#211914] placeholder:text-[#B0A49A] " +
+  "focus:outline-none focus:ring-2 focus:ring-[#B86F50]/20 " +
+  "focus:border-[#B86F50]/60 transition-all";

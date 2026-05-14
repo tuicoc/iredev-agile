@@ -1,4 +1,23 @@
 export function ArtifactTable({ data, column, tableTitle }) {
+  const rows = Array.isArray(data) ? data : [];
+  const columns = Array.isArray(column) ? column : [];
+  const renderCell = (col, item) => {
+    let value;
+    try {
+      value = col.displayValue?.(item);
+    } catch {
+      value = null;
+    }
+
+    if (value === null || value === undefined || value === "") return "—";
+    if (typeof value === "object" && !Array.isArray(value)) {
+      if (value.$$typeof) return value;
+      return JSON.stringify(value);
+    }
+    if (Array.isArray(value)) return value.join(", ");
+    return value;
+  };
+
   return (
     <>
       {tableTitle && (
@@ -7,11 +26,12 @@ export function ArtifactTable({ data, column, tableTitle }) {
       <div className="px-4 py-3 overflow-x-auto">
         <table className="w-full text-[12px] border-collapse min-w-[700px]">
           <thead>
-            <tr className="text-left border-b border-[#E8E3D9]">
-              {column.map((val, idx) => (
+            <tr className="text-left border-b border-[#E2D6C5]">
+              {columns.map((val, idx) => (
                 <th
+                  key={idx}
                   className={
-                    val.titleStyle ?? `py-2 pr-3 font-semibold text-[#8A7F72]`
+                    val.titleStyle ?? `py-2 pr-3 font-semibold text-[#776B60]`
                   }
                 >
                   {val.title}
@@ -20,19 +40,19 @@ export function ArtifactTable({ data, column, tableTitle }) {
             </tr>
           </thead>
           <tbody>
-            {data.map((item, idx) => {
+            {rows.map((item, idx) => {
               return (
                 <tr
                   key={idx}
-                  className="border-b border-[#F0ECE6] hover:bg-[#FAF8F4] group"
+                  className="border-b border-[#E9DFD1] hover:bg-[#FCF8F1] group"
                 >
                   {/* Rank */}
-                  {column.map((col, idex) => (
+                  {columns.map((col, idex) => (
                     <td
                       key={idex}
                       className={col.rowStyle ?? `py-2.5 pr-3 align-top`}
                     >
-                      {col.displayValue(item) ?? item}
+                      {renderCell(col, item)}
                     </td>
                   ))}
                 </tr>

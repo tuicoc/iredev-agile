@@ -30,14 +30,14 @@ function ChatRow({ chat, isActive, onSelect, onDelete }) {
       className={`flex items-center gap-2 pl-8 pr-2 py-[6px] rounded-lg
                   cursor-pointer text-[12px] transition-colors duration-100
                   ${isActive
-                    ? "bg-[#E2DDD0] text-[#1A1410]"
-                    : "text-[#5C5450] hover:bg-[#E4E0D5]"}`}
+                    ? "bg-[#E5D9C9] text-[#211914]"
+                    : "text-[#5B5048] hover:bg-[#E7DDCF]"}`}
     >
       <span className="flex-1 truncate leading-snug">{chat.title}</span>
       {hovered && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(chat.id); }}
-          className="p-0.5 rounded text-[#C0B8AE] hover:text-red-400 flex-shrink-0"
+          className="p-0.5 rounded text-[#B0A49A] hover:text-red-400 flex-shrink-0"
         >
           <Trash2 size={11} />
         </button>
@@ -60,16 +60,16 @@ function RenameInput({ value, onSave, onCancel }) {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKey}
-        className="flex-1 min-w-0 bg-white border border-[#C96A42]/50 rounded px-1.5 py-0.5
-                   text-[12px] text-[#1A1410] focus:outline-none focus:ring-1 focus:ring-[#C96A42]/30"
+        className="flex-1 min-w-0 bg-[#FFFDF8] border border-[#B86F50]/50 rounded px-1.5 py-0.5
+                   text-[12px] text-[#211914] focus:outline-none focus:ring-1 focus:ring-[#B86F50]/30"
       />
       <button
         onClick={() => text.trim() && onSave(text.trim())}
-        className="text-[#C96A42] hover:text-[#B85E38] flex-shrink-0"
+        className="text-[#B86F50] hover:text-[#A76145] flex-shrink-0"
       >
         <Check size={12} />
       </button>
-      <button onClick={onCancel} className="text-[#B5ADA4] hover:text-[#8A7F72] flex-shrink-0">
+      <button onClick={onCancel} className="text-[#A89C91] hover:text-[#776B60] flex-shrink-0">
         <X size={12} />
       </button>
     </div>
@@ -124,8 +124,8 @@ function ProjectFolder({
         className={`group flex items-center gap-1.5 px-2 py-[7px] rounded-lg
                     cursor-pointer text-[13px] transition-colors duration-100 select-none
                     ${isActive && !activeChatId
-                      ? "bg-[#E2DDD0] text-[#1A1410]"
-                      : "text-[#3D3530] hover:bg-[#E4E0D5]"}`}
+                      ? "bg-[#E5D9C9] text-[#211914]"
+                      : "text-[#4A4038] hover:bg-[#E7DDCF]"}`}
       >
         {/* Chevron — toggles expand/collapse */}
         <button
@@ -134,15 +134,15 @@ function ProjectFolder({
         >
           <ChevronRight
             size={13}
-            className={`text-[#B5ADA4] transition-transform duration-150
+            className={`text-[#A89C91] transition-transform duration-150
                         ${isExpanded ? "rotate-90" : ""}`}
           />
         </button>
 
         {/* Folder icon */}
         {isExpanded || isActive
-          ? <FolderOpen size={14} className="text-[#C96A42] flex-shrink-0" />
-          : <Folder     size={14} className="text-[#8A7F72] flex-shrink-0 group-hover:text-[#C96A42]" />
+          ? <FolderOpen size={14} className="text-[#B86F50] flex-shrink-0" />
+          : <Folder     size={14} className="text-[#776B60] flex-shrink-0 group-hover:text-[#B86F50]" />
         }
 
         {/* Name — clicking opens project home */}
@@ -166,23 +166,23 @@ function ProjectFolder({
           <div className="relative opacity-0 group-hover:opacity-100 flex-shrink-0">
             <button
               onClick={(e) => { e.stopPropagation(); setShowMenu((v) => !v); }}
-              className="p-1 rounded hover:bg-[#DDD8CF] text-[#B5ADA4] hover:text-[#3D3530]"
+              className="p-1 rounded hover:bg-[#D8CBBB] text-[#A89C91] hover:text-[#4A4038]"
             >
               <MoreHorizontal size={13} />
             </button>
             {showMenu && (
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)} />
-                <div className="absolute right-0 top-5 ml-1 z-40 bg-white border border-[#E8E3D9]
+                <div className="absolute right-0 top-5 ml-1 z-40 bg-[#FFFDF8] border border-[#E2D6C5]
                                 rounded-xl shadow-lg py-1 w-[140px]">
                   <button
                     onClick={(e) => { e.stopPropagation(); setRenaming(true); setShowMenu(false); }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px]
-                               text-[#3D3530] hover:bg-[#FAF8F4] transition-colors"
+                               text-[#4A4038] hover:bg-[#FCF8F1] transition-colors"
                   >
-                    <Pencil size={11} className="text-[#8A7F72]" /> Rename
+                    <Pencil size={11} className="text-[#776B60]" /> Rename
                   </button>
-                  <div className="h-px bg-[#F0ECE6] my-1" />
+                  <div className="h-px bg-[#E9DFD1] my-1" />
                   <button
                     onClick={(e) => { e.stopPropagation(); onDelete(project.id); setShowMenu(false); }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px]
@@ -202,11 +202,11 @@ function ProjectFolder({
         <div className="ml-1 mb-1">
           {loadingChats ? (
             <div className="flex items-center gap-2 pl-8 py-1.5">
-              <LoadingSpinner size={10} className="text-[#C96A42]" />
-              <span className="text-[11px] text-[#B5ADA4]">Loading…</span>
+              <LoadingSpinner size={10} className="text-[#B86F50]" />
+              <span className="text-[11px] text-[#A89C91]">Loading…</span>
             </div>
           ) : chats.length === 0 ? (
-            <div className="pl-8 py-1.5 text-[11px] text-[#C0B8AE] italic">No processes yet</div>
+            <div className="pl-8 py-1.5 text-[11px] text-[#B0A49A] italic">No processes yet</div>
           ) : (
             chats.map((chat) => (
               <ChatRow
@@ -233,24 +233,24 @@ function NewProjectForm({ onSave, onCancel }) {
   }
   return (
     <div className="flex items-center gap-1.5 px-2 py-1.5 mb-1">
-      <Folder size={14} className="text-[#C96A42] flex-shrink-0" />
+      <Folder size={14} className="text-[#B86F50] flex-shrink-0" />
       <input
         autoFocus
         placeholder="Project name…"
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={handleKey}
-        className="flex-1 bg-white border border-[#C96A42]/50 rounded-lg px-2 py-1
-                   text-[12px] text-[#1A1410] focus:outline-none focus:ring-1 focus:ring-[#C96A42]/30"
+        className="flex-1 bg-[#FFFDF8] border border-[#B86F50]/50 rounded-lg px-2 py-1
+                   text-[12px] text-[#211914] focus:outline-none focus:ring-1 focus:ring-[#B86F50]/30"
       />
       <button
         onClick={() => name.trim() && onSave(name.trim())}
         disabled={!name.trim()}
-        className="text-[#C96A42] hover:text-[#B85E38] disabled:opacity-30 flex-shrink-0"
+        className="text-[#B86F50] hover:text-[#A76145] disabled:opacity-30 flex-shrink-0"
       >
         <Check size={13} />
       </button>
-      <button onClick={onCancel} className="text-[#B5ADA4] hover:text-[#8A7F72] flex-shrink-0">
+      <button onClick={onCancel} className="text-[#A89C91] hover:text-[#776B60] flex-shrink-0">
         <X size={13} />
       </button>
     </div>
@@ -318,12 +318,12 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
   if (collapsed) {
     return (
       <aside className="w-[52px] h-full flex flex-col items-center
-                        bg-[#EDEADF] border-r border-[#E2DCCF] py-3 gap-2 flex-shrink-0">
+                        bg-[#EFE8DC] border-r border-[#D8CBBB] py-3 gap-2 flex-shrink-0">
         <Tooltip text="Expand">
           <button
             onClick={() => setCollapsed(false)}
             className="w-8 h-8 flex items-center justify-center rounded-lg
-                       text-[#8A7F72] hover:bg-[#E4E0D5] transition-colors"
+                       text-[#776B60] hover:bg-[#E7DDCF] transition-colors"
           >
             <PanelLeft size={16} />
           </button>
@@ -332,7 +332,7 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
           <button
             onClick={() => { setCollapsed(false); setCreatingProject(true); }}
             className="w-8 h-8 flex items-center justify-center rounded-lg
-                       text-[#8A7F72] hover:bg-[#E4E0D5] transition-colors"
+                       text-[#776B60] hover:bg-[#E7DDCF] transition-colors"
           >
             <Plus size={15} />
           </button>
@@ -345,15 +345,15 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
   return (
     <>
       <aside className="w-[260px] h-full flex flex-col flex-shrink-0
-                        bg-[#EDEADF] border-r border-[#E2DCCF]">
+                        bg-[#EFE8DC] border-r border-[#D8CBBB]">
         {/* Logo + collapse */}
         <div className="flex items-center justify-between px-3 pt-3 pb-2">
           <div className="flex items-center gap-2">
-            <div className="w-[26px] h-[26px] rounded-full bg-[#C96A42]
+            <div className="w-[26px] h-[26px] rounded-full bg-[#B86F50]
                             flex items-center justify-center flex-shrink-0">
               <span className="text-white text-[10px] font-semibold">C</span>
             </div>
-            <span className="text-[13px] font-semibold text-[#1A1410] tracking-[-0.01em]">
+            <span className="text-[13px] font-semibold text-[#211914]">
               CARA
             </span>
           </div>
@@ -361,7 +361,7 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
             <button
               onClick={() => setCollapsed(true)}
               className="w-7 h-7 flex items-center justify-center rounded-lg
-                         text-[#8A7F72] hover:bg-[#E4E0D5] transition-colors"
+                         text-[#776B60] hover:bg-[#E7DDCF] transition-colors"
             >
               <PanelLeftClose size={15} />
             </button>
@@ -373,9 +373,9 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
           <button
             onClick={() => setCreatingProject(true)}
             className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg
-                       text-[13px] text-[#3D3530] hover:bg-[#E4E0D5] transition-colors"
+                       text-[13px] text-[#4A4038] hover:bg-[#E7DDCF] transition-colors"
           >
-            <Plus size={14} className="text-[#C96A42]" />
+            <Plus size={14} className="text-[#B86F50]" />
             New project
           </button>
         </div>
@@ -383,16 +383,16 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
         {/* Search */}
         <div className="px-2 pb-2">
           <div className="relative">
-            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#B5ADA4]" />
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#A89C91]" />
             <input
               type="text"
               placeholder="Search projects…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full pl-7 pr-3 py-1.5 bg-[#F4F0E6]/70 border border-[#E2DCCF]
-                         rounded-lg text-[12px] text-[#1A1410] placeholder:text-[#B5ADA4]
-                         focus:outline-none focus:ring-1 focus:ring-[#C96A42]/30
-                         focus:border-[#C96A42]/40 transition-all"
+              className="w-full pl-7 pr-3 py-1.5 bg-[#F7F3EA]/70 border border-[#D8CBBB]
+                         rounded-lg text-[12px] text-[#211914] placeholder:text-[#A89C91]
+                         focus:outline-none focus:ring-1 focus:ring-[#B86F50]/30
+                         focus:border-[#B86F50]/40 transition-all"
             />
           </div>
         </div>
@@ -408,16 +408,16 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
 
           {loadingProjects && projects.length === 0 && (
             <div className="flex items-center justify-center py-8">
-              <LoadingSpinner size={18} className="text-[#C96A42]" />
+              <LoadingSpinner size={18} className="text-[#B86F50]" />
             </div>
           )}
 
           {!loadingProjects && filteredProjects.length === 0 && !creatingProject && (
             <div className="px-3 py-8 text-center">
-              <div className="text-[#B5ADA4] text-[12px]">No projects yet</div>
+              <div className="text-[#A89C91] text-[12px]">No projects yet</div>
               <button
                 onClick={() => setCreatingProject(true)}
-                className="mt-2 text-[12px] text-[#C96A42] hover:underline"
+                className="mt-2 text-[12px] text-[#B86F50] hover:underline"
               >
                 Create your first project
               </button>
@@ -441,30 +441,30 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
         </div>
 
         {/* Bottom nav */}
-        <div className="border-t border-[#E2DCCF] p-2 space-y-0.5">
+        <div className="border-t border-[#D8CBBB] p-2 space-y-0.5">
           <button
             onClick={() => setShowSettings(true)}
             className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg
-                       text-[12px] text-[#8A7F72] hover:bg-[#E4E0D5]
-                       hover:text-[#3D3530] transition-colors"
+                       text-[12px] text-[#776B60] hover:bg-[#E7DDCF]
+                       hover:text-[#4A4038] transition-colors"
           >
             <Settings size={13} /> Settings
           </button>
           <div className="flex items-center gap-2.5 px-2.5 py-2 mt-0.5 rounded-lg group">
-            <div className="w-6 h-6 rounded-full bg-[#8A7F72] flex items-center
+            <div className="w-6 h-6 rounded-full bg-[#776B60] flex items-center
                             justify-center flex-shrink-0">
               <span className="text-white text-[10px] font-semibold">
                 {(user?.name || user?.email || "U")[0].toUpperCase()}
               </span>
             </div>
-            <span className="text-[12px] text-[#3D3530] truncate flex-1">
+            <span className="text-[12px] text-[#4A4038] truncate flex-1">
               {user?.email || "user@example.com"}
             </span>
             <Tooltip text="Sign out">
               <button
                 onClick={logout}
                 className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center
-                           justify-center rounded text-[#B5ADA4] hover:text-red-400 transition-all"
+                           justify-center rounded text-[#A89C91] hover:text-red-400 transition-all"
               >
                 <LogOut size={12} />
               </button>

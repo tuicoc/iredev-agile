@@ -15,11 +15,11 @@ export function ChatHeader({ activeChatId, chats, onNew, subChat, onSelect }) {
   return (
     <header
       className="flex items-center justify-between h-[52px] px-4
-                       border-b border-[#E8E3D9] bg-[#F4F0E6] flex-shrink-0"
+                       border-b border-[#E2D6C5] bg-[#F7F3EA] flex-shrink-0"
     >
       {/* Left: title + model pill */}
       <div className="flex items-center gap-2.5 min-w-0">
-        <span className="text-[14px] font-semibold text-[#1A1410] truncate max-w-[260px]">
+        <span className="text-[14px] font-semibold text-[#211914] truncate max-w-[260px]">
           {title}
         </span>
 
@@ -29,9 +29,9 @@ export function ChatHeader({ activeChatId, chats, onNew, subChat, onSelect }) {
             value={subChat}
             onChange={(e) => onSelect(activeChatId, e.target.value)}
             className="flex items-center gap-1 pl-2.5 pr-1.5 py-1
-                           text-[12px] text-[#8A7F72] font-medium
-                           bg-[#EAE6DC] hover:bg-[#E2DCCF]
-                           rounded-full border border-[#DDD8CC]
+                           text-[12px] text-[#776B60] font-medium
+                           bg-[#ECE3D6] hover:bg-[#D8CBBB]
+                           rounded-full border border-[#D8CBBB]
                            transition-colors flex-shrink-0"
           >
             <option value={0}>Requirement Process</option>
@@ -46,7 +46,7 @@ export function ChatHeader({ activeChatId, chats, onNew, subChat, onSelect }) {
         <Tooltip text="Share">
           <button
             className="w-8 h-8 flex items-center justify-center rounded-lg
-                             text-[#8A7F72] hover:bg-[#EAE6DC] hover:text-[#1A1410]
+                             text-[#776B60] hover:bg-[#ECE3D6] hover:text-[#211914]
                              transition-colors"
           >
             <Share2 size={15} />
@@ -56,7 +56,7 @@ export function ChatHeader({ activeChatId, chats, onNew, subChat, onSelect }) {
           <button
             onClick={onNew}
             className="w-8 h-8 flex items-center justify-center rounded-lg
-                             text-[#8A7F72] hover:bg-[#EAE6DC] hover:text-[#1A1410]
+                             text-[#776B60] hover:bg-[#ECE3D6] hover:text-[#211914]
                              transition-colors"
           >
             <SquarePen size={15} />

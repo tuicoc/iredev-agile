@@ -131,6 +131,12 @@ def start(current_user, chat_id):
     if not projDescr:
         return jsonify({"error": "Validation error", "message": "Project Description is required."}), 400
 
+    try:
+        max_turns = int(data.get("maxIterations", 150) or 150)
+    except (TypeError, ValueError):
+        max_turns = 150
+    max_turns = min(max(max_turns, 5), 200)
+
     initial_state = {
         # ── Session ───────────────────────────────────────────────────────
         "session_id": req_id,
@@ -145,7 +151,7 @@ def start(current_user, chat_id):
         # max_turns is a SAFETY NET — the interviewer stops on its own
         # via interview_complete=True when completeness ≥ threshold (0.8).
         # Only change this if you have a specific token-budget constraint.
-        "max_turns": data.get("maxIterations", 20),  # default 20
+        "max_turns": max_turns,
         "interview_complete": False,
         # ── Live requirements draft (populated incrementally per turn) ─────
         # InterviewerAgent.update_requirements appends here after each

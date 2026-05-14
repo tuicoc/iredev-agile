@@ -8,10 +8,25 @@
 import { CodeBlock } from "./CodeBlock";
 import { FormattedText } from "./FormattedText";
 
+function normalizeEscapedMarkdownNewlines(content = "") {
+  const text = String(content);
+  if (!text.includes("\\n")) return text;
+
+  const trimmed = text.trim();
+  const looksLikeMarkdownSummary =
+    /^#{1,3}\s/.test(trimmed) ||
+    trimmed.includes("**What's inside:**") ||
+    trimmed.includes("**Your action:**");
+
+  return looksLikeMarkdownSummary ? text.replace(/\\n/g, "\n") : text;
+}
+
 export function AssistantContent({ content, streaming }) {
+  const displayContent = normalizeEscapedMarkdownNewlines(content);
+
   // Split the content string by fenced code blocks: ```...```
   // The capturing group means the delimiters are kept in the resulting array.
-  const parts = content.split(/(```[\s\S]*?```)/g);
+  const parts = displayContent.split(/(```[\s\S]*?```)/g);
 
   return (
     <div className="space-y-3">
