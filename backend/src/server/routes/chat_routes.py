@@ -150,7 +150,7 @@ def start(current_user, chat_id):
         # ── Live requirements draft (populated incrementally per turn) ─────
         # InterviewerAgent.update_requirements appends here after each
         # stakeholder reply. write_interview_record copies this into
-        # interview_record["requirements_identified"].
+        # interview_record["items"].
         "requirements_draft": [],
         "backlog_draft": [],
         "errors": [],

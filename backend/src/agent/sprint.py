@@ -1,118 +1,24 @@
 """
-sprint.py – SprintAgent  (Product Owner)
+sprint.py - SprintAgent (Product Owner)
 
-Role
-────
-SprintAgent runs in two distinct steps within Phase 1:
+SprintAgent owns two backlog-lane steps:
 
-Step 9a — create_user_stories (sprint_agent_turn):
-  Reads requirement_list_approved and converts each confirmed requirement
-  into a user story. No estimation occurs here — story points are assigned
-  exclusively by AnalystAgent in Step 9c.
-  Output: user_story_draft artifact.
+1. create_user_stories
+   Input: requirement_list_approved.items plus compact reviewed Product Vision.
+   Output: user_story_draft.
 
-Step 9b — build_product_backlog (sprint_agent_turn):
-  Reads both user_story_draft and analyst_estimation (from Step 9c), runs
-  dependency-aware WSJF prioritization, and assembles the final product_backlog
-  using the consolidated PBI schema.
-  Output: product_backlog artifact.
+2. build_product_backlog
+   Input: user_story_draft plus analyst_estimation.
+   Output: product_backlog.
 
-Split loop handling (between Steps 9a and 9b)
-─────────────────────────────────────────────
-When AnalystAgent returns analyst_estimation with has_pending_splits=True:
-  1. SprintAgent reads split_proposals from each flagged story.
-  2. Creates sub-stories (inheriting domain, type, source_req_id + suffix).
-  3. Replaces user_story_draft with sub-stories only (not already-valid stories).
-  4. Increments state["split_round"].
-  5. Supervisor routes back to analyst_estimation_turn for re-estimation.
-  Hard limit: split_round ≤ 2. After 2 rounds, oversized stories are flagged
-  in quality_warnings and included as-is.
-
-Source artifacts
-────────────────
-Step 9a reads: artifacts["requirement_list_approved"]
-               artifacts["requirement_list"] (fallback on PO rejection rebuild)
-Step 9b reads: artifacts["user_story_draft"]
-               artifacts["analyst_estimation"]
-
-Fallback on PO rejection
-────────────────────────
-When product_backlog_feedback is set (PO rejected the backlog):
-  • product_backlog, user_story_draft, and analyst_estimation are removed
-    by review_product_backlog_turn_fn in graph.py.
-  • SprintAgent re-runs Step 9a (create_user_stories) from scratch with
-    the feedback injected into the story generation prompt.
-  • AnalystAgent re-runs Step 9c (estimate_and_validate_stories).
-  • split_round is reset to 0.
-
-Profile + Addendum pattern
-──────────────────────────
-  self.profile.prompt         → who the agent is (sprint_agent_react.txt)
-  _PASS1_ADDENDUM             → story creation rules
-  _PASS2_ADDENDUM             → WSJF prioritization rules
-
-PBI schema (consolidated)
-──────────────────────────
-The product_backlog uses a consolidated schema. enrichment block and top-level
-INVEST booleans are NOT included in the output — they live in analyst_estimation
-and are referenced via source_req_id when needed.
-
-  {
-    "id":             "PBI-001",
-    "source_req_id":  "FR-012",
-    "type":           "functional" | "non_functional" | "constraint",
-    "domain":         "<Epic label>",
-    "title":          "<short card title>",
-    "description":    "As a <role>, I can <capability>, so that <benefit>.",
-
-    "estimation": {
-      "story_points": <int Fibonacci>,
-      "complexity":   <int 1–5>,
-      "effort":       <int 1–5>,
-      "uncertainty":  <int 1–5>
-    },
-
-    "prioritization": {
-      "priority_rank":    <int, 1=highest>,
-      "wsjf_score":       <float>,
-      "business_value":   <int 1–10>,
-      "time_criticality": <int 1–10>,
-      "risk_reduction":   <int 1–10>
-    },
-
-    "dependencies": {
-      "blocked_by": ["PBI-NNN", ...],
-      "blocks":     ["PBI-NNN", ...]
-    },
-
-    "planning": {
-      "status":        "ready" | "needs_refinement" | "invest_failed" | "oversized",
-      "target_sprint": null,
-      "tags":          []
-    },
-
-    "quality": {
-      "invest_pass":          <bool>,
-      "invest_flags":         ["small", ...],
-      "acceptance_criteria":  []   ← populated by AnalystAgent in Phase 2
-    }
-  }
-
-State fields used
-─────────────────
-  artifacts["requirement_list_approved"] — source for Step 9a
-  artifacts["requirement_list"]          — fallback source for Step 9a
-  artifacts["user_story_draft"]          — Step 9a output / Step 9b input
-  artifacts["analyst_estimation"]        — Step 9c output / Step 9b input
-  artifacts["product_backlog"]           — Step 9b output
-  project_description                    — injected into story generation prompt
-  product_backlog_feedback               — injected on PO rejection; cleared on approval
-  session_id                             — stamped on artifact
-  split_round                            — tracks split loop depth; reset on new cycle
+The LLM decides story wording and WSJF component scores. Python copies trace
+data, formats prompt inputs, applies split proposals, computes formulas, maps
+ids, and assembles artifacts.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import datetime
@@ -120,1118 +26,830 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from .base import BaseAgent, Tool, ToolResult
+from .base import BaseAgent
 
 logger = logging.getLogger(__name__)
 
-_FIBONACCI       = {1, 2, 3, 5, 8, 13, 21}
-_INVEST_CRITERIA = ["independent", "negotiable", "valuable", "estimable", "small", "testable"]
-_MAX_SPLIT_ROUND = 2   # hard limit on split loop depth
+_FIBONACCI = {1, 2, 3, 5, 8, 13, 21}
+_MAX_SPLIT_ROUND = 2
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Per-pass addendums
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Pass prompts: how the agent works
+# ---------------------------------------------------------------------------
 
 _PASS1_ADDENDUM = """\
-TASK: PASS 1 — USER STORY CREATION
+TASK: PASS 1 - USER STORY DRAFT
 
-Convert each active requirement into exactly one user story.
-The mandatory format is: "As a <role>, I can <capability>, so that <benefit>."
+Convert each approved requirement into one compact user story.
 
-Do NOT estimate story points. Do NOT assess INVEST. That is AnalystAgent's job.
-Your only task is to produce clear, well-formed user stories with correct traceability.
+Inputs:
+- REQUIREMENT TRACES: the only source of backlog scope.
+- PRODUCT VISION CONTEXT: read-only orientation for role, entity, step,
+  quality concern, and scope vocabulary.
+- REVIEWER FEEDBACK: changes requested on a previous backlog, if present.
 
-─────────────────────────────────────────────────────
-ROLE
-─────────────────────────────────────────────────────
-Read the stakeholder field and use its value as the role.
-If the value is plural, convert to singular: "Students" → "a Student".
-If already singular (e.g. "First-year Student"), use without modification.
+Flow:
+1. Read each requirement trace fully before writing the story.
+2. Use requirement_trace.stakeholder as the actor.
+3. Rephrase requirement_trace.statement into a capability the actor can own.
+4. Derive the benefit from requirement_trace.rationale first, then from
+   requirement_trace.acceptance_criteria if the rationale has no clear outcome.
+5. Use Product Vision only to keep entity, step, and role wording aligned.
+6. For initial stories, source_story_id equals requirement_trace.requirement_id.
+7. Write exactly one story for every trace in the input.
 
-─────────────────────────────────────────────────────
-CAPABILITY
-─────────────────────────────────────────────────────
-Strip the SHALL or SHALL NOT modal from the statement and rephrase as a
-present-tense action verb phrase. Then narrow using the context field to
-make the scene specific and concrete.
-
-Example: statement "SHALL provide guidance on responsible AI use" + context
-"On the Responsible AI Use guidance page, when a student views the rules"
-→ capability: "view clear responsible-AI rules on a dedicated guidance page"
-
-When priority is "high", the capability must be precise and scene-specific.
-When priority is "low", keep the capability concise; open thought with "low-urgency:".
-
-─────────────────────────────────────────────────────
-BENEFIT
-─────────────────────────────────────────────────────
-Extract the "So that" clause from the rationale field and rephrase as a
-measurable outcome for the named actor.
-When rationale has no "So that" clause, derive the benefit from
-acceptance_criteria conditions instead.
-
-─────────────────────────────────────────────────────
-STATUS
-─────────────────────────────────────────────────────
-When status is "excluded" → skip entirely, produce no story.
-When status is "inferred" → include the story, open thought with "inferred:".
-
-─────────────────────────────────────────────────────
-TRACEABILITY
-─────────────────────────────────────────────────────
-Copy req_id verbatim into source_req_id.
-Copy epic verbatim into domain.
-Copy source_elicitation_id into the thought field as a traceability note.
-Output stories in the same order as the input requirements.
-
-─────────────────────────────────────────────────────
-ENRICHMENT (required for AnalystAgent)
-─────────────────────────────────────────────────────
-Each story must carry an "enrichment" sub-dict with the following requirement
-fields copied verbatim. This allows AnalystAgent to perform feasibility
-assessment and AC generation without re-reading the requirement list.
-
-  enrichment = {
-    "statement":             <req.statement>,
-    "context":               <req.context or "">,
-    "rationale":             <req.rationale>,
-    "acceptance_criteria":   <req.acceptance_criteria as list of strings>,
-    "priority":              <req.priority>,
-    "source_elicitation_id": <req.source_elicitation_id>,
-    "stakeholder":           <req.stakeholder>,
-    "req_type":              <req.req_type>
-  }
+Rules:
+- Do not create stories from Product Vision alone.
+- Do not use the original project description.
+- Do not estimate story points.
+- Do not assess INVEST.
+- Do not propose splits.
+- Do not add technologies, UI layouts, vendors, thresholds, or rules absent
+  from requirement evidence.
 """
 
 _PASS2_ADDENDUM = """\
-TASK: PASS 2 — WSJF PRIORITIZATION
+TASK: PASS 2 - WSJF PRIORITISATION
 
-Assign BusinessValue, TimeCriticality, and RiskReduction scores to every story,
-compute WSJF, and assign unique priority ranks.
+Assign BusinessValue, TimeCriticality, and RiskReduction for each story.
 
-You receive:
-  • The user stories with their descriptions and domains.
-  • Analyst estimation data: story_points, invest results, dependency mapping.
+Inputs:
+- USER STORIES: backlog cards created in Pass 1 or split cards created from
+  AnalystAgent proposals.
+- ANALYST ESTIMATION: the only source of story points, INVEST flags, risks,
+  and dependency evidence.
+- REQUIREMENT TRACE: source evidence for priority and stakeholder outcome.
+- PRODUCT VISION CONTEXT: read-only orientation for flow and scope impact.
 
-Do NOT re-estimate story_points. Use the values from analyst_estimation exactly.
+Flow:
+1. Anchor BusinessValue and TimeCriticality to requirement priority, rationale,
+   and acceptance criteria.
+2. Use RiskReduction for uncertainty, hard dependencies, quality concerns,
+   threshold gaps, and cross-flow impact visible in evidence.
+3. Keep scores consistent for stories in the same domain.
+4. Lower score confidence when the source evidence is sparse or a threshold
+   still needs human confirmation.
+5. Assign unique priority ranks from 1 upward.
 
-─────────────────────────────────────────────────────
-WSJF FORMULA
-─────────────────────────────────────────────────────
+Rules:
+- Do not change story points.
+- Do not reassess INVEST.
+- Do not hide hard dependencies inside score rationale; Python will repair
+  ranking order from AnalystAgent dependency fields.
+
+Formula:
 WSJF = (BusinessValue + TimeCriticality + RiskReduction) / StoryPoints
-Round to 2 decimal places. Higher WSJF = higher priority = lower rank number.
-
-─────────────────────────────────────────────────────
-SCORING DIMENSIONS (1–10 each)
-─────────────────────────────────────────────────────
-BusinessValue (BV):    Economic or user benefit if delivered now vs. delayed.
-TimeCriticality (TC):  Cost of delay — how much the project suffers if this slips.
-RiskReduction (RR):    Degree to which delivering this removes a technical or
-                       business blocker.
-
-─────────────────────────────────────────────────────
-CALIBRATION RULES
-─────────────────────────────────────────────────────
-• priority="high"   → BV ≥ 7, TC ≥ 6.
-• priority="medium" → BV between 4 and 7.
-• priority="low"    → BV ≤ 4.
-
-• Stories in the same domain must have internally consistent BV scores.
-  The foundational domain delivering core user-facing content ranks above
-  supporting domains (educator resources, administration).
-
-• context "Across all system interactions" → raise RR (deferring blocks multiple epics).
-• context narrow and scene-specific → lower RR unless stakeholder-critical.
-
-• stakeholder = "Project Team" on a constraint → raise RR (compliance exposure).
-• Rich, specific "So that" clause in rationale → raise BV.
-• source_elicitation_id = "PD" → lower TC by 1 (inferred, lower confidence).
-• acceptance_criteria empty → lower TC (harder to demo).
-• status = "inferred" → do not inflate BV.
-• req_type = "non_functional" → weight TC on what degrades if deferred.
-• req_type = "constraint" → weight BV on compliance exposure avoided.
-
-─────────────────────────────────────────────────────
-RANKING RULES
-─────────────────────────────────────────────────────
-Assign priority_rank as unique integers starting at 1 (1 = highest priority).
-Tie-breaking: lower rank number goes to the story with higher BusinessValue.
-Output stories ordered by priority_rank ascending (rank 1 first).
-
-NOTE: Dependency-aware rank adjustment is performed by SprintAgent after you
-return scores. You do not need to reorder for dependencies — just score correctly.
+Round to two decimals.
 """
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Enrichment typed model
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Schemas: what the artifacts contain
+# ---------------------------------------------------------------------------
 
-class EnrichmentData(BaseModel):
-    """
-    Typed enrichment sub-model carrying original requirement fields.
-
-    Replaces Dict[str, Any] to satisfy OpenAI strict JSON schema requirement
-    that all objects have additionalProperties=false.
-
-    All fields are Optional with defaults so the LLM can omit fields
-    that are not available for a given requirement (e.g. null context).
-    """
-    statement:             str            = Field(
-        default="",
-        description="Verbatim requirement statement (The system SHALL …)."
+class RequirementTrace(BaseModel):
+    requirement_id: str = Field(description="Original requirement identifier.")
+    requirement_type: Literal["functional", "non_functional"] = Field(
+        description="Original requirement type."
     )
-    context:               Optional[str]  = Field(
-        default=None,
-        description="Where/when the requirement applies. Null if universal."
+    stakeholder: str = Field(description="Role that owns the requirement.")
+    statement: str = Field(description="Original requirement statement.")
+    entity: Optional[str] = Field(default=None, description="Referenced entity.")
+    step: Optional[str] = Field(default=None, description="Referenced entity step.")
+    aspect: Optional[str] = Field(default=None, description="Requirement aspect.")
+    category: Optional[str] = Field(default=None, description="NFR category.")
+    concern_theme: Optional[str] = Field(default=None, description="NFR concern theme.")
+    entity_refs: List[str] = Field(default_factory=list, description="Additional entity anchors.")
+    flow_step_refs: List[str] = Field(default_factory=list, description="Additional step anchors.")
+    requires_threshold: bool = Field(
+        default=False,
+        description="Whether a measurable threshold still needs confirmation.",
     )
-    rationale:             str            = Field(
-        default="",
-        description="Business justification including pain and 'So that' outcome."
-    )
-    acceptance_criteria:   List[str]      = Field(
+    rationale: str = Field(description="Original requirement rationale.")
+    acceptance_criteria: List[str] = Field(
         default_factory=list,
-        description="Original Given-When-Then criteria strings from elicitation."
+        description="Original requirement acceptance criteria.",
     )
-    priority:              str            = Field(
-        default="medium",
-        description="high | medium | low — inherited from elicitation."
+    priority: Literal["high", "medium", "low"] = Field(description="Requirement priority.")
+    source: str = Field(description="Trace source id.")
+    origin: Literal["interview", "baseline", "vision"] = Field(
+        description="Requirement origin."
     )
-    source_elicitation_id: str            = Field(
-        default="",
-        description="EL-NNN traceability key, or 'PD' if inferred from project description."
-    )
-    stakeholder:           str            = Field(
-        default="",
-        description="Primary stakeholder role who expressed this requirement."
-    )
-    req_type:              str            = Field(
-        default="functional",
-        description="functional | non_functional | constraint | out_of_scope"
-    )
+    status: str = Field(default="confirmed", description="Requirement status.")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Pass 1 schemas — Story Creation
-# ─────────────────────────────────────────────────────────────────────────────
+class SplitTrace(BaseModel):
+    parent_story_id: Optional[str] = Field(default=None, description="Parent story id.")
+    suffix: Optional[str] = Field(default=None, description="Split suffix.")
+    reasoning: Optional[str] = Field(default=None, description="Split proposal rationale.")
+
 
 class UserStoryItem(BaseModel):
-    source_req_id: str = Field(
-        description="Copied verbatim from the requirement's req_id field (e.g. 'FR-001')."
-    )
-    source_type: Literal["functional", "non_functional", "constraint"] = Field(
-        description="Requirement type — copied verbatim from req_type."
-    )
-    title: str = Field(
-        description=(
-            "Short backlog card title (5–8 words). Names the core action, not the actor. "
-            "Example: 'View Responsible AI Use Rules'."
-        )
-    )
-    description: str = Field(
-        description=(
-            "MANDATORY USER STORY FORMAT: "
-            "'As a <role>, I can <capability>, so that <benefit>.' "
-            "Role = named actor from stakeholder field. "
-            "Capability = action verb present tense, narrowed by context. "
-            "Benefit = measurable outcome from rationale 'So that…' clause."
-        )
-    )
-    domain: str = Field(
-        description="Epic area — copied verbatim from the requirement's epic field."
-    )
-    # ── FIX: replaced Dict[str, Any] with typed EnrichmentData model ─────────
-    # OpenAI strict JSON schema requires all object types to declare
-    # additionalProperties=false, which Dict[str, Any] cannot satisfy.
-    # EnrichmentData is a fully-typed Pydantic model with explicit fields.
-    enrichment: EnrichmentData = Field(
-        description=(
-            "Original requirement fields for AnalystAgent traceability: "
-            "statement, context, rationale, acceptance_criteria, priority, "
-            "source_elicitation_id, stakeholder, req_type."
-        )
-    )
-    thought: str = Field(
-        description=(
-            "1–2 sentence rationale: why this role was chosen, how capability maps "
-            "to statement+context, what benefit captures from rationale."
-        )
-    )
+    source_story_id: str = Field(description="Story identifier in the backlog lane.")
+    source_requirement_id: str = Field(description="Original requirement identifier.")
+    type: Literal["functional", "non_functional"] = Field(description="Backlog item type.")
+    domain: str = Field(description="Backlog domain label.")
+    title: str = Field(description="Short backlog card title.")
+    description: str = Field(description="User story sentence.")
+    requirement_trace: RequirementTrace = Field(description="Copied source requirement trace.")
+    is_split_child: bool = Field(default=False, description="Whether this story is a split child.")
+    split: SplitTrace = Field(default_factory=SplitTrace, description="Split metadata.")
+    thought: str = Field(description="Brief mapping note.")
 
 
 class UserStoryList(BaseModel):
-    stories: List[UserStoryItem] = Field(
-        description=(
-            "One user story per confirmed requirement, in the same order as input. "
-            "Requirements with status='excluded' are absent."
-        )
-    )
-    pass_notes: str = Field(
-        description=(
-            "2–3 sentence summary: total stories generated, excluded items skipped, "
-            "any formulation decisions made."
-        )
-    )
+    stories: List[UserStoryItem] = Field(description="Draft user stories.")
+    pass_notes: str = Field(description="Reviewer-facing pass summary.")
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Pass 2 schemas — WSJF Prioritization
-# ─────────────────────────────────────────────────────────────────────────────
 
 class PrioritizedStoryItem(BaseModel):
-    source_req_id:    str
-    business_value:   int = Field(ge=1, le=10)
-    time_criticality: int = Field(ge=1, le=10)
-    risk_reduction:   int = Field(ge=1, le=10)
-    wsjf_score:       float = Field(
-        description="(BV + TC + RR) / StoryPoints — rounded to 2 decimal places."
-    )
-    priority_rank: int = Field(
-        description="Unique rank. 1 = highest priority. Ties broken by BV."
-    )
-    thought: str = Field(
-        description=(
-            "Rationale for BV/TC/RR: which requirement fields drove each score "
-            "and why this story ranks where it does relative to peers in the same domain."
-        )
-    )
+    source_story_id: str = Field(description="Story identifier being scored.")
+    business_value: int = Field(ge=1, le=10, description="Business value score.")
+    time_criticality: int = Field(ge=1, le=10, description="Time criticality score.")
+    risk_reduction: int = Field(ge=1, le=10, description="Risk reduction score.")
+    wsjf_score: float = Field(description="Weighted Shortest Job First score.")
+    priority_rank: int = Field(description="Initial priority rank.")
+    thought: str = Field(description="Brief scoring rationale.")
 
 
 class PrioritizedBacklog(BaseModel):
-    stories: List[PrioritizedStoryItem] = Field(
-        description="All stories ordered by priority_rank ascending (rank 1 first)."
-    )
-    pass_notes: str = Field(
-        description=(
-            "Summary: ranking rationale, high-priority clusters by domain, "
-            "any tied WSJF scores and how ties were broken."
-        )
-    )
+    stories: List[PrioritizedStoryItem] = Field(description="Prioritized stories.")
+    pass_notes: str = Field(description="Reviewer-facing prioritization summary.")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SprintAgent
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Agent
+# ---------------------------------------------------------------------------
 
 class SprintAgent(BaseAgent):
-    """
-    Product Owner agent — two-step pipeline collaborating with AnalystAgent.
-
-    Step 9a — create_user_stories:
-      Pass 1: requirement_list_approved → user_story_draft.
-      Called via process_stories().
-
-    Step 9b — build_product_backlog:
-      Pass 2: WSJF prioritization using analyst_estimation story_points.
-      Pass 3: Dependency-aware rank adjustment + quality gate + assembly.
-      Called via process_backlog().
-
-    Split loop:
-      When analyst_estimation.has_pending_splits=True, SprintAgent creates
-      sub-stories from split_proposals and rebuilds user_story_draft.
-      Called via process_splits().
-    """
-
     def __init__(self, config_path: Optional[str] = None):
         super().__init__(name="sprint_agent")
 
     def _register_tools(self) -> None:
-        # Pipeline is pure extract_structured — no ReAct tools.
-        pass
+        """SprintAgent uses structured extraction only."""
 
-    # =========================================================================
-    # LangGraph node entry points
-    # =========================================================================
     def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        pass
+        return {}
 
     def process_stories(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Step 9a entry point — called by sprint_agent_turn_fn when
-        user_story_draft is absent (initial run or after PO rejection rebuild).
-        """
         artifacts = state.get("artifacts") or {}
-        feedback  = (state.get("product_backlog_feedback") or "").strip()
-
+        feedback = (state.get("product_backlog_feedback") or "").strip()
         if "user_story_draft" in artifacts and not feedback:
-            logger.warning(
-                "[SprintAgent] process_stories() called but user_story_draft exists "
-                "and no feedback pending. Supervisor should not have routed here."
-            )
+            logger.warning("[SprintAgent] user_story_draft already exists.")
             return {}
-
         return self._create_user_stories(state)
 
     def process_splits(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Split loop entry point — called by sprint_agent_turn_fn when
-        analyst_estimation.has_pending_splits=True and split_round < MAX.
-
-        Reads split_proposals from analyst_estimation, creates sub-stories,
-        replaces user_story_draft with the sub-stories only, increments
-        split_round, and clears analyst_estimation so the supervisor routes
-        back to analyst_estimation_turn for re-estimation.
-        """
-        artifacts   = state.get("artifacts") or {}
-        estimation  = artifacts.get("analyst_estimation") or {}
+        artifacts = state.get("artifacts") or {}
+        estimation = artifacts.get("analyst_estimation") or {}
         split_round = state.get("split_round", 0)
 
         if split_round >= _MAX_SPLIT_ROUND:
-            logger.warning(
-                "[SprintAgent] split_round=%d reached max (%d). "
-                "Flagging oversized stories and proceeding to assembly.",
-                split_round, _MAX_SPLIT_ROUND,
-            )
-            # Do not split further — assembly will flag oversized items.
             return {"split_round": split_round}
 
-        stories       = estimation.get("stories") or []
-        new_stories:  List[Dict[str, Any]] = []
+        draft = artifacts.get("user_story_draft") or {}
+        draft_lookup = {self._story_id(s): s for s in (draft.get("stories") or [])}
+
+        new_stories: List[Dict[str, Any]] = []
         replaced_ids: List[str] = []
 
-        for story_est in stories:
+        for story_est in estimation.get("stories") or []:
             if not story_est.get("needs_split"):
                 continue
+
+            parent_id = self._story_id(story_est)
+            parent_story = draft_lookup.get(parent_id, {})
             split_props = story_est.get("split_proposals") or []
-            if not split_props:
-                logger.warning(
-                    "[SprintAgent] Story %s needs_split=True but no split_proposals. Skipping.",
-                    story_est.get("source_req_id", "?"),
-                )
+            if not parent_story or not split_props:
                 continue
 
-            parent_id = story_est.get("source_req_id", "")
             replaced_ids.append(parent_id)
-
-            # Find original story data from user_story_draft to inherit enrichment
-            draft        = artifacts.get("user_story_draft") or {}
-            draft_lookup = {s.get("source_req_id"): s for s in (draft.get("stories") or [])}
-            parent_story = draft_lookup.get(parent_id, {})
+            trace = dict(parent_story.get("requirement_trace") or {})
+            source_requirement_id = (
+                parent_story.get("source_requirement_id")
+                or trace.get("requirement_id")
+                or parent_id
+            )
 
             for idx, proposal in enumerate(split_props):
-                suffix   = chr(ord("a") + idx)   # a, b, c, …
-                sub_id   = f"{parent_id}{suffix}"
-
-                new_stories.append({
-                    "source_req_id": sub_id,
-                    "source_parent_req_id": parent_id,   # traceability to original
-                    "is_split_child": True,
-                    "split_suffix":   suffix,
-                    "source_type":    parent_story.get("source_type", "functional"),
-                    "title":          proposal.get("title", f"{parent_story.get('title', '')} ({suffix})"),
-                    "description":    (
+                suffix = chr(ord("a") + idx)
+                child_id = f"{parent_id}{suffix}"
+                reasoning = proposal.get("reasoning", "")
+                child_story = {
+                    "source_story_id": child_id,
+                    "source_requirement_id": source_requirement_id,
+                    "type": parent_story.get("type", "functional"),
+                    "domain": parent_story.get("domain", ""),
+                    "title": proposal.get("title") or f"{parent_story.get('title', '')} {suffix}",
+                    "description": (
                         f"As a {self._extract_role(parent_story.get('description', ''))}, "
                         f"I can {proposal.get('capability', '')}, "
                         f"so that {self._extract_benefit(parent_story.get('description', ''))}."
                     ),
-                    "domain":      parent_story.get("domain", ""),
-                    # Carry enrichment forward — already a dict at this point
-                    # (serialised from EnrichmentData when stored in artifact)
-                    "enrichment":  parent_story.get("enrichment", {}),
-                    "thought":     f"Split child {suffix} of {parent_id}: {proposal.get('reasoning', '')}",
-                })
+                    "requirement_trace": trace,
+                    "is_split_child": True,
+                    "split": {
+                        "parent_story_id": parent_id,
+                        "suffix": suffix,
+                        "reasoning": reasoning,
+                    },
+                    "thought": f"Split child of {parent_id}: {reasoning}",
+                }
+                new_stories.append(child_story)
 
         if not new_stories:
-            logger.info(
-                "[SprintAgent] No split sub-stories created (needs_split=True but "
-                "split_proposals empty). Forcing split_round to MAX to proceed to assembly."
-            )
-            # Force split_round to MAX so sprint_agent_turn_fn routes to
-            # process_backlog() instead of re-entering process_splits().
             return {"split_round": _MAX_SPLIT_ROUND}
 
-        # Rebuild user_story_draft: keep non-split stories, replace split ones with children
         existing_stories = [
-            s for s in ((artifacts.get("user_story_draft") or {}).get("stories") or [])
-            if s.get("source_req_id") not in replaced_ids
+            s for s in (draft.get("stories") or [])
+            if self._story_id(s) not in set(replaced_ids)
         ]
-
         updated_draft = {
-            **(artifacts.get("user_story_draft") or {}),
-            "stories":    existing_stories + new_stories,
+            **draft,
+            "stories": existing_stories + new_stories,
+            "total_stories": len(existing_stories) + len(new_stories),
             "split_round": split_round + 1,
         }
 
-        # Clear analyst_estimation so supervisor routes back to analyst_estimation_turn
         updated_artifacts = {**artifacts, "user_story_draft": updated_draft}
         updated_artifacts.pop("analyst_estimation", None)
 
         logger.info(
-            "[SprintAgent] Split round %d → %d: created %d sub-stories from %d parent(s).",
-            split_round, split_round + 1, len(new_stories), len(replaced_ids),
+            "[SprintAgent] Split round %d -> %d created %d child stories.",
+            split_round,
+            split_round + 1,
+            len(new_stories),
         )
-
-        return {
-            "artifacts":   updated_artifacts,
-            "split_round": split_round + 1,
-        }
+        return {"artifacts": updated_artifacts, "split_round": split_round + 1}
 
     def process_backlog(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Step 9b entry point — called by sprint_agent_turn_fn when both
-        user_story_draft and analyst_estimation are present and
-        has_pending_splits is False (or split_round has reached the limit).
-        """
         artifacts = state.get("artifacts") or {}
-        feedback  = (state.get("product_backlog_feedback") or "").strip()
-
+        feedback = (state.get("product_backlog_feedback") or "").strip()
         if "product_backlog" in artifacts and not feedback:
-            logger.warning(
-                "[SprintAgent] process_backlog() called but product_backlog exists "
-                "and no feedback pending. Supervisor should not have routed here."
-            )
+            logger.warning("[SprintAgent] product_backlog already exists.")
             return {}
-
         return self._build_product_backlog(state)
 
-    # =========================================================================
-    # Step 9a — User Story Creation
-    # =========================================================================
+    # ------------------------------------------------------------------
+    # Step 9a
+    # ------------------------------------------------------------------
 
     def _create_user_stories(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        artifacts    = state.get("artifacts") or {}
-        project_desc = state.get("project_description", "")
-        feedback     = (state.get("product_backlog_feedback") or "").strip()
+        artifacts = dict(state.get("artifacts") or {})
+        feedback = (state.get("product_backlog_feedback") or "").strip()
+        req_list = artifacts.get("requirement_list_approved") or artifacts.get("requirement_list") or {}
 
-        req_list = (
-            artifacts.get("requirement_list_approved")
-            or artifacts.get("requirement_list")
-            or {}
-        )
-        all_requirements    = self._extract_all_requirements(req_list)
-        active_requirements = [
-            r for r in all_requirements
+        all_requirements = self._extract_all_requirements(req_list)
+        traces = [
+            self._normalise_requirement_trace(r)
+            for r in all_requirements
             if r.get("status", "confirmed") != "excluded"
-            and r.get("req_type", r.get("type", "")) != "out_of_scope"
+            and self._normalise_requirement_type(
+                r.get("type") or r.get("req_type") or ""
+            )
+            != "out_of_scope"
         ]
+        if not traces:
+            return {"errors": ["SprintAgent: no active approved requirements found."]}
 
-        if not active_requirements:
-            logger.error("[SprintAgent] No active requirements found.")
-            return {"errors": ["SprintAgent: no confirmed/inferred requirements found."]}
-
-        logger.info(
-            "[SprintAgent] Creating user stories — %d active requirements "
-            "(%d total, %d excluded/OOS).",
-            len(active_requirements),
-            len(all_requirements),
-            len(all_requirements) - len(active_requirements),
-        )
+        product_vision = self._compact_product_vision(state)
 
         try:
-            story_list = self._pass1_create_stories(
-                active_requirements, project_desc, feedback
-            )
-            logger.info(
-                "[SprintAgent] Pass 1 complete — %d stories created.", len(story_list.stories)
-            )
-
-            # Serialise stories: convert EnrichmentData to dict for artifact storage
-            serialised_stories = []
-            for s in story_list.stories:
-                story_dict = s.model_dump()
-                # enrichment is already serialised to dict by model_dump()
-                serialised_stories.append(story_dict)
-
-            artifacts["user_story_draft"] = {
-                "id":          str(uuid.uuid4()),
-                "session_id":  state.get("session_id", ""),
-                "created_at":  datetime.now().isoformat(),
-                "stories":     serialised_stories,
-                "total_stories": len(story_list.stories),
-                "pass_notes":  story_list.pass_notes,
-                **({"rebuild_feedback": feedback} if feedback else {}),
-            }
-
-            # Reset split_round when starting a fresh story creation cycle.
-            return {
-                "artifacts":   artifacts,
-                "split_round": 0,
-            }
-
+            story_list = self._pass1_create_stories(traces, product_vision, feedback)
         except Exception as exc:
             logger.error("[SprintAgent] Story creation failed: %s", exc, exc_info=True)
             return {"errors": [f"SprintAgent story creation error: {exc}"]}
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Pass 1 — Story Generation (LLM call)
-    # ─────────────────────────────────────────────────────────────────────────
+        trace_by_id = {t["requirement_id"]: t for t in traces}
+        serialised_stories: List[Dict[str, Any]] = []
+        for story in story_list.stories:
+            story_dict = story.model_dump()
+            source_requirement_id = (
+                story_dict.get("source_requirement_id")
+                or story_dict.get("source_story_id")
+                or story_dict.get("requirement_trace", {}).get("requirement_id")
+            )
+            trace = trace_by_id.get(source_requirement_id) or story_dict.get("requirement_trace") or {}
+            story_dict["source_requirement_id"] = trace.get("requirement_id", source_requirement_id)
+            story_dict["source_story_id"] = story_dict.get("source_story_id") or story_dict["source_requirement_id"]
+            story_dict["type"] = trace.get("requirement_type", story_dict.get("type", "functional"))
+            story_dict["domain"] = story_dict.get("domain") or self._domain_from_trace(trace)
+            story_dict["requirement_trace"] = trace
+            story_dict["is_split_child"] = False
+            story_dict["split"] = {"parent_story_id": None, "suffix": None, "reasoning": None}
+            serialised_stories.append(story_dict)
+
+        artifacts["user_story_draft"] = {
+            "id": str(uuid.uuid4()),
+            "session_id": state.get("session_id", ""),
+            "source_artifacts": ["requirement_list_approved", "reviewed_product_vision"],
+            "created_at": datetime.now().isoformat(),
+            "stories": serialised_stories,
+            "total_stories": len(serialised_stories),
+            "pass_notes": story_list.pass_notes,
+            **({"rebuild_feedback": feedback} if feedback else {}),
+        }
+        return {"artifacts": artifacts, "split_round": 0}
 
     def _pass1_create_stories(
         self,
-        requirements: List[Dict],
-        project_desc: str,
-        feedback:     str = "",
+        requirement_traces: List[Dict[str, Any]],
+        product_vision: Dict[str, Any],
+        feedback: str = "",
     ) -> UserStoryList:
-
         system_prompt = (
             self.profile.prompt
             + "\n\n"
             + _PASS1_ADDENDUM
             + self._feedback_block(feedback, "user story creation")
         )
-
         user_prompt = (
-            f"PROJECT CONTEXT:\n{project_desc or '(not provided)'}\n\n"
-            f"REQUIREMENTS TO CONVERT ({len(requirements)} items):\n\n"
-            f"{self._format_requirements_block(requirements)}\n\n"
-            "Generate exactly ONE User Story for EVERY requirement listed above.\n"
-            "Preserve input order. Include the enrichment sub-object for each story.\n"
-            "Requirements with status='excluded' have already been removed.\n\n"
-            "ENRICHMENT FIELD INSTRUCTIONS:\n"
-            "  The enrichment field is a structured object with these exact fields:\n"
-            "    statement, context, rationale, acceptance_criteria (list of strings),\n"
-            "    priority, source_elicitation_id, stakeholder, req_type.\n"
-            "  Copy each field verbatim from the source requirement.\n"
-            "  If context is null/missing, set it to null.\n"
-            "  If acceptance_criteria is empty, set it to []."
+            "PRODUCT VISION CONTEXT:\n"
+            f"{json.dumps(product_vision, indent=2, ensure_ascii=False)}\n\n"
+            f"REQUIREMENT TRACES ({len(requirement_traces)} items):\n"
+            f"{self._format_requirement_traces(requirement_traces)}\n\n"
+            "Return one draft user story per requirement trace."
         )
-
         return self.extract_structured(
             schema=UserStoryList,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            include_memory=False,
         )
 
-    # =========================================================================
-    # Step 9b — WSJF Prioritization + Assembly
-    # =========================================================================
+    # ------------------------------------------------------------------
+    # Step 9b
+    # ------------------------------------------------------------------
 
     def _build_product_backlog(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        artifacts    = state.get("artifacts") or {}
-        project_desc = state.get("project_description", "")
-        feedback     = (state.get("product_backlog_feedback") or "").strip()
-        split_round  = state.get("split_round", 0)
+        artifacts = state.get("artifacts") or {}
+        feedback = (state.get("product_backlog_feedback") or "").strip()
+        split_round = state.get("split_round", 0)
 
-        draft      = artifacts.get("user_story_draft") or {}
+        draft = artifacts.get("user_story_draft") or {}
         estimation = artifacts.get("analyst_estimation") or {}
-
-        stories    = draft.get("stories") or []
+        stories = draft.get("stories") or []
         est_stories = estimation.get("stories") or []
-
         if not stories:
-            logger.error("[SprintAgent] user_story_draft has no stories for assembly.")
             return {"errors": ["SprintAgent: user_story_draft is empty."]}
-
         if not est_stories:
-            logger.error("[SprintAgent] analyst_estimation has no stories for assembly.")
             return {"errors": ["SprintAgent: analyst_estimation is empty."]}
 
-        logger.info(
-            "[SprintAgent] Building product backlog — %d stories, split_round=%d.",
-            len(stories), split_round,
-        )
+        product_vision = self._compact_product_vision(state)
 
         try:
-            # ── Pass 2: WSJF Prioritization ─────────────────────────────────
-            prioritized = self._pass2_wsjf(stories, est_stories, project_desc, feedback)
-            logger.info("[SprintAgent] Pass 2 complete — %d stories ranked.", len(prioritized.stories))
-
-            # ── Pass 3: Dependency-aware adjustment + quality gate + assembly ─
+            prioritized = self._pass2_wsjf(stories, est_stories, product_vision, feedback)
             return self._pass3_assembly(
-                prioritized, stories, est_stories, state, feedback, split_round
+                prioritized=prioritized,
+                stories=stories,
+                est_stories=est_stories,
+                state=state,
+                feedback=feedback,
+                split_round=split_round,
             )
-
         except Exception as exc:
             logger.error("[SprintAgent] Backlog assembly failed: %s", exc, exc_info=True)
             return {"errors": [f"SprintAgent assembly error: {exc}"]}
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Pass 2 — WSJF Prioritization (LLM call)
-    # ─────────────────────────────────────────────────────────────────────────
-
     def _pass2_wsjf(
         self,
-        stories:     List[Dict],
-        est_stories: List[Dict],
-        project_desc: str,
-        feedback:    str = "",
+        stories: List[Dict[str, Any]],
+        est_stories: List[Dict[str, Any]],
+        product_vision: Dict[str, Any],
+        feedback: str = "",
     ) -> PrioritizedBacklog:
-
         system_prompt = (
             self.profile.prompt
             + "\n\n"
             + _PASS2_ADDENDUM
-            + self._feedback_block(feedback, "WSJF prioritization")
+            + self._feedback_block(feedback, "WSJF prioritisation")
         )
-
-        # Build estimation lookup by source_req_id
-        est_lookup: Dict[str, Dict] = {
-            s.get("source_req_id", ""): s for s in est_stories
-        }
-
-        stories_block  = self._format_stories_with_estimation(stories, est_lookup)
-        priority_block = self._format_priority_signals(stories, est_lookup)
-
+        est_lookup = {self._story_id(s): s for s in est_stories}
         user_prompt = (
-            f"PROJECT CONTEXT:\n{project_desc or '(not provided)'}\n\n"
-            f"STORIES WITH ANALYST ESTIMATION ({len(stories)} items):\n\n"
-            f"{stories_block}\n\n"
-            f"PRIORITY SIGNALS (from requirement fields):\n{priority_block}\n\n"
-            "Assign WSJF scores and unique ranks for ALL stories.\n"
-            "Use story_points from analyst_estimation exactly — do NOT re-estimate.\n"
-            "Output stories ordered by priority_rank ascending (rank 1 first)."
+            "PRODUCT VISION CONTEXT:\n"
+            f"{json.dumps(product_vision, indent=2, ensure_ascii=False)}\n\n"
+            f"STORIES WITH ANALYST ESTIMATION ({len(stories)} items):\n"
+            f"{self._format_stories_with_estimation(stories, est_lookup)}\n\n"
+            "Assign scores and unique initial priority ranks for every story."
         )
-
         return self.extract_structured(
             schema=PrioritizedBacklog,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            include_memory=False,
         )
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Pass 3 — Dependency-Aware Adjustment + Quality Gate + Assembly
-    # (deterministic — no LLM call)
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _pass3_assembly(
         self,
-        prioritized:  PrioritizedBacklog,
-        stories:      List[Dict],
-        est_stories:  List[Dict],
-        state:        Dict[str, Any],
-        feedback:     str = "",
-        split_round:  int = 0,
+        prioritized: PrioritizedBacklog,
+        stories: List[Dict[str, Any]],
+        est_stories: List[Dict[str, Any]],
+        state: Dict[str, Any],
+        feedback: str = "",
+        split_round: int = 0,
     ) -> Dict[str, Any]:
-        """
-        Deterministic assembly pass — no LLM call.
+        story_lookup = {self._story_id(s): s for s in stories}
+        est_lookup = {self._story_id(s): s for s in est_stories}
+        wsjf_lookup = {p.source_story_id: p for p in prioritized.stories}
 
-        Steps:
-          1. Build lookups (story data, estimation, WSJF scores).
-          2. Dependency-aware rank adjustment: if Story A is blocked_by Story B
-             and rank(A) < rank(B), promote Story B above Story A.
-          3. Assign sequential PBI IDs. Split children inherit parent seq + suffix.
-          4. Snap non-Fibonacci story_points.
-          5. Recompute WSJF from raw scores.
-          6. Validate user story format.
-          7. Build consolidated PBI schema (no enrichment block, no top-level INVEST booleans).
-          8. Write product_backlog artifact.
-        """
-        # ── 1. Build lookups ──────────────────────────────────────────────
-        story_lookup: Dict[str, Dict] = {
-            s.get("source_req_id", ""): s for s in stories
+        adjusted_ranks = {
+            p.source_story_id: float(p.priority_rank)
+            for p in prioritized.stories
         }
-        est_lookup: Dict[str, Dict] = {
-            s.get("source_req_id", ""): s for s in est_stories
-        }
-        wsjf_lookup: Dict[str, PrioritizedStoryItem] = {
-            p.source_req_id: p for p in prioritized.stories
-        }
-
-        # Ordered by LLM-assigned rank
-        ordered = sorted(prioritized.stories, key=lambda s: s.priority_rank)
-
-        # ── 2. Dependency-aware rank adjustment ───────────────────────────
-        # Build req_id → pbi index map (pre-adjustment)
-        rank_map: Dict[str, int] = {p.source_req_id: p.priority_rank for p in ordered}
-
-        # Build dependency map from analyst_estimation
-        dep_map: Dict[str, List[str]] = {}   # req_id → list of req_ids it is blocked_by
         for est in est_stories:
-            rid = est.get("source_req_id", "")
-            deps = est.get("dependencies", {})
-            blocked_by = deps.get("blocked_by") or []
-            if blocked_by:
-                dep_map[rid] = blocked_by
-
-        # Promote blockers: if A is blocked_by B and rank(A) < rank(B),
-        # swap B's rank to rank(A) - 0.5 (resolved to int after sort).
-        adjusted_ranks: Dict[str, float] = {p.source_req_id: float(p.priority_rank) for p in ordered}
-
-        for req_id, blockers in dep_map.items():
-            for blocker_id in blockers:
-                if blocker_id not in adjusted_ranks:
+            story_id = self._story_id(est)
+            for blocker_id in (est.get("dependencies") or {}).get("blocked_by") or []:
+                if story_id not in adjusted_ranks or blocker_id not in adjusted_ranks:
                     continue
-                story_rank   = adjusted_ranks.get(req_id, 9999.0)
-                blocker_rank = adjusted_ranks.get(blocker_id, 9999.0)
-                if story_rank < blocker_rank:
-                    # Blocker must come before the story — promote it
-                    adjusted_ranks[blocker_id] = story_rank - 0.5
-                    logger.info(
-                        "[SprintAgent] Dependency-aware promotion: '%s' (was rank %.1f) "
-                        "promoted before '%s' (rank %.1f).",
-                        blocker_id, blocker_rank, req_id, story_rank,
-                    )
+                if adjusted_ranks[story_id] < adjusted_ranks[blocker_id]:
+                    adjusted_ranks[blocker_id] = adjusted_ranks[story_id] - 0.5
 
-        # Re-sort with adjusted ranks and re-assign integer ranks
-        ordered_ids   = sorted(adjusted_ranks.keys(), key=lambda k: adjusted_ranks[k])
-        rank_reassign: Dict[str, int] = {rid: i + 1 for i, rid in enumerate(ordered_ids)}
+        ordered_ids = sorted(adjusted_ranks.keys(), key=lambda k: adjusted_ranks[k])
+        rank_reassign = {story_id: i + 1 for i, story_id in enumerate(ordered_ids)}
 
-        # ── 3–7. Build PBI items ──────────────────────────────────────────
-        items:           List[Dict[str, Any]] = []
-        format_warnings: List[str]            = []
-        fib_warnings:    List[str]            = []
-        invest_warnings: List[str]            = []
-        oversized:       List[str]            = []
-        seen_req_ids:    Dict[str, int]        = {}
-        seq              = 1
-        # Track parent seq for split children: parent_req_id → seq_number
-        parent_seq_map:  Dict[str, int]        = {}
+        items: List[Dict[str, Any]] = []
+        format_warnings: List[str] = []
+        fib_warnings: List[str] = []
+        invest_warnings: List[str] = []
+        oversized: List[str] = []
+        seq = 1
+        parent_seq: Dict[str, int] = {}
 
-        for req_id in ordered_ids:
-            story = story_lookup.get(req_id)
-            est   = est_lookup.get(req_id)
-            wsjf  = wsjf_lookup.get(req_id)
-
-            if not story or not wsjf:
-                logger.warning("[SprintAgent] Missing story or WSJF data for '%s'. Skipping.", req_id)
+        for story_id in ordered_ids:
+            story = story_lookup.get(story_id)
+            est = est_lookup.get(story_id)
+            wsjf = wsjf_lookup.get(story_id)
+            if not story or not est or not wsjf:
                 continue
 
-            # ── Duplicate detection ────────────────────────────────────────
-            if req_id in seen_req_ids:
-                format_warnings.append(
-                    f"Duplicate source_req_id '{req_id}' (first at PBI-{seen_req_ids[req_id]:03d})."
-                )
-            seen_req_ids[req_id] = seq
-
-            # ── Assign PBI ID ──────────────────────────────────────────────
-            is_split_child = story.get("is_split_child", False)
-            split_suffix   = story.get("split_suffix", "")
-            parent_req_id  = story.get("source_parent_req_id", "")
-
-            if is_split_child and parent_req_id in parent_seq_map:
-                pbi_id = f"PBI-{parent_seq_map[parent_req_id]:03d}{split_suffix}"
+            split_meta = story.get("split") or {}
+            is_split_child = bool(story.get("is_split_child"))
+            parent_story_id = split_meta.get("parent_story_id") or story.get("source_parent_story_id")
+            suffix = split_meta.get("suffix") or story.get("split_suffix") or ""
+            if is_split_child:
+                if parent_story_id not in parent_seq:
+                    parent_seq[parent_story_id or story_id] = seq
+                    seq += 1
+                pbi_id = f"PBI-{parent_seq[parent_story_id or story_id]:03d}{suffix}"
             else:
                 pbi_id = f"PBI-{seq:03d}"
-                if not is_split_child:
-                    parent_seq_map[req_id] = seq
+                parent_seq[story_id] = seq
                 seq += 1
 
-            # ── Fibonacci snap ─────────────────────────────────────────────
-            sp = (est or {}).get("estimation", {}).get("story_points", 3) if est else 3
-            if isinstance(sp, dict):
-                sp = sp.get("story_points", 3)
+            est_data = est.get("estimation") or {}
+            sp = est_data.get("story_points", 3)
             if sp not in _FIBONACCI:
                 snapped = min(_FIBONACCI, key=lambda f: abs(f - sp))
-                fib_warnings.append(f"{pbi_id} [{req_id}]: story_points {sp} → snapped to {snapped}.")
+                fib_warnings.append(f"{pbi_id} [{story_id}]: story_points {sp} -> {snapped}.")
                 sp = snapped
 
-            # ── WSJF recompute (guard against LLM rounding drift) ─────────
-            bv   = wsjf.business_value
-            tc   = wsjf.time_criticality
-            rr   = wsjf.risk_reduction
+            bv = wsjf.business_value
+            tc = wsjf.time_criticality
+            rr = wsjf.risk_reduction
             wsjf_score = round((bv + tc + rr) / sp, 2)
 
-            # ── INVEST from analyst_estimation ─────────────────────────────
-            invest_data  = (est or {}).get("invest", {}) if est else {}
-            invest_flags = invest_data.get("invest_flags", [])
-            invest_pass  = invest_data.get("invest_pass", True)
+            invest = est.get("invest") or {}
+            invest_flags = invest.get("invest_flags") or []
+            invest_pass = bool(invest.get("invest_pass", not invest_flags))
             if invest_flags:
-                invest_warnings.append(f"{pbi_id} [{req_id}]: invest_flags={invest_flags}.")
+                invest_warnings.append(f"{pbi_id} [{story_id}]: invest_flags={invest_flags}.")
 
-            # ── Oversized flag (after max split rounds) ───────────────────
-            est_data = (est or {}).get("estimation", {}) if est else {}
-            is_oversized = bool(est_data.get("needs_split") if est else False) and split_round >= _MAX_SPLIT_ROUND
-
+            is_oversized = bool(est.get("needs_split")) and split_round >= _MAX_SPLIT_ROUND
             if is_oversized:
-                oversized.append(req_id)
+                oversized.append(story_id)
 
-            # ── Status ────────────────────────────────────────────────────
-            if is_oversized:
-                status = "oversized"
-            elif len(invest_flags) >= 3:
-                status = "invest_failed"
-            elif not invest_pass:
-                status = "needs_refinement"
-            else:
-                status = "ready"
-
-            # ── User story format check ────────────────────────────────────
-            desc     = (story.get("description") or "").strip()
-            desc_low = desc.lower()
-            format_ok = (
-                (desc_low.startswith("as a ") or desc_low.startswith("as an "))
-                and ", i can " in desc_low
-                and ", so that " in desc_low
-            )
-            if not format_ok:
-                format_warnings.append(
-                    f"{pbi_id} [{req_id}]: description does not match format — got: '{desc[:80]}'"
-                )
+            status = self._planning_status(is_oversized, invest_pass, invest_flags)
+            desc = (story.get("description") or "").strip()
+            if not self._valid_story_format(desc):
+                format_warnings.append(f"{pbi_id} [{story_id}]: invalid user story format.")
                 if status == "ready":
                     status = "needs_refinement"
 
-            # ── Resolve PBI-level dependency IDs ─────────────────────────
-            # Analyst uses source_req_ids; we store PBI IDs in the artifact.
-            # Full resolution happens after all items are built (post-loop).
-            raw_blocked_by = (est or {}).get("dependencies", {}).get("blocked_by", []) if est else []
-            raw_blocks     = (est or {}).get("dependencies", {}).get("blocks", [])     if est else []
-
-            # ── Tags (derived from type and domain) ───────────────────────
-            tags: List[str] = [story.get("domain", "").lower().replace(" ", "_")]
-            if story.get("source_type") == "non_functional":
-                tags.append("non_functional")
-            elif story.get("source_type") == "constraint":
-                tags.append("constraint")
+            trace = story.get("requirement_trace") or {}
+            source_requirement_id = (
+                story.get("source_requirement_id")
+                or trace.get("requirement_id")
+                or story_id
+            )
+            tags = self._tags_for_story(story)
 
             items.append({
-                "id":             pbi_id,
-                "source_req_id":  req_id,
-                "type":           story.get("source_type", "functional"),
-                "domain":         story.get("domain", ""),
-                "title":          story.get("title", ""),
-                "description":    desc,
-
+                "id": pbi_id,
+                "source_story_id": story_id,
+                "source_requirement_id": source_requirement_id,
+                "type": story.get("type", trace.get("requirement_type", "functional")),
+                "domain": story.get("domain", ""),
+                "title": story.get("title", ""),
+                "description": desc,
+                "requirement_trace": trace,
+                "split": split_meta,
                 "estimation": {
                     "story_points": sp,
-                    "complexity":   est_data.get("complexity", 2) if est else 2,
-                    "effort":       est_data.get("effort", 2)      if est else 2,
-                    "uncertainty":  est_data.get("uncertainty", 2) if est else 2,
+                    "complexity": est_data.get("complexity", 2),
+                    "effort": est_data.get("effort", 2),
+                    "uncertainty": est_data.get("uncertainty", 2),
                 },
-
                 "prioritization": {
-                    "priority_rank":    rank_reassign.get(req_id, seq),
-                    "wsjf_score":       wsjf_score,
-                    "business_value":   bv,
+                    "priority_rank": rank_reassign.get(story_id, len(items) + 1),
+                    "wsjf_score": wsjf_score,
+                    "business_value": bv,
                     "time_criticality": tc,
-                    "risk_reduction":   rr,
+                    "risk_reduction": rr,
                 },
-
-                # Stored as source_req_id references; resolved to PBI IDs below
-                "_raw_blocked_by": raw_blocked_by,
-                "_raw_blocks":     raw_blocks,
-
+                "_raw_blocked_by": (est.get("dependencies") or {}).get("blocked_by") or [],
+                "_raw_blocks": (est.get("dependencies") or {}).get("blocks") or [],
                 "planning": {
-                    "status":        status,
+                    "status": status,
                     "target_sprint": None,
-                    "tags":          tags,
+                    "tags": tags,
                 },
-
                 "quality": {
-                    "invest_pass":         invest_pass,
-                    "invest_flags":        invest_flags,
-                    "acceptance_criteria": [],   # populated by AnalystAgent in Phase 2
+                    "invest_pass": invest_pass,
+                    "invest_flags": invest_flags,
+                    "acceptance_criteria": [],
+                },
+                "analysis": {
+                    "is_feasible": (est.get("feasibility") or {}).get("is_feasible", True),
+                    "feasibility_notes": (est.get("feasibility") or {}).get("feasibility_notes", ""),
+                    "invest_notes": invest.get("invest_notes", ""),
+                    "risks": est.get("risks") or [],
+                    "estimation_reasoning": est_data.get("reasoning", ""),
+                    "split_warning": est_data.get("split_warning", ""),
                 },
             })
 
-        # ── Resolve dependency source_req_id → PBI IDs ────────────────────
-        # Build reverse map: source_req_id → pbi_id
-        req_to_pbi: Dict[str, str] = {item["source_req_id"]: item["id"] for item in items}
-
+        story_to_pbi = {item["source_story_id"]: item["id"] for item in items}
         for item in items:
             item["dependencies"] = {
                 "blocked_by": [
-                    req_to_pbi.get(rid, rid) for rid in item.pop("_raw_blocked_by", [])
+                    story_to_pbi.get(story_id, story_id)
+                    for story_id in item.pop("_raw_blocked_by", [])
                 ],
                 "blocks": [
-                    req_to_pbi.get(rid, rid) for rid in item.pop("_raw_blocks", [])
+                    story_to_pbi.get(story_id, story_id)
+                    for story_id in item.pop("_raw_blocks", [])
                 ],
             }
 
-        # ── Build artifact ─────────────────────────────────────────────────
-        total_pts    = sum(i["estimation"]["story_points"] for i in items)
-        ready_count  = sum(1 for i in items if i["planning"]["status"] == "ready")
+        total_points = sum(i["estimation"]["story_points"] for i in items)
+        ready_count = sum(1 for i in items if i["planning"]["status"] == "ready")
         refine_count = sum(1 for i in items if i["planning"]["status"] == "needs_refinement")
         failed_count = sum(1 for i in items if i["planning"]["status"] == "invest_failed")
-        over_count   = sum(1 for i in items if i["planning"]["status"] == "oversized")
+        over_count = sum(1 for i in items if i["planning"]["status"] == "oversized")
 
-        session_id = state.get("session_id", str(uuid.uuid4()))
-        artifacts  = dict(state.get("artifacts") or {})
-
-        product_backlog: Dict[str, Any] = {
-            "id":                     str(uuid.uuid4()),
-            "session_id":             session_id,
-            "source_artifact":        "requirement_list_approved",
-            "status":                 "draft",
-            "total_items":            len(items),
-            "total_story_points":     total_pts,
-            "ready_count":            ready_count,
+        artifacts = dict(state.get("artifacts") or {})
+        product_backlog = {
+            "id": str(uuid.uuid4()),
+            "session_id": state.get("session_id", ""),
+            "source_artifacts": [
+                "requirement_list_approved",
+                "reviewed_product_vision",
+                "user_story_draft",
+                "analyst_estimation",
+            ],
+            "status": "draft",
+            "total_items": len(items),
+            "total_story_points": total_points,
+            "ready_count": ready_count,
             "needs_refinement_count": refine_count,
-            "invest_failed_count":    failed_count,
-            "oversized_count":        over_count,
-            "split_round":            split_round,
-            "items":                  items,
+            "invest_failed_count": failed_count,
+            "oversized_count": over_count,
+            "split_round": split_round,
+            "items": items,
             "methodology": {
-                "story_format":     "As a <role>, I can <capability>, so that <benefit>.",
-                "estimation":       "Fibonacci via AnalystAgent (Complexity + Effort + Uncertainty)",
-                "prioritization":   "WSJF = (BV + TC + RR) / StoryPoints with dependency-aware ranking",
-                "quality_gate":     "INVEST flags from AnalystAgent; format validation by SprintAgent",
+                "story_format": "As a <role>, I can <capability>, so that <benefit>.",
+                "estimation": "Fibonacci story points from AnalystAgent.",
+                "prioritization": "WSJF scores with dependency-aware ordering.",
+                "quality_gate": "INVEST status from AnalystAgent.",
             },
-            "pass_notes":      prioritized.pass_notes,
+            "pass_notes": prioritized.pass_notes,
             "quality_warnings": {
-                "invest":    invest_warnings,
-                "format":    format_warnings,
+                "invest": invest_warnings,
+                "format": format_warnings,
                 "fibonacci": fib_warnings,
                 "oversized": [
-                    f"{rid}: exceeded 8 points after {_MAX_SPLIT_ROUND} split rounds."
-                    for rid in oversized
+                    f"{story_id}: exceeded split threshold after {_MAX_SPLIT_ROUND} rounds."
+                    for story_id in oversized
                 ],
             },
             "created_at": datetime.now().isoformat(),
             **({"rebuild_feedback": feedback} if feedback else {}),
         }
-
         artifacts["product_backlog"] = product_backlog
-
-        logger.info(
-            "[SprintAgent] Assembly complete — %d items | %d pts | "
-            "ready=%d refinement=%d invest_failed=%d oversized=%d",
-            len(items), total_pts, ready_count, refine_count, failed_count, over_count,
-        )
-        if invest_warnings:
-            logger.warning("[SprintAgent] INVEST warnings (%d).", len(invest_warnings))
-        if format_warnings:
-            logger.warning("[SprintAgent] Format warnings (%d).", len(format_warnings))
-        if fib_warnings:
-            logger.warning("[SprintAgent] Fibonacci snaps (%d).", len(fib_warnings))
-        if oversized:
-            logger.warning("[SprintAgent] Oversized stories (%d): %s", len(oversized), oversized)
-
         return {"artifacts": artifacts}
 
-    # =========================================================================
+    # ------------------------------------------------------------------
     # Helpers
-    # =========================================================================
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _story_id(item: Dict[str, Any]) -> str:
+        return (
+            item.get("source_story_id")
+            or item.get("source_req_id")
+            or item.get("id")
+            or ""
+        )
 
     @staticmethod
     def _extract_role(description: str) -> str:
-        """Extract the role from 'As a <role>, I can ...' format."""
-        desc_lower = description.lower()
-        if desc_lower.startswith("as a "):
-            part = description[5:]
-        elif desc_lower.startswith("as an "):
-            part = description[6:]
-        else:
-            return "User"
-        return part.split(",")[0].strip()
+        lower = description.lower()
+        if lower.startswith("as an "):
+            return description[6:].split(",", 1)[0].strip()
+        if lower.startswith("as a "):
+            return description[5:].split(",", 1)[0].strip()
+        return "User"
 
     @staticmethod
     def _extract_benefit(description: str) -> str:
-        """Extract the benefit clause from '..., so that <benefit>' format."""
-        lower = description.lower()
-        idx   = lower.find(", so that ")
+        marker = ", so that "
+        idx = description.lower().find(marker)
         if idx == -1:
             return "achieve the intended outcome"
-        return description[idx + len(", so that "):].rstrip(".")
-
-    @staticmethod
-    def _format_stories_with_estimation(
-        stories:    List[Dict],
-        est_lookup: Dict[str, Dict],
-    ) -> str:
-        """Render stories alongside estimation data for Pass 2 WSJF prompt."""
-        lines: List[str] = []
-        for i, story in enumerate(stories, start=1):
-            req_id = story.get("source_req_id", "?")
-            est    = est_lookup.get(req_id, {})
-            est_d  = est.get("estimation", {})
-            invest = est.get("invest", {})
-
-            block = (
-                f"[{i}] source_req_id={req_id}  "
-                f"pts={est_d.get('story_points', '?')}  "
-                f"type={story.get('source_type', '?')}  "
-                f"domain={story.get('domain', '?')}\n"
-                f"       title:        {story.get('title', '')}\n"
-                f"       description:  {story.get('description', '')}\n"
-                f"       invest_flags: {invest.get('invest_flags') or 'none'}\n"
-                f"       blocked_by:   {est.get('dependencies', {}).get('blocked_by') or 'none'}\n"
-            )
-            lines.append(block)
-        return "\n".join(lines)
-
-    @staticmethod
-    def _format_priority_signals(
-        stories:    List[Dict],
-        est_lookup: Dict[str, Dict],
-    ) -> str:
-        """Render priority signals from enrichment fields for Pass 2 WSJF prompt."""
-        lines: List[str] = []
-        for story in stories:
-            req_id  = story.get("source_req_id", "?")
-            # enrichment may be a dict (serialised from artifact) or EnrichmentData
-            raw_enr = story.get("enrichment") or {}
-            enr     = raw_enr if isinstance(raw_enr, dict) else raw_enr.model_dump()
-            est     = est_lookup.get(req_id, {})
-            rat     = enr.get("rationale", "")
-            so_that = ""
-            if "so that" in rat.lower():
-                so_that = rat[rat.lower().index("so that"):][:120]
-            context     = (enr.get("context") or "").lower()
-            ctx_breadth = (
-                "broad (cross-cutting)"
-                if "across all system interactions" in context or not context
-                else "narrow (scoped)"
-            )
-            lines.append(
-                f"  {req_id}: "
-                f"priority={enr.get('priority', '?')}  "
-                f"stakeholder={enr.get('stakeholder', '?')}  "
-                f"elicit_id={enr.get('source_elicitation_id', '?')}  "
-                f"status={enr.get('status', 'confirmed')}  "
-                f"context_breadth={ctx_breadth}  "
-                + (f'so_that="{so_that}"' if so_that else "so_that=(absent)")
-            )
-        return "\n".join(lines)
+        return description[idx + len(marker):].rstrip(".")
 
     @staticmethod
     def _extract_all_requirements(req_list: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Flatten requirements from the requirement_list artifact.
-        Handles both schema variants (req_id/req_type and id/type).
-        Returns ALL items — status filtering is done by the caller.
-        """
         if not req_list:
             return []
-        for key in ("requirements", "items", "requirement_items", "all_requirements"):
-            if key in req_list and isinstance(req_list[key], list):
+        for key in ("items", "requirements", "requirement_items", "all_requirements"):
+            if isinstance(req_list.get(key), list):
                 return list(req_list[key])
-        merged: List[Dict] = []
-        for key in ("functional_requirements", "non_functional_requirements", "constraints"):
-            sub = req_list.get(key, [])
-            if isinstance(sub, list):
-                merged.extend(sub)
+        merged: List[Dict[str, Any]] = []
+        for key in ("functional_requirements", "non_functional_requirements"):
+            if isinstance(req_list.get(key), list):
+                merged.extend(req_list[key])
         return merged
 
     @staticmethod
-    def _format_requirements_block(requirements: List[Dict]) -> str:
-        """
-        Render requirements as a rich, readable block for Pass 1 LLM prompt.
-        Handles both old schema (id/type/domain) and new schema (req_id/req_type/epic).
-        """
-        lines: List[str] = []
-        for r in requirements:
-            req_id      = r.get("req_id")     or r.get("id", "?")
-            req_type    = r.get("req_type")   or r.get("type", "?")
-            epic        = r.get("epic")       or r.get("domain", "")
-            stakeholder = r.get("stakeholder") or r.get("who", "")
-            statement   = r.get("statement")  or r.get("description", "")
-            context     = r.get("context")    or ""
-            rationale   = r.get("rationale")  or r.get("why", "")
-            acs         = r.get("acceptance_criteria") or []
-            priority    = r.get("priority", "?")
-            elicit_id   = r.get("source_elicitation_id", "")
-            status      = r.get("status", "confirmed")
+    def _normalise_requirement_trace(requirement: Dict[str, Any]) -> Dict[str, Any]:
+        req_type = SprintAgent._normalise_requirement_type(
+            requirement.get("type") or requirement.get("req_type") or "functional"
+        )
+        if req_type == "out_of_scope":
+            req_type = "functional"
+        priority = requirement.get("priority") or "medium"
+        if priority not in {"high", "medium", "low"}:
+            priority = "medium"
+        raw_origin = requirement.get("origin") or requirement.get("sourcestream") or "interview"
+        origin_map = {
+            "interview": "interview",
+            "tension": "interview",
+            "baseline": "baseline",
+            "vision": "vision",
+            "productvision": "vision",
+            "product_vision": "vision",
+        }
+        origin = origin_map.get(str(raw_origin).lower().replace("-", "_"), "interview")
+        return {
+            "requirement_id": requirement.get("id") or requirement.get("req_id") or "",
+            "requirement_type": req_type,
+            "stakeholder": requirement.get("stakeholder") or requirement.get("role") or "",
+            "statement": requirement.get("statement") or requirement.get("description") or "",
+            "entity": requirement.get("entity") or requirement.get("entityref"),
+            "step": requirement.get("step") or requirement.get("stepref"),
+            "aspect": requirement.get("aspect"),
+            "category": requirement.get("category"),
+            "concern_theme": requirement.get("concern_theme"),
+            "entity_refs": requirement.get("entity_refs") or [],
+            "flow_step_refs": requirement.get("flow_step_refs") or [],
+            "requires_threshold": bool(requirement.get("requires_threshold", False)),
+            "rationale": requirement.get("rationale") or "",
+            "acceptance_criteria": requirement.get("acceptance_criteria")
+            or requirement.get("acceptancecriteria")
+            or [],
+            "priority": priority,
+            "source": requirement.get("source") or requirement.get("sourceelicitationid") or "",
+            "origin": origin,
+            "status": requirement.get("status") or "confirmed",
+        }
 
-            block = (
-                f"[{req_id}]  type={req_type}  priority={priority}  status={status}\n"
-                f"  epic:        {epic}\n"
-                f"  stakeholder: {stakeholder}\n"
-                f"  statement:   {statement}\n"
+    @staticmethod
+    def _normalise_requirement_type(value: Any) -> str:
+        text = str(value or "").lower().replace("-", "_")
+        if text in {"nonfunctional", "non_functional"}:
+            return "non_functional"
+        if text in {"outofscope", "out_of_scope"}:
+            return "out_of_scope"
+        return "functional"
+
+    @staticmethod
+    def _compact_product_vision(state: Dict[str, Any]) -> Dict[str, Any]:
+        artifacts = state.get("artifacts") or {}
+        vision = (
+            artifacts.get("reviewed_product_vision")
+            or artifacts.get("product_vision")
+            or state.get("product_vision")
+            or {}
+        )
+        return {
+            "flow": vision.get("flow") or vision.get("entity_flow") or {},
+            "roles": vision.get("roles") or vision.get("stakeholders") or [],
+            "nfr_concerns": vision.get("nfr_concerns") or [],
+            "scope": vision.get("scope") or vision.get("out_of_scope") or [],
+        }
+
+    @staticmethod
+    def _domain_from_trace(trace: Dict[str, Any]) -> str:
+        return (
+            trace.get("entity")
+            or trace.get("category")
+            or trace.get("aspect")
+            or "General"
+        )
+
+    @classmethod
+    def _format_requirement_traces(cls, traces: List[Dict[str, Any]]) -> str:
+        lines: List[str] = []
+        for trace in traces:
+            lines.append(
+                json.dumps(
+                    {
+                        **trace,
+                        "suggested_domain": cls._domain_from_trace(trace),
+                    },
+                    ensure_ascii=False,
+                )
             )
-            if context:
-                block += f"  context:     {context}\n"
-            if rationale:
-                rat_short = rationale[:240] + ("…" if len(rationale) > 240 else "")
-                block += f"  rationale:   {rat_short}\n"
-            if isinstance(acs, list) and acs:
-                for idx, ac in enumerate(acs, 1):
-                    block += f"  AC[{idx}]:      {ac}\n"
-            else:
-                block += "  AC:          (none)\n"
-            if elicit_id:
-                block += f"  elicit_id:  {elicit_id}\n"
-            lines.append(block)
+        return "\n".join(lines)
+
+    @classmethod
+    def _format_stories_with_estimation(
+        cls,
+        stories: List[Dict[str, Any]],
+        est_lookup: Dict[str, Dict[str, Any]],
+    ) -> str:
+        lines: List[str] = []
+        for story in stories:
+            story_id = cls._story_id(story)
+            est = est_lookup.get(story_id, {})
+            trace = story.get("requirement_trace") or {}
+            block = {
+                "source_story_id": story_id,
+                "source_requirement_id": story.get("source_requirement_id"),
+                "type": story.get("type"),
+                "domain": story.get("domain"),
+                "title": story.get("title"),
+                "description": story.get("description"),
+                "requirement_trace": trace,
+                "analyst_estimation": {
+                    "story_points": (est.get("estimation") or {}).get("story_points"),
+                    "complexity": (est.get("estimation") or {}).get("complexity"),
+                    "effort": (est.get("estimation") or {}).get("effort"),
+                    "uncertainty": (est.get("estimation") or {}).get("uncertainty"),
+                    "invest_flags": (est.get("invest") or {}).get("invest_flags") or [],
+                    "blocked_by": (est.get("dependencies") or {}).get("blocked_by") or [],
+                    "risks": est.get("risks") or [],
+                },
+            }
+            lines.append(json.dumps(block, ensure_ascii=False))
         return "\n".join(lines)
 
     @staticmethod
+    def _valid_story_format(description: str) -> bool:
+        lower = description.lower()
+        return (
+            (lower.startswith("as a ") or lower.startswith("as an "))
+            and ", i can " in lower
+            and ", so that " in lower
+        )
+
+    @staticmethod
+    def _planning_status(
+        is_oversized: bool,
+        invest_pass: bool,
+        invest_flags: List[str],
+    ) -> Literal["ready", "needs_refinement", "invest_failed", "oversized"]:
+        if is_oversized:
+            return "oversized"
+        if len(invest_flags) >= 3:
+            return "invest_failed"
+        if not invest_pass:
+            return "needs_refinement"
+        return "ready"
+
+    @staticmethod
+    def _tags_for_story(story: Dict[str, Any]) -> List[str]:
+        tags: List[str] = []
+        domain = (story.get("domain") or "").strip()
+        if domain:
+            tags.append(domain.lower().replace(" ", "_"))
+        story_type = story.get("type")
+        if story_type == "non_functional":
+            tags.append("non_functional")
+        trace = story.get("requirement_trace") or {}
+        aspect = (trace.get("aspect") or "").strip()
+        if aspect:
+            tags.append(aspect.lower().replace(" ", "_"))
+        return tags
+
+    @staticmethod
     def _feedback_block(feedback: str, context: str) -> str:
-        """Render a PO feedback constraint block for injection into system prompts."""
         if not feedback:
             return ""
         return (
-            f"\n\n{'━'*12} PRODUCT OWNER FEEDBACK — previous backlog was REJECTED {'━'*12}\n"
+            "\n\nREVIEWER FEEDBACK - previous backlog was rejected:\n"
             f"{feedback}\n"
-            f"You MUST address ALL points above when performing {context}.\n"
-            f"{'━'*70}\n"
+            f"Address this feedback during {context}.\n"
         )

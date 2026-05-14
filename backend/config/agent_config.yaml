@@ -13,46 +13,42 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# LLM provider
-# Uncomment exactly ONE option block.
+# LLM provider profiles
+# llm.default is used by all agents unless routed to another profile.
+# llm.interview is routed to interviewer/enduser below to reduce interview cost.
 # ---------------------------------------------------------------------------
 llm:
 
-  # ── Option 1: Claude (Anthropic) ─────────────────────────────────────────
-  # type: "claude"
-  # api_key: ${ANTHROPIC_API_KEY}
-  # model: "claude-3-5-haiku-latest"   # claude-3-5-sonnet | claude-3-opus | …
-  # temperature: 0.1
-  # max_output_tokens: 4096
-  # max_input_tokens: 100000
+  # ── Default profile: all agents except explicit overrides ───────────────
+  default:
+    type: "openai"
+    api_key: ${OPENAI_API_KEY}
+    model: "gpt-4o-mini"
+    base_url: ${OPENAI_BASE_URL}
+    temperature: 0.7
+    max_output_tokens: 4096
+    max_input_tokens: 100000
 
-  # ── Option 2: OpenAI ─────────────────────────────────────────────────────
-  type: "openai"
-  api_key: ${OPENAI_API_KEY}
-  model: "gpt-4o-mini"                # gpt-4o | gpt-4-turbo | gpt-3.5-turbo | …
-  base_url: ${OPENAI_BASE_URL}
-  temperature: 0.2
-  max_output_tokens: 4096
-  max_input_tokens: 100000
+  # ── Interview profile: cheaper dialogue loop for elicitation ────────────
+  # Inherits provider/API/base_url/token settings from llm.default unless
+  # explicitly overridden here.
+  interview:
+    model: "gpt-4o-mini"
+    temperature: 0.7
+    max_output_tokens: 2048
 
-  # ── Option 3: Gemini ─────────────────────────────────────────────────────
-  # type: "gemini"
-  # api_key: ${GEMINI_API_KEY}
-  # model: "gemini-flash-latest"
-  # temperature: 0.1
-  # max_output_tokens: 4096
-  # max_input_tokens: 100000
+  # ── Agent → profile routing ─────────────────────────────────────────────
+  agents:
+    interviewer: interview
+    enduser: interview
 
-  # ── Option 4: HuggingFace / Ollama (local) ───────────────────────────────
-  # type: "huggingface"
-  # model: "phi3.5"
-  # api_base: ${OLLAMA_BASE_URL}       # e.g. http://localhost:11434/v1
-  # api_key: ${HUGGINGFACE_API_KEY}    # "EMPTY" for local Ollama
-  # device: "cuda"                     # cuda | cpu
-  # torch_dtype: "float16"
-  # temperature: 0.1
-  # max_output_tokens: 4096
-  # max_input_tokens: 32000
+  # Other providers can use the same shape:
+  # default:
+  #   type: "claude"
+  #   api_key: ${ANTHROPIC_API_KEY}
+  #   model: "claude-3-5-sonnet-latest"
+  # interview:
+  #   model: "claude-3-5-haiku-latest"
 
 # ---------------------------------------------------------------------------
 # Rate limits

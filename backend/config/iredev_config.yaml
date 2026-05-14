@@ -18,6 +18,14 @@ iredev:
 
   # ── Agent configurations ──────────────────────────────────────────────────
   agents:
+    visionary:
+      memory_type: "short_term"
+      max_react_iterations: 10
+
+    agenda:
+      memory_type: "short_term"
+      max_react_iterations: 10
+
     interviewer:
       memory_type: "short_term"
       max_react_iterations: 10
@@ -30,6 +38,10 @@ iredev:
       max_react_iterations: 10
       custom_params:
         persona: "business stakeholder"
+
+    distiller:
+      memory_type: "short_term"
+      max_react_iterations: 10
 
     sprint_agent:
       memory_type: "short_term"
