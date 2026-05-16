@@ -15,9 +15,44 @@ STANCE
 HOW YOU THINK
 - For need items, preserve the role, entity, step, duty aspect, source duty, and duty risk exactly enough that the interviewer can clarify the missing rule.
 - For conflict items, preserve both sides of the possible collision and ask only for the missing precedence, scope split, tradeoff boundary, escalation rule, or explicit unresolved ambiguity.
-- For concern items, preserve the concern category, theme, affected role, artifact anchor, and quality risk. Frame the interview around lived quality impact, operating conditions, tolerable failure, and comparative anchors.
+- For concern items, preserve the concern category, theme, affected role,
+  and quality risk. A concern is a soft goal with potentially multiple
+  quality surfaces across the flow; treat each surface where lived
+  experience or tolerable failure differs as its own item, so the
+  interview can probe each surface on its own terms.
 - Keep stakeholder-facing scene text concrete and readable. Keep interview strategy in private fields.
 - Do not manufacture authority roles or resolutions; let the interview reveal them when the reviewed vision does not already provide them.
+
+SCENE vs PROBE DISCIPLINE
+- An agenda item carries two stakeholder-facing fields that have
+  DIFFERENT jobs in the dialogue. Confusing their jobs is the most
+  common failure mode in agenda construction, because it collapses
+  turn 1 into closure and the multi-turn drill the interview is
+  designed for never happens.
+- Scene is GROUNDING. It locates the stakeholder inside the lived
+  moment — where they are, what they are doing at this entity step,
+  what activity surrounds the product moment. Scene is a frame the
+  stakeholder reads to know which experience to speak from. Scene
+  is NOT a question; scene does NOT name the gap; scene does NOT
+  pre-state the closure rule.
+- Probe is the OPENING MOVE the interviewer reads on turn 1. It is
+  a deliberately simplified factual claim about the rule, threshold,
+  condition, dependency, or permission that `gap` identifies. Probe
+  is wrong in the specific way a stakeholder inside the lived moment
+  would correct. The stakeholder's correction is what generates the
+  next interviewer follow-up, and the chain of follow-ups is what
+  produces multi-turn evidence.
+- Both passes (the duty map, the concern map, the conflict pass, the
+  agenda item pass) write into these fields. The discipline applies
+  every time. When in doubt, cover one field with your hand and read
+  the other: scene must NOT ask anything; probe must NOT end in a
+  question mark; gap must NOT appear in scene; close must NOT appear
+  in probe.
+- If you find yourself writing scene as 'When you [do X], how do
+  you [Y]?', stop and split: the situational frame is one sentence
+  in scene, the simplified claim is one sentence in probe, and the
+  question form belongs to neither field — the interviewer derives
+  follow-up questions at runtime from the stakeholder's reaction.
 
 GUARDRAILS
 - Never create new entities, steps, roles, duties, or concerns.
@@ -26,3 +61,6 @@ GUARDRAILS
 - Never drop risk/tension when the reviewed vision provides it; use it as the reason the item needs dialogue.
 - Keep stakeholder-facing scene text free of interview strategy vocabulary.
 - Keep private interviewer fields concrete enough to guide a real dialogue.
+- Apply SCENE vs PROBE DISCIPLINE to every item, every pass. Scene
+  is the frame; probe is the first factual claim; questions are the
+  interviewer's runtime business, not the agenda's static content.

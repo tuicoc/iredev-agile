@@ -42,8 +42,16 @@ TRAP_DRILL_STYLE: Dict[str, str] = {
         "happens when the wrong role acts."
     ),
     "priority_split": (
-        "Ask when both pressures occur together, which rule wins, what condition "
-        "separates them, and whether a person or a rule resolves the tie."
+        "Capture the current stakeholder's experience of the collision "
+        "only: when they feel both pressures together at the named entity "
+        "step, which side they personally lean toward and why in their own "
+        "role's terms, and any concrete preference they would want the "
+        "product to offer from their side. Do not push the current "
+        "stakeholder to manufacture a global rule that other stakeholders "
+        "would also have to accept; that biases the outcome toward "
+        "whichever side this stakeholder represents. Global resolution "
+        "belongs to the human reviewer who sees every affected "
+        "stakeholder's stance together at the distiller HITL gate."
     ),
     "quality_probe": (
         "Ask for lived examples, the condition where quality failure matters, "
@@ -182,8 +190,45 @@ class AgendaItem(BaseModel):
     )
     scene: str = Field(
         description=(
-            "Stakeholder-facing lived situation at this entity and step. It must be "
-            "enough for EndUserAgent to answer without seeing interview strategy."
+            "Stakeholder-facing GROUNDING for EndUserAgent. Scene "
+            "locates the stakeholder inside the lived moment around "
+            "this entity step so they can speak from experience. It is "
+            "NOT the first interview question — that role belongs to "
+            "`probe`.\n"
+            "\n"
+            "Structural shape: a situational frame in second person or "
+            "implied second person, naming WHERE the stakeholder is, "
+            "WHAT they are doing at this entity step, and WHAT "
+            "activity surrounds the product moment. The stakeholder "
+            "reads scene and knows the moment; nothing more is "
+            "conveyed.\n"
+            "\n"
+            "Forbidden in scene (each forbidden form has a structural "
+            "test, not a topic test):\n"
+            "- Question form. Any sentence ending in '?', or any "
+            "  clause shaped as a request for the stakeholder's "
+            "  answer ('what does this look like for you', 'how do "
+            "  you typically...', 'what guides your choice'). A "
+            "  question in scene IS the first interview move, and the "
+            "  agenda item will close on the answer to it after one "
+            "  turn.\n"
+            "- Gap leakage. Wording that names or hints at the "
+            "  missing condition the close is built to extract. Scene "
+            "  describes the moment; the gap belongs in private "
+            "  fields. If scene reveals the gap, the stakeholder "
+            "  front-loads the rule in turn 1 and multi-turn drill "
+            "  is lost.\n"
+            "- Interview-strategy vocabulary ('trap', 'probe', 'gap', "
+            "  'close', 'risk', 'baseline'). These belong only to "
+            "  private fields.\n"
+            "\n"
+            "Test before emitting: cover the probe and close fields "
+            "with your hand and read scene alone. If the stakeholder "
+            "would feel asked a question, the scene contains a "
+            "question and must be rewritten as a frame. If the "
+            "stakeholder could already write the closing rule from "
+            "scene alone, scene has leaked the gap and must be "
+            "narrowed back to grounding."
         )
     )
     risk: Optional[str] = Field(
@@ -195,8 +240,45 @@ class AgendaItem(BaseModel):
     )
     probe: str = Field(
         description=(
-            "Deliberately incomplete factual claim that invites the stakeholder to "
-            "correct, narrow, or enrich it."
+            "The interviewer's OPENING move on turn 1 of this item, "
+            "written as a deliberately simplified FACTUAL CLAIM — not "
+            "a question. The interviewer reads probe near-verbatim "
+            "when the item first comes up; a stakeholder who knows "
+            "the lived moment instinctively pushes back on the "
+            "simplification, and that pushback is what produces "
+            "multi-turn dialogue.\n"
+            "\n"
+            "Structural shape: a stand-alone declarative sentence "
+            "ending in '.', containing exactly one oversimplification "
+            "of the rule, threshold, condition, dependency, or "
+            "permission that `gap` identifies. The simplification "
+            "must be wrong in the way the stakeholder would correct "
+            "if asked from inside the moment; if it is too obviously "
+            "wrong the stakeholder dismisses it, if it is too "
+            "carefully hedged the stakeholder accepts it.\n"
+            "\n"
+            "Forbidden in probe (structural tests, not topic tests):\n"
+            "- Question form. A sentence ending in '?', or a clause "
+            "  shaped as a request for the stakeholder's answer. A "
+            "  probe that is already a question collapses turn 1 "
+            "  into closure; the interviewer is supposed to derive "
+            "  follow-up questions from the stakeholder's correction "
+            "  of the probe, not from the probe itself.\n"
+            "- Hedge words that drain the simplification ('typically', "
+            "  'sometimes', 'in most cases', 'often'). The probe's "
+            "  job is to be wrong enough to provoke correction; "
+            "  hedges defuse that.\n"
+            "- The exact rule the close is built to extract. Probe "
+            "  is the foil; close names what must replace the foil. "
+            "  If probe pre-bakes the closure rule, there is nothing "
+            "  for the dialogue to add.\n"
+            "\n"
+            "Pairing with scene: scene grounds the stakeholder in "
+            "the moment without naming the gap; probe states the "
+            "oversimplification the gap exposes. The two fields are "
+            "complementary — scene does not smuggle in probe's claim "
+            "or a question, and probe does not re-state scene's "
+            "moment."
         )
     )
     gap: str = Field(
@@ -411,6 +493,9 @@ Rules:
   present; if the duty risk is vague, sharpen it only from the duty wording and
   reviewed flow, without adding a new business rule.
 - notes must explain how coverage was achieved.
+
+- Duty entries follow 1 duty -> 1 entry. Concern entries may follow
+  1 concern -> N entries, one per quality surface; see PASS B.
 """
 
 _CONFLICT_PROMPT = """\
@@ -467,17 +552,35 @@ Rules:
 - Do not create new entities, steps, or roles.
 - kind must be concern.
 - aspect must be quality_concern.
-- source and concern_ref must carry the concern id when present. If the concern
-  has no id, use CONCERN-NN consistently from list order.
-- role must be one of the concern's affected_roles. Choose the role most likely
-  to describe lived quality impact.
-- entity and step must come from the reviewed flow. If the concern attaches to
-  an entity, choose that entity and the step where the quality is easiest to
-  discuss. If it attaches to a step, choose the entity containing that step.
-- note must explain how the entry is anchored.
-- risk must state the stakeholder-facing failure or operating tension if the
-  quality is not good enough. Do not include numbers, thresholds, technologies,
-  or acceptance criteria.
+- source and concern_ref must carry the concern id when present. If the
+  concern has no id, use CONCERN-NN consistently from list order.
+- role must be one of the concern's affected_roles. Choose the role most
+  likely to describe lived quality impact for the surface being mapped.
+- A concern is a softgoal that can surface at more than one place in the
+  flow. A quality surface is a distinct (entity, step) where the lived
+  experience, operating condition, or tolerable failure of this concern
+  differs from elsewhere. For example, "responsive record management"
+  surfaces differently when a user is mid-entry (patience budget seconds,
+  breakdown = lost typing) versus when a user opens a history view
+  (patience budget longer, breakdown = trust loss). Treat each such
+  surface as its own entry, sharing the same concern_ref.
+- Decide the surfaces by walking the concern's attached_to list and the
+  reviewed flow:
+    * Collapse multiple steps into one entry only when the lived quality
+      experience and the failure story are genuinely the same across them.
+      State that collapse in notes.
+    * Keep separate entries when the operating condition, expectation, or
+      breakdown differs between steps - even if the category and theme
+      are identical.
+- Anchor every entry to an (entity, step) already present in the reviewed
+  flow. If a concern attaches to an entity rather than a step, pick the
+  step where the role would describe lived impact for that surface; do not
+  default to the first step in the entity.
+- note must explain how the entry is anchored and why this (entity, step)
+  represents a distinct surface (or why surfaces were collapsed).
+- risk must state the stakeholder-facing failure or operating tension
+  specific to this surface, without numbers, thresholds, technologies, or
+  acceptance criteria.
 
 Guardrails:
 - A concern entry is an interview topic, not a final NFR. Do not write a
@@ -517,12 +620,29 @@ For need items:
 
 For conflict items:
 - use trap=priority_split.
-- baseline states the local rule that is under pressure.
-- scene describes the moment where two reviewed entries can collide.
-- risk states the consequence of leaving the collision unresolved.
-- probe presents a simplified priority assumption that should be corrected.
-- gap names the missing precedence, scope split, or escalation rule.
-- close states the exact clarification needed to remove ambiguity.
+- baseline states the local rule that is under pressure for THIS
+  stakeholder's side.
+- scene describes the moment where two reviewed entries can collide
+  in this stakeholder's lived role.
+- risk states the consequence of leaving the collision unresolved
+  from this stakeholder's perspective.
+- probe presents a simplified priority assumption the current
+  stakeholder is invited to correct from their own side.
+- gap names what is missing from the CURRENT stakeholder's stance —
+  their lean, their pain, or their personal preference about the
+  collision — NOT the globally missing precedence rule. The global
+  rule is decided later by a human reviewer who sees every affected
+  stakeholder's stance together.
+- close states what the current stakeholder must make explicit about
+  THEIR side of the collision for the interviewer to record their
+  evidence. Acceptable close shapes are "the current stakeholder
+  names which side they lean toward and why", "the current
+  stakeholder names a personal preference for how the product should
+  surface the collision from their side", or "the current stakeholder
+  explicitly states the collision is not theirs to resolve". The
+  close does NOT ask this single stakeholder to produce a global
+  product rule that binds the other party; that is the human
+  reviewer's call.
 
 For concern items:
 - use kind=concern, aspect=quality_concern, and trap=quality_probe.
