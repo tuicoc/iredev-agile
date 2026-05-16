@@ -65,9 +65,6 @@ projects:
         sync: false
       buildCommand: npm install;npm run build
       staticPublishPath: dist
-      domains:
-      - cara.vn
-      - www.cara.vn
       autoDeployTrigger: commit
       rootDir: frontend
     databases:
