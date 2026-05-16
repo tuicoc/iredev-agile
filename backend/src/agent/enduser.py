@@ -44,11 +44,47 @@ class EndUserAgent(BaseAgent):
         self.register_tool(Tool(
             name="respond",
             description=(
-                "Return the stakeholder's in-character answer to the current interviewer "
-                "message. The answer should be concrete, scene-based, and 2-4 sentences. "
-                "Correct wrong or incomplete interviewer assumptions from the stakeholder's "
-                "operational reality, but do not provide product design advice or invented "
-                "numeric thresholds.\n"
+                "Return the stakeholder's in-character answer to the current "
+                "interviewer message.\n"
+                "\n"
+                "The message argument MUST be a non-empty string of at least "
+                "two complete sentences of first-person lived experience "
+                "grounded in YOUR SCENE. An empty message, a whitespace-only "
+                "message, or a one-word acknowledgement is rejected and the "
+                "model is asked to try again — do not call respond at all "
+                "unless you have real content to deliver. Aim for two to "
+                "four sentences: concrete, scene-based, and in your voice.\n"
+                "\n"
+                "Open from your situation, not from the interviewer's text. "
+                "Good openings: 'When I open the app to...', 'In my "
+                "experience...', 'For me, the moment that matters is...', "
+                "'Usually I...'. Forbidden openings: 'The assertion that...', "
+                "'The claim that... is misleading', 'The statement "
+                "overlooks...', 'Your question assumes that...' — these "
+                "signal textual analysis instead of lived experience.\n"
+                "\n"
+                "Describe the app's behaviour from your side ('the app asks "
+                "me for...', 'the app won't let me past sign-up without...', "
+                "'the app warns me about...'). Do NOT write requirement-"
+                "shaped sentences about yourself ('users must do X', 'the "
+                "user is required to Y'); that is the interviewer's job.\n"
+                "\n"
+                "If you cannot answer the question precisely from your role, "
+                "still call respond with non-empty content: say what part "
+                "you DO know, what your routine around this moment looks "
+                "like, what you would notice or expect, and the specific "
+                "part you would need the interviewer to clarify. Saying "
+                "'I do not know exactly because my routine here is X' is "
+                "real evidence; an empty respond call is not.\n"
+                "\n"
+                "If you need to correct a wrong interviewer assumption, do "
+                "it AFTER one sentence of experience, not before. Do not "
+                "provide product design advice. Do not invent numeric "
+                "thresholds; prefer an observable anchor (absence, "
+                "comparator, operating condition, precedent) — but real "
+                "numbers from your own routine (the time you actually have "
+                "at that moment, the duration of the activity around it) "
+                "are legitimate and welcome.\n"
                 'Input: {"message": str}'
             ),
             func=self._tool_respond,
@@ -92,7 +128,30 @@ class EndUserAgent(BaseAgent):
         state: Optional[Dict[str, Any]] = None,
         **_: Any,
     ) -> ToolResult:
-        text = message.strip() or "I need the interviewer to restate that more concretely."
+        text = message.strip()
+        if not text:
+            # Empty respond calls are NOT silently substituted any more.
+            # Returning a non-fatal observation tells the ReAct loop to keep
+            # going (should_return=False, no state updates) and gives the
+            # model an explicit fix-it instruction. The outer
+            # enduser_turn_fn retry will fire if the loop exhausts itself
+            # without ever producing a non-empty message.
+            return ToolResult(
+                observation=(
+                    "Your respond call had an empty message. Call respond "
+                    "again with at least two sentences of first-person "
+                    "experience grounded in YOUR SCENE: start with "
+                    "'When I...', 'Usually I...', or 'In my experience...', "
+                    "and say what the app does to you at this moment, what "
+                    "you expect, or what you would notice. If you cannot "
+                    "answer the question precisely, name the part you do "
+                    "know from your role and the part you would need the "
+                    "interviewer to clarify — but do that in YOUR voice, "
+                    "not as a tool-call hand-off."
+                ),
+                should_return=False,
+            )
+
         conversation = list((state or {}).get("conversation") or [])
         conversation.append({
             "role": "enduser",
@@ -225,19 +284,55 @@ class EndUserAgent(BaseAgent):
         role = (state.get("current_stakeholder_role") or "").strip() or self._persona
         item = self._runtime_item(state)
         kind = getattr(item, "kind", "") if item is not None else ""
-        parts = [
+        retry_hint = (state.get("_enduser_retry_hint") or "").strip()
+        parts: List[str] = []
+        if retry_hint:
+            # Outer-loop retry: the previous EndUserAgent invocation finished
+            # without producing a usable stakeholder response (typically an
+            # empty respond call). Place the hint at the very top so the
+            # model encounters it before persona, scene, and rules.
+            parts.append("RETRY DIRECTIVE — READ FIRST:")
+            parts.append(retry_hint)
+            parts.append(
+                "On this attempt you MUST call respond with a non-empty "
+                "first-person message rooted in YOUR SCENE below. Do not "
+                "produce plain text outside a tool call, and do not call "
+                "respond again with an empty message — the previous "
+                "attempt already failed for that reason."
+            )
+            parts.append("")
+        parts.extend([
             f"PERSONA: {role}",
-            "Answer entirely from this stakeholder's perspective.",
-            "You do not see interview strategy; treat the interviewer message as an ordinary but possibly flawed question.",
-            "If the message is too simple, wrong, or missing a condition that affects your work, correct it directly.",
-        ]
+            "You are this stakeholder. Speak in first person about your experience: what you do, what the app does to you, what you expect, what frustrates you. Do not narrate at the interviewer; live the scene.",
+            "You do not see interview strategy. The interviewer's message is your conversation partner, not text to analyse.",
+            "Do NOT open your reply by quoting, summarising, or rebutting the interviewer's claim. Forbidden openings include 'The assertion that...', 'The claim that... is misleading', 'The statement overlooks...', 'Your question assumes...'. Start from your situation instead: 'When I open the app to...', 'In my experience...', 'For me...', 'Usually I...'.",
+            "If the interviewer is wrong about something, correct them AFTER one sentence of lived experience, not before.",
+            "Describe the app's behaviour from your side: 'the app asks me for...', 'the app won't let me past sign-up without...', 'the app warns me about...'. Do not write requirement sentences about yourself ('users must do X', 'the user is required to Y'); your job is experience, the interviewer turns it into the product's rule.",
+        ])
         if kind == "concern":
             parts.append(
-                "This is a quality-concern item: answer with lived experience, operating conditions, tolerable failure, and comparative anchors only when you can defend them from this role."
+                "This is a quality-concern item. Describe what failure feels like in lived use and what observable boundary you can defend: an observable absence (\"no spinner appears\", \"no perceptible pause\"), a comparative anchor (\"faster than typing the next word\"), an operating condition that bounds the failure (\"before I shift attention away\"), or a named precedent. Avoid emotional descriptors alone — saying 'instantly' or 'fast' without an observable condition gives the interviewer nothing to record."
+            )
+        elif kind == "conflict":
+            parts.append(
+                "This is a conflict item. The collision exposed here will "
+                "be resolved later by a human reviewer who can balance every "
+                "affected stakeholder's stance; the global resolution is NOT "
+                "yours to produce. Your job is to give the interviewer YOUR "
+                "side only: how the collision lands on you at this entity "
+                "step, which side you personally lean toward and why from "
+                "your own role, and any concrete preference you would want "
+                "the product to offer from your side. Speak only from your "
+                "role's perspective — do not negotiate a fair rule for "
+                "other stakeholders or imagine what they would accept. If "
+                "you honestly have no lean, or you feel the collision is "
+                "not yours to call, say so plainly ('for me this is a "
+                "product decision'); that refusal is a legitimate answer "
+                "and the interviewer is expected to close on it."
             )
         elif kind:
             parts.append(
-                "This is a rule-clarification item: answer with business rules, exceptions, permissions, dependencies, or precedence when the question touches them."
+                "This is a rule-clarification item. Tell the interviewer what the app does to you, what conditions or exceptions you encounter, what the app prevents or allows. Phrase as your experience of being prompted, blocked, allowed — not as duties you bear."
             )
         for block in (
             self._role_context(state, role),
@@ -255,8 +350,9 @@ class EndUserAgent(BaseAgent):
             "INTERVIEWER MESSAGE:",
             f"  {question}",
             "",
-            "If the message conflicts with your scene or role, say so and explain why.",
-            "Do not invent a precise number unless the question asks for an acceptable limit and this role would know it from practice, policy, or repeated experience.",
+            "If the message conflicts with your scene or role, say so plainly after one sentence of experience. Do not turn that disagreement into a paragraph of rebuttal.",
+            "If the interviewer asks the same closure question for the third time and your honest answer is still that the app should support flexibility or multiple options, say so once, clearly, and stop softening.",
+            "Do not invent a precise number unless the question asks for an acceptable limit and this role would know it from practice, policy, or repeated experience. Prefer an observable anchor (absence, comparator, operating condition, precedent) over a fabricated number.",
             "You may call search_knowledge once if necessary. Then call respond.",
         ])
         return "\n".join(parts)

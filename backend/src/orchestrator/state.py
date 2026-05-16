@@ -155,6 +155,18 @@ class WorkflowState(TypedDict, total=False):
     # very next invocation (no EndUser turn in between).
     _needs_srs_synthesis:       bool
 
+    # Distiller conflict-resolution short-circuit. When the requirement_list
+    # HITL gate returns conflict-resolution feedback, the reviewer's choice
+    # is the governing rule for Pass 3 only — Pass 1 and Pass 2 candidates
+    # are valid and do not need re-running. The handler sets the flag and
+    # carries the previous Pass 1+2 items and the surfaced conflicts in
+    # the carryover fields below; distiller.process() reads them, runs only
+    # Pass 3 with the CONFLICT FEEDBACK ADHERENCE addendum, and clears the
+    # fields when synthesis completes.
+    _distiller_pass3_only:          bool
+    _pass3_carryover_items:         List[Dict[str, Any]]
+    _pass3_carryover_conflicts:     List[Dict[str, Any]]
+
     # Set by record_answer tool; tells after_interviewer to retry
     # interviewer_turn instead of routing to enduser_turn.
     _agenda_needs_question:     bool
