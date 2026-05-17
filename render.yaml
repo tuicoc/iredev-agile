@@ -8,7 +8,7 @@ projects:
     - type: web
       name: iredev-agile
       runtime: python
-      repo: https://github.com/arc0social1slaver/iredev-agile
+      repo: https://github.com/Trungpham2k4/iredev-agile
       plan: free
       envVars:
       - key: CORS_ORIGIN
@@ -53,7 +53,7 @@ projects:
     - type: web
       name: iredev-agile-fe
       runtime: static
-      repo: https://github.com/arc0social1slaver/iredev-agile
+      repo: https://github.com/Trungpham2k4/iredev-agile
       envVars:
       - key: VITE_WS_BASE_URL
         sync: false
