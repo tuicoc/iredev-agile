@@ -3,15 +3,14 @@ state.py
 
 WorkflowState — single source of truth flowing through the LangGraph graph.
 
-Artifact chain (v7 — Entity Flow Spine)
+Artifact chain (v10 — Lean Assumption-Centered Elicitation)
 ────────────────────────────────────────
 Phase 1 (sprint_zero_planning):
-  product_vision                 ← produced by VisionaryAgent (flow + roles + NFR concerns + scope)
+  product_vision                 ← produced by VisionaryAgent (intent/outcome + roles + known_signals + curated assumptions + concerns + scope)
   reviewed_product_vision        ← HITL approval
-  aspect_map_artifact            ← produced by AgendaAgent Pass A/B/C (duty/concern/conflict mapping)
-  elicitation_agenda_artifact    ← produced by AgendaAgent Pass D, approved by HITL
+  elicitation_agenda_artifact    ← produced by AgendaAgent (assumption-centered items: perspective + scene + decision_target + seed_question + coverage_points), approved by HITL
   interview_record               ← produced by InterviewerAgent (conclude), approved by HITL
-  requirement_list               ← produced by DistillerAgent (3-pass synthesis)
+  requirement_list               ← produced by DistillerAgent (map + vision preservation + final merge & audit)
   requirement_list_approved      ← HITL approval
   user_story_draft               ← produced by SprintAgent Pass 1
   analyst_estimation             ← produced by AnalystAgent (feasibility + INVEST + estimation)
@@ -22,24 +21,24 @@ Phase 2 (backlog_refinement):
   validated_product_backlog      ← produced by AnalystAgent Pass 3 (AC generation)
   analyst_review_done            ← HITL approval
 
-Elicitation state (v7)
+Elicitation state (v9)
 ──────────────────────
-  elicitation_agenda  → AgendaRuntime dict (Pass D of AgendaAgent)
-  aspect_map          → AspectMap dict (Pass A/B/C of AgendaAgent)
-  item_turn_count     → per-item turn counter (reset on advance)
-  probe_presented     → gate flag for mandatory probe before item close
+  elicitation_agenda  → AgendaRuntime dict (assumption-centered agenda)
+  item_turn_count     → per-item question counter (reset on advance)
   current_question / enduser_answer → handshake between Interviewer and EndUser
-  current_stakeholder_role → persona key for EndUserAgent
+  current_stakeholder_role → strict perspective key for EndUserAgent
   conversation        → per-item dialogue buffer (flushed on advance)
 
-Agenda-driven flow (InterviewerAgent v6)
-────────────────────────────────────────
-  InterviewerAgent reads current agenda item (entity, step, role, scene,
-  baseline, risk, probe, gap, close, aspect, trap, kind).
-  kind=concern runs quality probing; need/conflict run rule clarification.
-  EndUserAgent receives only role + scene + entity + step grounding.
-  System gates (turn budget, probe gate) are enforced in code; all interview
-  strategy lives in the LLM prompts.
+Agenda-driven flow (InterviewerAgent v10)
+─────────────────────────────────────────
+  InterviewerAgent reads the current agenda item (vision_refs,
+  perspective, context, decision_target, seed_question, close_when,
+  coverage_points). vision_refs is a single list of vision ids
+  (assumption / concern / scope) — the agenda no longer carries focus_kind,
+  focus_ref, covered_refs, or three separate ref lists.
+  EndUserAgent receives only perspective + scene context + current question.
+  System gates enforce only safety limits; interview strategy lives in the
+  ReAct addendum prompt and tool descriptions.
 """
 
 from enum import Enum
@@ -95,14 +94,11 @@ class WorkflowState(TypedDict, total=False):
 
     # Serialised AgendaRuntime dict:
     #   { items: [...], current_index: int, elicitation_complete: bool }
-    # Each item (AgendaRuntimeItem): { id, entity, step, role, aspect, trap, kind,
-    #   baseline, scene, risk, probe, gap, close,
-    #   status, question, answer, talk, rule, align, signals }
+    # Each item (AgendaRuntimeItem): { id, vision_refs, perspective,
+    #   context, decision_target, seed_question, close_when, coverage_points,
+    #   merge_anchor, notes, status, question, answer, talk, rule, signals,
+    #   assumption_evidence, gaps, coverage }
     elicitation_agenda: Dict[str, Any]
-
-    # Serialised AspectMap dict produced by AgendaAgent Pass A/B/C.
-    # Contains entries for duty needs, NFR concerns, and conflict hooks.
-    aspect_map: Dict[str, Any]
 
     # Handshake keys between InterviewerAgent and EndUserAgent.
     # InterviewerAgent writes current_question via ask_question tool.
@@ -121,9 +117,6 @@ class WorkflowState(TypedDict, total=False):
     # ── Agenda-driven elicitation turn controls (InterviewerAgent v5) ──────
     # item_turn_count: 1-indexed turn counter within the current agenda item.
     item_turn_count: int
-
-    # probe_presented: True once ask_question is called with probe_injected=True.
-    probe_presented: bool
 
     # ── Sprint / Analyst collaboration intermediate artifacts ──────────────
     # user_story_draft: produced by SprintAgent Pass 1.
@@ -171,7 +164,6 @@ class WorkflowState(TypedDict, total=False):
     # interviewer_turn instead of routing to enduser_turn.
     _agenda_needs_question:     bool
     _agenda_needs_followup: bool
-    _force_probe_next: bool
 
     # ── UI signalling (transient) ──────────────────────────────────────────
     _workflow_started_message: bool

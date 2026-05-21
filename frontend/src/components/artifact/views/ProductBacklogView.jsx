@@ -244,11 +244,6 @@ export function ProductBacklogView({ data }) {
             <ClipboardList size={14} className="text-[#B86F50]" />
             Product Backlog
           </div>
-          {data?.pass_notes && (
-            <p className="mt-2 text-[11px] leading-relaxed text-[#776B60]">
-              {data.pass_notes}
-            </p>
-          )}
           <div className="mt-3 flex flex-wrap gap-1.5">
             <MetaPill label="Stories" value={data?.total_items ?? data?.total_stories ?? items.length} />
             <MetaPill label="Story Points" value={totalPoints} />
@@ -291,28 +286,16 @@ export function ProductBacklogView({ data }) {
 
       <QualityWarnings warnings={data?.quality_warnings} />
 
-      <Section title="Notes" icon={FileText}>
-        {data?.notes || data?.pass_notes || data?.rebuild_feedback ? (
-          <div className="space-y-2">
-            {(data?.notes || data?.pass_notes) && (
-              <pre
-                className="whitespace-pre-wrap rounded-xl border border-[#E2D6C5] bg-[#F6F1E8]
-                           p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
-              >
-                {data.notes || data.pass_notes}
-              </pre>
-            )}
-            {data?.rebuild_feedback && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[10.5px] leading-relaxed text-amber-900">
-                <span className="font-semibold">Rebuild feedback:</span>{" "}
-                {data.rebuild_feedback}
-              </div>
-            )}
-          </div>
-        ) : (
-          <EmptyState label="No backlog notes found." />
-        )}
-      </Section>
+      {data?.notes && (
+        <Section title="Notes" icon={FileText}>
+          <pre
+            className="whitespace-pre-wrap rounded-xl border border-[#E2D6C5] bg-[#F6F1E8]
+                       p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
+          >
+            {data.notes}
+          </pre>
+        </Section>
+      )}
     </div>
   );
 }

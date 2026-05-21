@@ -17,58 +17,61 @@ if importlib.util.find_spec("langchain_core") is None:
 
 from src.agent.agenda import AgendaRuntime
 from src.agent.base import BaseAgent
-from src.agent.distiller import Requirement, _PASS1 as DISTILLER_PASS1
-from src.agent.interviewer import InterviewerAgent, _REACT_ADDENDUM as INTERVIEWER_ADDENDUM
-from src.agent.sprint import SprintAgent
-from src.agent.visionary import (
-    ProductVision,
-    _PASS1 as VISIONARY_PASS1,
-    _PASS1_AUDIT as VISIONARY_PASS1_AUDIT,
-    _PASS3 as VISIONARY_PASS3,
-    _PASS4 as VISIONARY_PASS4,
+from src.agent.distiller import (
+    DistillerAgent,
+    Requirement,
+    _BATCH_EXTRACTION as DISTILLER_BATCH_EXTRACTION,
+    _FINAL_ASSEMBLY as DISTILLER_FINAL_ASSEMBLY,
+    _MERGE_SEEDS as DISTILLER_MERGE_SEEDS,
 )
+from src.agent.enduser import EndUserAgent
+from src.agent.interviewer import InterviewerAgent, _REACT_ADDENDUM as INTERVIEWER_ADDENDUM
+from src.agent.visionary import ProductVision, _GLOSSARY as VISIONARY_GLOSSARY
 
 
 class PromptContractTest(unittest.TestCase):
-    def test_visionary_flow_keeps_anchored_operational_entity_inference(self) -> None:
-        self.assertIn("operationally entailed", VISIONARY_PASS1)
-        self.assertIn("both anchors are present", VISIONARY_PASS1)
-        self.assertIn("product domain gives the object a natural name", VISIONARY_PASS1)
-        self.assertIn("Do not reuse a fixed", VISIONARY_PASS1)
-        self.assertIn("same schema", VISIONARY_PASS1_AUDIT)
-        self.assertIn("orphan concept test", VISIONARY_PASS1_AUDIT)
-        self.assertIn("shared resource", VISIONARY_PASS4)
-        self.assertNotIn("Seating Resource", VISIONARY_PASS1)
-        self.assertNotIn("Bookable Resource", VISIONARY_PASS1)
+    def test_visionary_defines_operating_terms_without_domain_examples(self) -> None:
+        self.assertIn("sparse input", VISIONARY_GLOSSARY)
+        self.assertIn("capability", VISIONARY_GLOSSARY)
+        self.assertIn("interaction", VISIONARY_GLOSSARY)
+        self.assertIn("Do not use domain examples", VISIONARY_GLOSSARY)
 
-    def test_visionary_flow_separates_actors_from_entities(self) -> None:
-        self.assertIn("actor boundary test", VISIONARY_PASS1)
-        self.assertIn("Being the subject of another entity is not enough", VISIONARY_PASS1)
-        self.assertIn("name the managed record", VISIONARY_PASS1)
-        self.assertIn("must not be entities", VISIONARY_PASS1_AUDIT)
-        self.assertIn("partner role", VISIONARY_PASS3)
+    def test_personas_stay_short_and_domain_neutral(self) -> None:
+        for path in [
+            "prompts/visionary_react.txt",
+            "prompts/agenda_react.txt",
+            "prompts/interviewer_react.txt",
+            "prompts/enduser_react.txt",
+            "prompts/distiller_react.txt",
+        ]:
+            persona = Path(path).read_text(encoding="utf-8")
+            self.assertIn("ROLE", persona)
+            self.assertIn("MISSION", persona)
+            self.assertIn("STANCE", persona)
+            self.assertIn("VOICE", persona)
+            self.assertNotIn("for example", persona.lower())
 
-    def test_visionary_persona_stays_domain_neutral(self) -> None:
-        persona = Path("prompts/visionary_react.txt").read_text(encoding="utf-8")
-        self.assertIn("fixed entity names", persona)
-        self.assertNotIn("bookings, queues", persona)
-        self.assertNotIn("Seating Resource", persona)
+    def test_legacy_interviewer_prompt_folder_is_removed(self) -> None:
+        self.assertFalse(Path("prompts/interviewer").exists())
 
-    def test_distiller_is_not_one_to_one_with_interview_records(self) -> None:
-        self.assertIn(
-            "One interview record may produce zero, one, or many requirements",
-            DISTILLER_PASS1,
-        )
-        self.assertIn("signals as the preferred atomic evidence source", DISTILLER_PASS1)
-        self.assertIn("Multiple requirements may share the same EL source id", DISTILLER_PASS1)
+    def test_distiller_uses_batch_seed_extraction(self) -> None:
+        self.assertIn("Read signals first", DISTILLER_BATCH_EXTRACTION)
+        self.assertIn("Read talk units after signals", DISTILLER_BATCH_EXTRACTION)
+        self.assertIn("information, action, state, prevention, recovery, or quality", DISTILLER_BATCH_EXTRACTION)
+        self.assertIn("Keep cross-focus source_refs visible", DISTILLER_MERGE_SEEDS)
+        self.assertIn("keep it as a gap instead of an out_of_scope requirement", DISTILLER_FINAL_ASSEMBLY)
 
-    def test_interviewer_records_atomic_signals_for_distiller(self) -> None:
-        self.assertIn("signals carry the independent facts", INTERVIEWER_ADDENDUM)
-        self.assertIn("Do not merge them", INTERVIEWER_ADDENDUM)
+    def test_interviewer_uses_toolkit_without_forced_probe(self) -> None:
+        self.assertIn("specify", INTERVIEWER_ADDENDUM)
+        self.assertIn("negate", INTERVIEWER_ADDENDUM)
+        self.assertIn("stretch", INTERVIEWER_ADDENDUM)
+        self.assertIn("conflict", INTERVIEWER_ADDENDUM)
+        self.assertIn("why-deeper", INTERVIEWER_ADDENDUM)
+        self.assertNotIn("coverage >= " + "80", INTERVIEWER_ADDENDUM)
 
 
 class LLMConfigContractTest(unittest.TestCase):
-    def test_profiled_llm_routes_interview_agents_to_smaller_model(self) -> None:
+    def test_profiled_llm_routes_interview_agents_to_profile(self) -> None:
         config = {
             "llm": {
                 "default": {
@@ -117,143 +120,120 @@ class LLMConfigContractTest(unittest.TestCase):
 
 
 class ProductVisionContractTest(unittest.TestCase):
-    def test_product_vision_accepts_nfr_concerns_with_legacy_scope_shape(self) -> None:
+    def test_product_vision_accepts_focus_driven_shape(self) -> None:
         vision = ProductVision(
-            description="Tracks a persistent concept through stakeholder work.",
-            notes="audit",
-            flow={
-                "entities": [
-                    {
-                        "name": "TrackedConcept",
-                        "kind": "primary",
-                        "purpose": "Represents the main thing being tracked.",
-                        "steps": [
-                            {"name": "ConceptCreated", "detail": "The concept starts."}
-                        ],
-                        "related_to": None,
-                        "order": 1,
-                        "signal": "Named by the product concept.",
-                    }
-                ],
-                "links": [],
-            },
+            description="Provides requested product behavior for a product user.",
+            notes="given signal was developed into a usable focus source",
+            capabilities=[
+                {
+                    "id": "CAP-01",
+                    "name": "Capability Alpha",
+                    "need": "Role Alpha needs observable product behavior.",
+                    "source_kind": "given",
+                    "source_note": "The input states the desired product behavior.",
+                    "notes": "",
+                }
+            ],
             roles=[
                 {
-                    "name": "Operator",
-                    "kind": "operator",
-                    "duties": [
+                    "id": "ROLE-01",
+                    "name": "Role Alpha",
+                    "kind": "primary_user",
+                    "need": "Uses the product behavior.",
+                    "source_kind": "given",
+                    "source_note": "The input names this product user.",
+                    "notes": "",
+                }
+            ],
+            entities=[
+                {
+                    "name": "Map Coordinate Alpha",
+                    "purpose": "Grounds an operating scene.",
+                    "steps": [
                         {
-                            "id": "MD-01",
-                            "rule": "Create the tracked concept when work begins.",
-                            "risk": "Work cannot be followed if creation is unclear.",
-                            "aspect": "operational_rule",
-                            "entity": "TrackedConcept",
-                            "step": "ConceptCreated",
-                            "entity_refs": ["TrackedConcept"],
-                            "flow_step_refs": ["ConceptCreated"],
-                            "priority": "high",
+                            "name": "Action Alpha",
+                            "actor": "Role Alpha",
+                            "detail": "A meaningful product action occurs.",
                         }
                     ],
+                    "notes": "",
                 }
             ],
-            nfr_concerns=[
+            links=[
                 {
-                    "category": "reliability",
-                    "theme": "preserved history",
-                    "attached_to": ["TrackedConcept", "ConceptCreated"],
-                    "affected_roles": ["Operator"],
-                    "rationale": "The operator needs history to remain available.",
+                    "id": "LINK-01",
+                    "source": "Capability Alpha",
+                    "target": "Map Coordinate Alpha",
+                    "trigger": "A product action changes an operating condition.",
+                    "affected_roles": ["Role Alpha"],
+                    "detail": "The dependency may need interaction elicitation.",
+                    "source_kind": "developed",
+                    "source_note": "The capability and map coordinate are connected.",
                 }
             ],
-            scope=[
-                {
-                    "id": "OOS-01",
-                    "item": "External billing",
-                    "reason": "Not implied by the product concept.",
-                }
-            ],
+            duties=[],
+            concerns=[],
+            scope=[],
         )
 
-        self.assertEqual(vision.nfr_concerns[0].theme, "preserved history")
-        self.assertEqual(vision.scope[0].item, "External billing")
+        self.assertEqual(vision.capabilities[0].id, "CAP-01")
+        self.assertEqual(vision.roles[0].kind, "primary_user")
+        self.assertEqual(vision.links[0].id, "LINK-01")
 
 
 class AgendaRuntimeContractTest(unittest.TestCase):
-    def test_runtime_loads_legacy_need_and_new_concern_items(self) -> None:
+    def test_runtime_loads_focus_items(self) -> None:
         runtime = AgendaRuntime.from_agenda_artifact(
             {
                 "items": [
                     {
-                        "id": "IT-01",
-                        "entity": "TrackedConcept",
-                        "step": "ConceptCreated",
-                        "role": "Operator",
-                        "aspect": "operational_rule",
-                        "trap": "straw_man",
-                        "kind": "need",
-                        "baseline": "Operator creates the concept.",
-                        "scene": "Work begins.",
-                        "risk": "Operator cannot start work when the creation condition is unclear.",
-                        "probe": "Creation is always simple.",
-                        "gap": "creation condition",
-                        "close": "Creation rule is explicit.",
-                        "source": "MD-01",
-                        "peer": None,
-                    },
-                    {
-                        "id": "IT-02",
-                        "entity": "TrackedConcept",
-                        "step": "ConceptCreated",
-                        "role": "Operator",
-                        "aspect": "quality_concern",
-                        "trap": "quality_probe",
-                        "kind": "concern",
-                        "baseline": "Reliability concern around preserved history.",
-                        "scene": "History is needed during work.",
-                        "risk": "Operator loses needed history when normal continuity fails.",
-                        "probe": "History is always available enough.",
-                        "gap": "acceptable loss condition",
-                        "close": "Quality evidence is explicit.",
-                        "source": "CONCERN-01",
-                        "peer": None,
-                        "concern_ref": "CONCERN-01",
-                        "concern_category": "reliability",
-                        "concern_theme": "preserved history",
-                    },
+                        "id": "IT-001",
+                        "focus_kind": "capability",
+                        "focus_ref": "CAP-01",
+                        "perspective": "Role Alpha",
+                        "context": "A role needs to use a product behavior.",
+                        "seed_question": "What makes this behavior successful for you?",
+                        "close_when": "Success, failure, and responsibility are clear.",
+                        "notes": "Covers a capability focus.",
+                    }
                 ]
             }
         )
 
-        self.assertEqual(runtime.items[0].kind, "need")
-        self.assertEqual(
-            runtime.items[0].risk,
-            "Operator cannot start work when the creation condition is unclear.",
-        )
-        self.assertEqual(runtime.items[1].kind, "concern")
-        self.assertEqual(runtime.items[1].concern_theme, "preserved history")
-        self.assertEqual(
-            runtime.items[1].risk,
-            "Operator loses needed history when normal continuity fails.",
-        )
+        self.assertEqual(runtime.items[0].focus_kind, "capability")
+        self.assertEqual(runtime.items[0].perspective, "Role Alpha")
+        self.assertEqual(runtime.items[0].status, "pending")
 
 
 class DistillerContractTest(unittest.TestCase):
-    def test_requirement_accepts_nfr_trace_fields(self) -> None:
+    def test_distiller_batches_by_perspective_not_agenda_order(self) -> None:
+        batches = DistillerAgent._build_batches(
+            [
+                {"id": "EL-001", "perspective": "Role Alpha", "signals": ["first"]},
+                {"id": "EL-002", "perspective": "Role Beta", "signals": ["second"]},
+                {"id": "EL-003", "perspective": "Role Alpha", "signals": ["third"]},
+            ]
+        )
+
+        self.assertEqual([batch["perspective"] for batch in batches], ["Role Alpha", "Role Beta"])
+        self.assertEqual([item["id"] for item in batches[0]["items"]], ["EL-001", "EL-003"])
+        self.assertEqual([item["id"] for item in batches[1]["items"]], ["EL-002"])
+
+    def test_requirement_accepts_focus_trace_fields(self) -> None:
         requirement = Requirement(
             id="NFR-001",
             type="non_functional",
-            stakeholder="Operator",
-            statement="The system should preserve concept history under normal operation.",
-            entity="TrackedConcept",
-            step="ConceptCreated",
-            aspect="quality_concern",
-            category="reliability",
-            concern_theme="preserved history",
-            entity_refs=["TrackedConcept"],
-            flow_step_refs=["ConceptCreated"],
+            stakeholder="Role Alpha",
+            statement="The product should satisfy a stated quality boundary.",
+            focus_kind="concern",
+            focus_ref="CONCERN-01",
+            trace_refs=["EL-001", "CONCERN-01"],
+            entity=None,
+            step=None,
+            quality_theme="Concern Alpha",
             requires_threshold=True,
-            rationale="The stakeholder described preserved history as necessary.",
-            acceptance_criteria=["History is available after normal restart."],
+            rationale="EL-001 evidence states a defensible qualitative boundary.",
+            acceptance_criteria=["The stated qualitative boundary can be reviewed."],
             priority="high",
             source="EL-001",
             origin="interview",
@@ -261,134 +241,46 @@ class DistillerContractTest(unittest.TestCase):
         )
 
         self.assertTrue(requirement.requires_threshold)
-        self.assertEqual(requirement.category, "reliability")
+        self.assertEqual(requirement.focus_kind, "concern")
+        self.assertEqual(requirement.focus_ref, "CONCERN-01")
 
-
-class BacklogContractTest(unittest.TestCase):
-    def test_requirement_trace_normalizes_distiller_item(self) -> None:
-        trace = SprintAgent._normalise_requirement_trace(
-            {
-                "id": "FR-001",
-                "type": "functional",
-                "stakeholder": "Customer",
-                "statement": "Customers can create a booking.",
-                "entity": "Booking",
-                "step": "Create Booking",
-                "aspect": "permission",
-                "rationale": "Customers need a reservation.",
-                "acceptance_criteria": ["Booking request is captured."],
-                "priority": "high",
-                "source": "EL-001",
-                "origin": "interview",
-                "status": "confirmed",
-            }
+    def test_requirement_accepts_system_type(self) -> None:
+        requirement = Requirement(
+            id="SYS-001",
+            type="system",
+            stakeholder=None,
+            statement="The product shall preserve a shared operating state.",
+            focus_kind="interaction",
+            focus_ref="LINK-01",
+            trace_refs=["EL-001-T01"],
+            requires_threshold=False,
+            rationale="The cited evidence requires one shared product behavior.",
+            acceptance_criteria=["The shared state is preserved for the cited behavior."],
+            priority="high",
+            source="EL-001",
+            origin="interview",
+            status="confirmed",
         )
 
-        self.assertEqual(trace["requirement_id"], "FR-001")
-        self.assertEqual(trace["requirement_type"], "functional")
-        self.assertEqual(trace["entity"], "Booking")
-        self.assertEqual(trace["source"], "EL-001")
-
-    def test_split_child_keeps_original_requirement_trace(self) -> None:
-        agent = SprintAgent.__new__(SprintAgent)
-        state = {
-            "split_round": 0,
-            "artifacts": {
-                "user_story_draft": {
-                    "stories": [
-                        {
-                            "source_story_id": "FR-004",
-                            "source_requirement_id": "FR-004",
-                            "type": "functional",
-                            "domain": "Booking",
-                            "title": "Modify Booking Details",
-                            "description": (
-                                "As a Customer, I can modify booking details, "
-                                "so that my reservation stays accurate."
-                            ),
-                            "requirement_trace": {
-                                "requirement_id": "FR-004",
-                                "requirement_type": "functional",
-                                "stakeholder": "Customer",
-                                "statement": "Customers can modify booking details.",
-                                "entity": "Booking",
-                                "step": "Modify Booking",
-                                "aspect": "permission",
-                                "category": None,
-                                "concern_theme": None,
-                                "entity_refs": [],
-                                "flow_step_refs": [],
-                                "requires_threshold": False,
-                                "rationale": "Customers need reservation flexibility.",
-                                "acceptance_criteria": [],
-                                "priority": "medium",
-                                "source": "EL-003",
-                                "origin": "interview",
-                                "status": "confirmed",
-                            },
-                            "is_split_child": False,
-                            "split": {
-                                "parent_story_id": None,
-                                "suffix": None,
-                                "reasoning": None,
-                            },
-                        }
-                    ]
-                },
-                "analyst_estimation": {
-                    "stories": [
-                        {
-                            "source_story_id": "FR-004",
-                            "needs_split": True,
-                            "split_proposals": [
-                                {
-                                    "title": "Modify Booking Before Cutoff",
-                                    "capability": "modify booking details before the cut-off time",
-                                    "reasoning": "This covers the allowed modification path.",
-                                },
-                                {
-                                    "title": "Handle Late Modification",
-                                    "capability": "see the late-modification path after the cut-off time",
-                                    "reasoning": "This covers the blocked modification path.",
-                                },
-                            ],
-                        }
-                    ]
-                },
-            },
-        }
-
-        updates = agent.process_splits(state)
-        stories = updates["artifacts"]["user_story_draft"]["stories"]
-
-        self.assertEqual(stories[0]["source_story_id"], "FR-004a")
-        self.assertEqual(stories[0]["source_requirement_id"], "FR-004")
-        self.assertEqual(stories[0]["requirement_trace"]["requirement_id"], "FR-004")
-        self.assertTrue(stories[0]["is_split_child"])
-        self.assertNotIn("analyst_estimation", updates["artifacts"])
+        self.assertEqual(requirement.type, "system")
+        self.assertIsNone(requirement.stakeholder)
 
 
 class InterviewerGuardTest(unittest.TestCase):
     def test_conclude_refuses_open_agenda(self) -> None:
         agent = InterviewerAgent.__new__(InterviewerAgent)
+        agent._max_turns_per_item = 5
         runtime = AgendaRuntime.from_agenda_artifact(
             {
                 "items": [
                     {
-                        "id": "IT-01",
-                        "entity": "TrackedConcept",
-                        "step": "ConceptCreated",
-                        "role": "Operator",
-                        "aspect": "operational_rule",
-                        "trap": "straw_man",
-                        "kind": "need",
-                        "baseline": "Operator creates the concept.",
-                        "scene": "Work begins.",
-                        "risk": "Operator cannot start work when the creation condition is unclear.",
-                        "probe": "Creation is always simple.",
-                        "gap": "creation condition",
-                        "close": "Creation rule is explicit.",
-                        "source": "MD-01",
+                        "id": "IT-001",
+                        "focus_kind": "scene",
+                        "focus_ref": "DUTY-01",
+                        "perspective": "Role Alpha",
+                        "context": "A role acts in an operating situation.",
+                        "seed_question": "What happens in this situation?",
+                        "close_when": "Condition, exception, permission, and consequence are clear.",
                     }
                 ]
             }
@@ -399,42 +291,36 @@ class InterviewerGuardTest(unittest.TestCase):
         self.assertFalse(result.should_return)
         self.assertNotIn("artifacts", result.state_updates)
 
-    def test_record_answer_keeps_item_open_without_settled_statement(self) -> None:
+    def test_record_answer_keeps_item_open_without_done(self) -> None:
         agent = InterviewerAgent.__new__(InterviewerAgent)
+        agent._max_turns_per_item = 5
         runtime = AgendaRuntime.from_agenda_artifact(
             {
                 "items": [
                     {
-                        "id": "IT-01",
-                        "entity": "TrackedConcept",
-                        "step": "ConceptCreated",
-                        "role": "Operator",
-                        "aspect": "quality_concern",
-                        "trap": "quality_probe",
-                        "kind": "concern",
-                        "baseline": "Reliability concern.",
-                        "scene": "Work begins.",
-                        "risk": "Operator loses needed history when normal continuity fails.",
-                        "probe": "History is always available enough.",
-                        "gap": "acceptable loss condition",
-                        "close": "Quality evidence is explicit.",
-                        "source": "CONCERN-01",
-                        "concern_ref": "CONCERN-01",
-                        "concern_category": "reliability",
-                        "concern_theme": "preserved history",
+                        "id": "IT-001",
+                        "focus_kind": "concern",
+                        "focus_ref": "CONCERN-01",
+                        "perspective": "Role Alpha",
+                        "context": "A role experiences a quality concern.",
+                        "seed_question": "What boundary matters in this situation?",
+                        "close_when": "Boundary, condition, and impact are clear.",
                     }
                 ]
             }
         )
 
         result = agent._tool_record_answer(
-            align="narrower",
-            done=True,
+            done=False,
             rule="",
-            signals=["History matters."],
+            signals=["A quality boundary matters."],
+            evidence=["The answer states that the boundary matters."],
+            coverage_note="Boundary is mentioned but not settled.",
+            technique_used="specify",
             state={
                 "elicitation_agenda": runtime.model_dump(),
-                "enduser_answer": "History loss is painful, but I do not know the exact limit.",
+                "enduser_answer": "The boundary matters, but I cannot state it yet.",
+                "item_turn_count": 1,
             },
         )
 
@@ -444,183 +330,64 @@ class InterviewerGuardTest(unittest.TestCase):
         self.assertEqual(updated.items[0].status, "pending")
 
 
+class EndUserGuardTest(unittest.TestCase):
+    def test_empty_response_is_not_fabricated(self) -> None:
+        agent = EndUserAgent.__new__(EndUserAgent)
+
+        result = agent._tool_respond(message="", state={"conversation": []})
+
+        self.assertFalse(result.should_return)
+        self.assertNotIn("enduser_answer", result.state_updates)
+
+
 @unittest.skipUnless(
     importlib.util.find_spec("langgraph") is not None,
     "graph review payload import requires langgraph",
 )
 class ReviewPayloadContractTest(unittest.TestCase):
-    def test_product_vision_payload_includes_concerns_and_scope_shape(self) -> None:
+    def test_product_vision_payload_includes_focus_shape(self) -> None:
         from src.orchestrator.graph import _build_product_vision_review_payload
 
         payload = _build_product_vision_review_payload(
             {
-                "product_name": "Concept Tracker",
-                "concept_summary": "Tracks a persistent concept.",
-                "description": "Tracks a persistent concept.",
-                "flow": {"entities": [], "links": []},
-                "roles": [
-                    {
-                        "name": "Operator",
-                        "kind": "operator",
-                        "duties": [
-                            {
-                                "id": "MD-01",
-                                "rule": "Create the concept.",
-                                "risk": "Missing creation rule.",
-                                "aspect": "operational_rule",
-                                "entity": "TrackedConcept",
-                                "step": "ConceptCreated",
-                                "entity_refs": ["TrackedConcept"],
-                                "flow_step_refs": ["ConceptCreated"],
-                                "priority": "high",
-                            }
-                        ],
-                    }
-                ],
-                "nfr_concerns": [{"category": "reliability", "theme": "preserved history"}],
-                "scope": [
-                    {
-                        "id": "OOS-01",
-                        "item": "External billing",
-                        "reason": "Not implied by the product concept.",
-                    }
-                ],
+                "description": "Provides requested product behavior.",
+                "notes": "audit note",
+                "capabilities": [{"id": "CAP-01", "name": "Capability Alpha"}],
+                "roles": [{"id": "ROLE-01", "name": "Role Alpha", "kind": "primary_user"}],
+                "entities": [],
+                "links": [],
+                "duties": [],
+                "concerns": [{"id": "CONCERN-01", "theme": "Concern Alpha"}],
+                "scope": [],
             }
         )
 
-        self.assertEqual(payload["nfr_concerns"][0]["theme"], "preserved history")
-        self.assertEqual(payload["scope"][0]["item"], "External billing")
-        self.assertEqual(payload["roles"][0]["duties"][0]["entity_refs"], ["TrackedConcept"])
+        self.assertEqual(payload["capabilities"][0]["id"], "CAP-01")
+        self.assertEqual(payload["roles"][0]["name"], "Role Alpha")
+        self.assertEqual(payload["concerns"][0]["theme"], "Concern Alpha")
 
-    def test_agenda_payload_includes_risk_hooks(self) -> None:
+    def test_agenda_payload_includes_focus_items(self) -> None:
         from src.orchestrator.graph import _build_elicitation_agenda_review_payload
 
         payload = _build_elicitation_agenda_review_payload(
             {
                 "items": [
                     {
-                        "id": "IT-01",
-                        "entity": "TrackedConcept",
-                        "step": "ConceptCreated",
-                        "role": "Operator",
-                        "aspect": "operational_rule",
-                        "trap": "straw_man",
-                        "kind": "need",
-                        "baseline": "Operator creates the concept.",
-                        "scene": "Work begins.",
-                        "risk": "Operator cannot start work when creation is unclear.",
-                        "probe": "Creation is always simple.",
-                        "gap": "creation condition",
-                        "close": "Creation rule is explicit.",
-                        "source": "MD-01",
-                    }
-                ]
-            },
-            {
-                "entries": [
-                    {
-                        "id": "AM-01",
-                        "entity": "TrackedConcept",
-                        "step": "ConceptCreated",
-                        "role": "Operator",
-                        "aspect": "operational_rule",
-                        "source": "MD-01",
-                        "kind": "need",
-                        "note": "Mapped from duty.",
-                        "risk": "Operator cannot start work when creation is unclear.",
-                    }
-                ]
-            },
-        )
-
-        self.assertEqual(
-            payload["aspect_entries"][0]["risk"],
-            "Operator cannot start work when creation is unclear.",
-        )
-        self.assertEqual(
-            payload["items"][0]["risk"],
-            "Operator cannot start work when creation is unclear.",
-        )
-
-    def test_product_backlog_payload_shows_requirement_trace(self) -> None:
-        from src.orchestrator.graph import _build_product_backlog_review_payload
-
-        payload = _build_product_backlog_review_payload(
-            {
-                "items": [
-                    {
-                        "id": "PBI-001a",
-                        "source_story_id": "FR-004a",
-                        "source_requirement_id": "FR-004",
-                        "title": "Modify Booking Before Cutoff",
-                        "type": "functional",
-                        "description": (
-                            "As a Customer, I can modify booking details before "
-                            "the cut-off time, so that my reservation stays accurate."
-                        ),
-                        "requirement_trace": {
-                            "requirement_id": "FR-004",
-                            "requirement_type": "functional",
-                            "stakeholder": "Customer",
-                            "entity": "Booking",
-                            "step": "Modify Booking",
-                            "aspect": "permission",
-                            "priority": "medium",
-                            "source": "EL-003",
-                            "origin": "interview",
-                            "statement": "Customers can modify booking details.",
-                            "rationale": "Customers need reservation flexibility.",
-                            "acceptance_criteria": ["Modification before cut-off succeeds."],
-                        },
-                        "estimation": {"story_points": 3},
-                        "prioritization": {"priority_rank": 1, "wsjf_score": 5.0},
-                        "quality": {"invest_flags": []},
-                        "planning": {"status": "ready"},
-                        "dependencies": {"blocked_by": [], "blocks": []},
+                        "id": "IT-001",
+                        "focus_kind": "interaction",
+                        "focus_ref": "LINK-01",
+                        "perspective": "Role Alpha",
+                        "context": "A dependency affects a role.",
+                        "seed_question": "What changes when the dependency happens?",
+                        "close_when": "Order, consequence, and role impact are clear.",
+                        "notes": "Covers dependency evidence.",
                     }
                 ]
             }
         )
 
-        story = payload["stories"][0]
-        self.assertEqual(story["source_story_id"], "FR-004a")
-        self.assertEqual(story["source_requirement_id"], "FR-004")
-        self.assertEqual(story["requirement_trace"]["requirement_id"], "FR-004")
-        self.assertEqual(story["requirement_trace"]["statement"], "Customers can modify booking details.")
-
-    def test_requirement_list_payload_exposes_conflicts(self) -> None:
-        from src.orchestrator.graph import (
-            _build_requirement_conflict_summary,
-            _build_requirement_list_review_payload,
-        )
-
-        req_list = {
-            "session_id": "demo",
-            "items": [
-                {"id": "FR-001", "type": "functional", "priority": "high"},
-                {"id": "FR-002", "type": "functional", "priority": "medium"},
-            ],
-            "conflicts": [
-                {
-                    "id": "CF-01",
-                    "kind": "clash",
-                    "left": "FR-001",
-                    "right": "FR-002",
-                    "scope": "Booking creation",
-                    "issue": "The two booking limits cannot both apply.",
-                    "paths": ["Keep FR-001", "Keep FR-002"],
-                    "refs": ["EL-001"],
-                }
-            ],
-        }
-
-        payload = _build_requirement_list_review_payload(req_list, req_list["items"])
-        summary = _build_requirement_conflict_summary(req_list["conflicts"])
-
-        self.assertTrue(payload["has_conflicts"])
-        self.assertEqual(payload["conflicts"][0]["id"], "CF-01")
-        self.assertIn("hard gate", summary)
-        self.assertIn("FR-001", summary)
+        self.assertEqual(payload["items"][0]["focus_kind"], "interaction")
+        self.assertEqual(payload["items"][0]["focus_ref"], "LINK-01")
 
 
 if __name__ == "__main__":

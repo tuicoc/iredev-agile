@@ -31,15 +31,22 @@ import {
 import { silentRestore, onUnauthenticated, resetSilentRestore } from '../services/apiClient'
 import { clearAccessToken, getAccessToken } from '../services/tokenStore'
 import { wsService }                        from '../services/websocketService'
+import { AGENT_MOCK_MODE }                  from '../config/env'
 
 const AuthContext = createContext(null)
 
+const MOCK_USER = {
+  id: 'mock-user',
+  name: 'Mock Reviewer',
+  email: 'mock.reviewer@local.test',
+}
+
 export function AuthProvider({ children }) {
-  const [user,         setUser]        = useState(null)
-  const [initialising, setInitialising]= useState(true)
+  const [user,         setUser]        = useState(() => AGENT_MOCK_MODE ? MOCK_USER : null)
+  const [initialising, setInitialising]= useState(() => !AGENT_MOCK_MODE)
   const [authLoading,  setAuthLoading] = useState(false)
   const [authError,    setAuthError]   = useState(null)
-  const [authVersion,  setAuthVersion] = useState(0)
+  const [authVersion,  setAuthVersion] = useState(() => AGENT_MOCK_MODE ? 1 : 0)
 
   const isAuthenticated = user !== null
 
@@ -66,6 +73,7 @@ export function AuthProvider({ children }) {
   // ── Silent restore on page load ─────────────────────────────────────────────
   // Uses the HttpOnly refresh cookie — no localStorage token read.
   useEffect(() => {
+    if (AGENT_MOCK_MODE) return
     async function restore() {
       try {
         const restoredUser = await silentRestore()  // sets accessToken in RAM internally
@@ -134,6 +142,12 @@ export function AuthProvider({ children }) {
 
   // ── Logout ──────────────────────────────────────────────────────────────────
   const logout = useCallback(async () => {
+    if (AGENT_MOCK_MODE) {
+      setUser(MOCK_USER)
+      setAuthVersion(1)
+      setAuthLoading(false)
+      return
+    }
     setAuthLoading(true)
     wsService.close()                   // close WS while access token still valid
     try {

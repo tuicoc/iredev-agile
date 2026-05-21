@@ -246,11 +246,6 @@ export function ValidatedBacklogView({ data }) {
             <ClipboardCheck size={14} className="text-[#B86F50]" />
             Validated Product Backlog
           </div>
-          {data?.refinement_summary && (
-            <p className="mt-2 text-[11px] leading-relaxed text-[#776B60]">
-              {data.refinement_summary}
-            </p>
-          )}
           <div className="mt-3 flex flex-wrap gap-1.5">
             <MetaPill label="Ready PBIs" value={`${readyCount}/${totalItems}`} tone="green" />
             <MetaPill label="Acceptance Criteria" value={totalAc} />
@@ -294,28 +289,16 @@ export function ValidatedBacklogView({ data }) {
         </Section>
       )}
 
-      <Section title="Notes" icon={FileText}>
-        {data?.refinement_summary || data?.rebuild_feedback ? (
-          <div className="space-y-2">
-            {data?.refinement_summary && (
-              <pre
-                className="whitespace-pre-wrap rounded-xl border border-[#E2D6C5] bg-[#F6F1E8]
-                           p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
-              >
-                {data.refinement_summary}
-              </pre>
-            )}
-            {data?.rebuild_feedback && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[10.5px] leading-relaxed text-amber-900">
-                <span className="font-semibold">Rebuild feedback:</span>{" "}
-                {data.rebuild_feedback}
-              </div>
-            )}
-          </div>
-        ) : (
-          <EmptyState label="No validation notes found." />
-        )}
-      </Section>
+      {data?.notes && (
+        <Section title="Notes" icon={FileText}>
+          <pre
+            className="whitespace-pre-wrap rounded-xl border border-[#E2D6C5] bg-[#F6F1E8]
+                       p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
+          >
+            {data.notes}
+          </pre>
+        </Section>
+      )}
     </div>
   );
 }

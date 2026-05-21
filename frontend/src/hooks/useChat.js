@@ -23,6 +23,14 @@ import {
 } from "../services/chatService";
 import { uid }     from "../utils/helpers";
 import { useAuth } from "../context/AuthContext";
+import { AGENT_MOCK_MODE, AGENT_MOCK_STAGE } from "../config/env";
+import {
+  MOCK_ARTIFACT_MESSAGES,
+  MOCK_CHAT_ID,
+  MOCK_DISTILLER_ARTIFACT_MESSAGES,
+  MOCK_PROJECT_DESCRIPTION,
+  MOCK_PROJECT_ID,
+} from "../data/agentMockData";
 
 const getRequirementMaxTurns = () => {
   const value = Number(localStorage.getItem("requirement_max_turns"));
@@ -42,16 +50,59 @@ const agentNameFromStatus = (status) => {
   return "CARA";
 };
 
+const CARA_INTENT_GUIDE = `## Start with product intent
+
+Write a short product memo, not a feature checklist. Visionary works best when you include:
+
+- What is happening today: the friction, confusion, workaround, or risk before the product exists
+- Who is affected: runtime roles and any subgroups whose needs should not be flattened
+- What kind of product might help, even if the exact shape is still open
+- What the product should sit beside, not replace, or not decide
+- What outcome should improve for users, staff, customers, or other affected roles
+
+You can be uncertain. Candidate ideas, competing audiences, and unresolved boundaries are useful input; Visionary will turn them into reviewable forks instead of forcing a premature decision.`;
+
 const caraPromptMessage = () => ({
   id: `cara_prompt_${uid()}`,
   role: "assistant",
   agentName: "CARA",
-  content: "What would you like to build today?",
+  content: CARA_INTENT_GUIDE,
   isSystemPrompt: true,
 });
 
 const CORRUPTED_RUN_MESSAGE =
   "Generation was interrupted because you left this chat. The active run was stopped to prevent background execution.";
+
+function mockArtifactMessages() {
+  return AGENT_MOCK_STAGE === "distiller"
+    ? MOCK_DISTILLER_ARTIFACT_MESSAGES
+    : MOCK_ARTIFACT_MESSAGES;
+}
+
+function cloneMessage(message) {
+  return {
+    ...message,
+    artifact: message.artifact ? { ...message.artifact } : undefined,
+  };
+}
+
+function getMockMessages() {
+  return normalizeArtifactTimeline([
+    {
+      id: "mock-user-message-01",
+      role: "user",
+      content: MOCK_PROJECT_DESCRIPTION,
+      streaming: false,
+    },
+    ...mockArtifactMessages().map(cloneMessage),
+  ]);
+}
+
+function getMockOpenArtifact() {
+  const messages = mockArtifactMessages();
+  const last = messages[messages.length - 1];
+  return last?.artifact ? { ...last.artifact } : null;
+}
 
 function decorateMessages(list) {
   const decorated = (list || []).map((message) => {
@@ -116,12 +167,12 @@ function normalizeArtifactTimeline(list) {
 }
 
 export function useChat() {
-  const [activeChatId,    setActiveChatId]    = useState(null);
-  const [activeProjectId, setActiveProjectId] = useState(null);
-  const [subChat,         setSubChat]         = useState(null);
-  const [messages,        setMessages]        = useState([]);
+  const [activeChatId,    setActiveChatId]    = useState(() => AGENT_MOCK_MODE ? MOCK_CHAT_ID : null);
+  const [activeProjectId, setActiveProjectId] = useState(() => AGENT_MOCK_MODE ? MOCK_PROJECT_ID : null);
+  const [subChat,         setSubChat]         = useState(() => AGENT_MOCK_MODE ? 0 : null);
+  const [messages,        setMessages]        = useState(() => AGENT_MOCK_MODE ? getMockMessages() : []);
   const [streaming,       setStreaming]       = useState(false);
-  const [openArtifact,    setOpenArtifact]    = useState(null);
+  const [openArtifact,    setOpenArtifact]    = useState(() => AGENT_MOCK_MODE ? getMockOpenArtifact() : null);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error,           setError]           = useState(null);
   const [wsConnected,     setWsConnected]     = useState(false);
@@ -132,6 +183,16 @@ export function useChat() {
 
   const activeChatIdRef  = useRef(activeChatId);
   const placeholderIdRef = useRef(null);
+
+  useEffect(() => {
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.isSystemPrompt
+          ? { ...message, content: CARA_INTENT_GUIDE }
+          : message,
+      ),
+    );
+  }, []);
 
   useEffect(() => {
     activeChatIdRef.current = activeChatId;
@@ -186,6 +247,7 @@ export function useChat() {
 
   // ── Reset when user logs out ───────────────────────────────────────────────
   useEffect(() => {
+    if (AGENT_MOCK_MODE) return;
     if (authVersion === 0) {
       setActiveChatId(null);
       setActiveProjectId(null);
@@ -436,6 +498,19 @@ export function useChat() {
   /** Select a chat (called from sidebar or after creating a new one) */
   const selectChat = useCallback(
     async (id, newSubChat = 0, projectId = null) => {
+      if (AGENT_MOCK_MODE) {
+        setActiveChatId(MOCK_CHAT_ID);
+        setActiveProjectId(MOCK_PROJECT_ID);
+        setSubChat(0);
+        setMessages(getMockMessages());
+        setOpenArtifact(getMockOpenArtifact());
+        setError(null);
+        setStreaming(false);
+        setWorkflowRunning(false);
+        setWorkflowStatus(null);
+        setLoadingMessages(false);
+        return;
+      }
       if (id === activeChatId && subChat === newSubChat) return;
       await corruptActiveRun();
       if (activeChatId) wsService.stopStream(activeChatId);
@@ -468,6 +543,18 @@ export function useChat() {
   );
 
   const clearActiveChat = useCallback(async () => {
+    if (AGENT_MOCK_MODE) {
+      setActiveChatId(MOCK_CHAT_ID);
+      setActiveProjectId(MOCK_PROJECT_ID);
+      setSubChat(0);
+      setMessages(getMockMessages());
+      setOpenArtifact(getMockOpenArtifact());
+      setError(null);
+      setStreaming(false);
+      setWorkflowRunning(false);
+      setWorkflowStatus(null);
+      return;
+    }
     await corruptActiveRun();
     if (activeChatId) wsService.stopStream(activeChatId);
     placeholderIdRef.current = null;
@@ -723,8 +810,10 @@ export function useChat() {
     if (!art) return;
     const chatId    = art.chatId || activeChatIdRef.current;
     const messageId = art.messageId || "";
-    wsService.send({ type: "artifact_feedback", chatId, messageId, artifactId: art.id, action, comment });
-    setWorkflowRunning(true);
+    if (!AGENT_MOCK_MODE) {
+      wsService.send({ type: "artifact_feedback", chatId, messageId, artifactId: art.id, action, comment });
+    }
+    setWorkflowRunning(!AGENT_MOCK_MODE);
     setWorkflowStatus(null);
 
     const optimistic = (prev) => {

@@ -41,7 +41,8 @@ tool or any tool:
 
   "required"               – model MUST call at least one tool (any tool)
   "auto"                   – model chooses freely (default)
-  {"name": "<tool_name>"}  – model MUST call this specific tool
+  {"type": "function", "function": {"name": "<tool_name>"}}
+                           – model MUST call this specific tool (OpenAI-native shape)
 """
 
 from __future__ import annotations
@@ -123,7 +124,15 @@ def _tc_cache_key(tool_choice: ToolChoice) -> str:
     if isinstance(tool_choice, str):
         return tool_choice
     if isinstance(tool_choice, dict):
-        return f"fn:{tool_choice.get('name', '')}"
+        # Accept the OpenAI-native shape
+        #   {"type": "function", "function": {"name": "<tool>"}}
+        # as well as the legacy shorthand {"name": "<tool>"}.
+        fn_block = tool_choice.get("function")
+        if isinstance(fn_block, dict) and fn_block.get("name"):
+            return f"fn:{fn_block['name']}"
+        if tool_choice.get("name"):
+            return f"fn:{tool_choice['name']}"
+        return f"fn:{tool_choice.get('type', '')}"
     return str(tool_choice)
 
 

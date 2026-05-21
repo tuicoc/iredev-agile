@@ -1,7 +1,10 @@
-from typing import List
+from typing import List, Tuple
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.store.postgres import PostgresStore
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 
 class ConversationBuffer:
@@ -17,47 +20,52 @@ class ConversationBuffer:
             self._history.append(SystemMessage(content=system_prompt))
 
     def add_user(self, content: str) -> None:
-        """Append a human turn.
-
-        Args:
-            content: User message text.
-        """
         self._history.append(HumanMessage(content=content))
 
     def add_assistant(self, content: str) -> None:
-        """Append an assistant turn.
-
-        Args:
-            content: Model response text.
-        """
         self._history.append(AIMessage(content=content))
 
     def get(self) -> List[BaseMessage]:
-        """Return the full message list for llm.invoke().
-
-        Returns:
-            List of LangChain BaseMessage objects.
-        """
         return list(self._history)
 
     def clear(self) -> None:
-        """Reset buffer, keeping the system prompt if one was set."""
         system = [m for m in self._history if isinstance(m, SystemMessage)]
         self._history = system
 
 
-def create_checkpointer(pg_conn_str: str) -> PostgresSaver:
-    """Create a Postgres-backed LangGraph checkpointer for short-term session state.
+def _build_pool(pg_conn_str: str, min_size: int = 1, max_size: int = 10) -> ConnectionPool:
+    """Build a ConnectionPool with the kwargs LangGraph Postgres backends expect."""
+    dsn = pg_conn_str.replace("postgresql+psycopg://", "postgresql://")
+    return ConnectionPool(
+        conninfo=dsn,
+        min_size=min_size,
+        max_size=max_size,
+        kwargs={
+            "autocommit": True,
+            "prepare_threshold": 0,
+            "row_factory": dict_row,
+        },
+        open=True,
+    )
 
-    Use with LangGraph graphs: graph.compile(checkpointer=create_checkpointer(...)).
-    Scope each session via thread_id: {"configurable": {"thread_id": "session_xyz"}}.
 
-    Args:
-        pg_conn_str: PostgreSQL connection string.
+def create_langgraph_postgres(
+    pg_conn_str: str,
+    min_size: int = 1,
+    max_size: int = 10,
+) -> Tuple[PostgresSaver, PostgresStore, ConnectionPool]:
+    """Build a Postgres-backed checkpointer + store sharing one pool.
 
-    Returns:
-        Configured PostgresSaver with tables initialized.
+    The pool is opened eagerly and both backends run their idempotent
+    setup() so required tables/indexes exist. The pool is returned so the
+    caller can keep a reference for the server lifetime (and close it on
+    shutdown).
+
+    Scope each session via thread_id: {"configurable": {"thread_id": "..."}}.
     """
-    checkpointer = PostgresSaver.from_conn_string(pg_conn_str)
+    pool = _build_pool(pg_conn_str, min_size=min_size, max_size=max_size)
+    checkpointer = PostgresSaver(pool)
     checkpointer.setup()
-    return checkpointer
+    store = PostgresStore(pool)
+    store.setup()
+    return checkpointer, store, pool

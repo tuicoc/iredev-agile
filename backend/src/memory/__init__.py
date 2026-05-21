@@ -1,6 +1,6 @@
 from .long_term import EpisodicMemory, SemanticMemory, create_store
 from .memory_module import MemoryModule
-from .short_term import ConversationBuffer, create_checkpointer
+from .short_term import ConversationBuffer, create_langgraph_postgres
 from .types import Episode, Fact, MemoryType
 
 __all__ = [
@@ -15,5 +15,5 @@ __all__ = [
     "SemanticMemory",
     # Store / checkpointer factories
     "create_store",
-    "create_checkpointer",
+    "create_langgraph_postgres",
 ]

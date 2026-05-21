@@ -30,26 +30,42 @@ iredev:
       memory_type: "short_term"
       max_react_iterations: 10
       custom_params:
-        completeness_threshold: 0.80
-        max_turns: 100
+        min_turns_per_assumption_item: 3
+        max_turns_per_item: 5
 
     enduser:
       memory_type: "short_term"
       max_react_iterations: 10
-      custom_params:
-        persona: "business stakeholder"
 
     distiller:
       memory_type: "short_term"
       max_react_iterations: 10
+      custom_params:
+        # Max concurrent map-phase LLM calls (one per interview record).
+        # I/O bound; threads release the GIL during HTTP wait so this works
+        # without changing the sync ThinkModule. 3 keeps peak concurrent
+        # demand under typical provider TPM windows while still parallelising.
+        max_parallel: 3
+        # Retry budget for transient rate-limit (429) responses across all
+        # synthesis-phase calls. Exponential backoff: 5s, 15s, 45s.
+        rate_limit_retries: 3
+        rate_limit_base_delay: 5.0
 
     sprint_agent:
       memory_type: "short_term"
       max_react_iterations: 10
+      custom_params:
+        # Retry budget for transient rate-limit (429) responses on
+        # structured calls. Exponential backoff: 5s, 15s, 45s.
+        rate_limit_retries: 3
+        rate_limit_base_delay: 5.0
 
     analyst:
       memory_type: "short_term"
       max_react_iterations: 10
+      custom_params:
+        rate_limit_retries: 3
+        rate_limit_base_delay: 5.0
 
     reviewer:
       memory_type: "short_term"
