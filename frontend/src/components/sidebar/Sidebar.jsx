@@ -14,10 +14,24 @@ import { Tooltip }        from "../ui";
 import { LoadingSpinner } from "../ui/LoadingSpinner";
 import { SettingsModal }  from "../settings/SettingsModal";
 import { useAuth }        from "../../context/AuthContext";
+import { AGENT_MOCK_MODE } from "../../config/env";
+import { MOCK_CHAT_ID, MOCK_PROJECT_ID } from "../../data/agentMockData";
 import {
   fetchProjects, createProject, deleteProject, updateProject,
   fetchProjectChats, deleteChat,
 } from "../../services/chatService";
+
+const MOCK_PROJECT = {
+  id: MOCK_PROJECT_ID,
+  name: "Mock Cafe Queue",
+};
+
+const MOCK_PROJECT_CHATS = [
+  {
+    id: MOCK_CHAT_ID,
+    title: "Mock Agent Workflow",
+  },
+];
 
 // ── Single chat row inside expanded folder ─────────────────────────────────
 function ChatRow({ chat, isActive, onSelect, onDelete }) {
@@ -95,6 +109,11 @@ function ProjectFolder({
 
   useEffect(() => {
     if (!isExpanded) return;
+    if (AGENT_MOCK_MODE) {
+      setChats(MOCK_PROJECT_CHATS);
+      setLoadingChats(false);
+      return;
+    }
     setLoadingChats(true);
     fetchProjectChats(project.id)
       .then(setChats)
@@ -104,6 +123,10 @@ function ProjectFolder({
 
   // Expose refresh so parent can call it after a new chat is created
   const refreshChats = useCallback(() => {
+    if (AGENT_MOCK_MODE) {
+      setChats(MOCK_PROJECT_CHATS);
+      return;
+    }
     fetchProjectChats(project.id).then(setChats).catch(() => {});
   }, [project.id]);
 
@@ -113,6 +136,7 @@ function ProjectFolder({
   }, [project._refreshRef, refreshChats]);
 
   const handleDeleteChat = useCallback(async (chatId) => {
+    if (AGENT_MOCK_MODE) return;
     await deleteChat(chatId).catch(() => {});
     setChats((prev) => prev.filter((c) => c.id !== chatId));
   }, []);
@@ -270,6 +294,12 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
   const { user, logout, authVersion } = useAuth();
 
   useEffect(() => {
+    if (AGENT_MOCK_MODE) {
+      setProjects([MOCK_PROJECT]);
+      setExpandedFolders({ [MOCK_PROJECT_ID]: true });
+      setLoadingProjects(false);
+      return;
+    }
     if (authVersion === 0) { setProjects([]); setLoadingProjects(false); return; }
     setLoadingProjects(true);
     fetchProjects()
@@ -279,6 +309,10 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
   }, [authVersion]);
 
   const handleCreateProject = async (name) => {
+    if (AGENT_MOCK_MODE) {
+      setCreatingProject(false);
+      return;
+    }
     setCreatingProject(false);
     try {
       const p = await createProject(name);
@@ -290,6 +324,7 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
   };
 
   const handleDeleteProject = async (projectId) => {
+    if (AGENT_MOCK_MODE) return;
     // If currently viewing this project, clear view
     if (activeProjectId === projectId) onOpenProject(null);
     try {
@@ -299,6 +334,7 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
   };
 
   const handleRenameProject = async (projectId, name) => {
+    if (AGENT_MOCK_MODE) return;
     if (!name) return;
     try {
       const updated = await updateProject(projectId, { name });

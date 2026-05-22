@@ -327,26 +327,58 @@ def display_product_vision(vision: dict) -> None:
     section("ARTIFACT: product_vision")
     print(f"  Description     : {vision.get('description', '?')}")
 
-    flow = vision.get("flow") or {}
-    entities = flow.get("entities") or []
-    print(f"  Entities        : {len(entities)}")
-    for entity in entities:
-        print(f"    • {entity.get('name', '')}")
+    frame = vision.get("discovery_frame") or {}
+    if frame:
+        print("\n  Discovery Frame:")
+        if frame.get("intent_summary"):
+            print(f"    Intent        : {frame.get('intent_summary')}")
+        if frame.get("first_release_hypothesis"):
+            print(f"    First release : {frame.get('first_release_hypothesis')}")
 
-    scope = vision.get("scope") or []
-    print(f"  Scope           : {len(scope)}")
-    for item in scope:
-        print(f"    • {item.get('item', '')}")
+    assumptions = vision.get("assumptions") or []
+    if assumptions:
+        print(f"\n  Assumptions ({len(assumptions)}):")
+        for assumption in assumptions:
+            roles = ", ".join(assumption.get("clarifier_roles") or [])
+            suffix = f" [{roles}]" if roles else ""
+            source = assumption.get("source_kind") or "?"
+            print(f"    {assumption.get('id','?')} ({source}){suffix}: {assumption.get('statement','')}")
 
     roles = vision.get("roles") or []
     if roles:
         print(f"\n  Roles ({len(roles)}):")
+        duties = vision.get("duties") or []
         for role in roles:
-            duties = role.get("duties") or []
+            role_duties = [
+                duty for duty in duties
+                if duty.get("role", "").strip().lower() == role.get("name", "").strip().lower()
+            ]
             print(
                 f"    [{role.get('kind','?')}] {role.get('name','?')} "
-                f"- {len(duties)} duty(s)"
+                f"- {len(role_duties)} duty(s)"
             )
+            for duty in role_duties[:3]:
+                print(f"      • {duty.get('need') or duty.get('rule') or duty.get('risk')}")
+
+    concerns = vision.get("concerns") or []
+    if concerns:
+        print(f"\n  Concerns ({len(concerns)}):")
+        for concern in concerns:
+            print(f"    • {concern.get('theme') or concern.get('quality') or concern.get('id','')}")
+
+    scope = vision.get("scope") or []
+    if scope:
+        print(f"\n  Scope ({len(scope)}):")
+        for item in scope:
+            print(f"    • {item.get('item', '')}")
+
+    capabilities = vision.get("capabilities") or []
+    entities = vision.get("entities") or []
+    links = vision.get("links") or []
+    print(
+        "\n  Supporting map  : "
+        f"{len(capabilities)} capability(s), {len(entities)} entity coordinate(s), {len(links)} link(s)"
+    )
 
 def display_requirement_list(rl: dict) -> None:
     section("ARTIFACT: requirement_list")
@@ -367,9 +399,14 @@ def display_requirement_list(rl: dict) -> None:
             print(
                 f"    {icon} [{r.get('id','?')}] "
                 f"({r.get('type','?')}, prio={r.get('priority','?')}) "
-                f"[{r.get('epic','?')}] "
+                f"[{r.get('focus_kind') or r.get('quality_theme') or '?'}] "
                 f"{r.get('statement','')}"
             )
+    gaps = rl.get("gaps") or []
+    if gaps:
+        print(f"\n  Gaps ({len(gaps)}):")
+        for gap in gaps:
+            print(f"    - {gap}")
     if conflicts:
         print(f"\n  Conflicts blocking approval ({len(conflicts)}):")
         for conflict in conflicts:
@@ -448,10 +485,16 @@ def collect_review_decision(updates: tuple, auto_approve: bool) -> Dict[str, Any
                     display_conflict(conflict, indent=4)
         elif review_type == "elicitation_agenda":
             summary = artifact_data.get("summary") or {}
+            missing = summary.get("assumption_missing") or []
             print(
                 f"\n  {summary.get('total', 0)} agenda item(s) "
-                f"({summary.get('needs', 0)} need, {summary.get('conflicts', 0)} conflict hook)"
+                f"covering {summary.get('assumption_covered', 0)}/"
+                f"{summary.get('assumption_expected', 0)} assumption(s)"
             )
+            if summary.get("items_per_assumption"):
+                print(f"  Items per assumption: {summary.get('items_per_assumption')}")
+            if missing:
+                print(f"  Missing assumptions: {', '.join(missing)}")
         elif review_type == "product_backlog":
             items = artifact_data.get("items") or []
             print(f"\n  {len(items)} user stories")
@@ -522,6 +565,9 @@ def collect_review_decision(updates: tuple, auto_approve: bool) -> Dict[str, Any
 # State initialisation
 # ---------------------------------------------------------------------------
 def build_initial_state(args, preloaded_artifacts=None):
+    from src.config.intake_hint import INTAKE_HINT, VISIONARY_CONTRACT
+    input_guidance = INTAKE_HINT
+    visionary_contract = VISIONARY_CONTRACT
     if args.project:
         project_desc = args.project.read()
         args.project.close()
@@ -569,6 +615,8 @@ def build_initial_state(args, preloaded_artifacts=None):
     state.update({
         "session_id":          args.session,
         "project_description": project_desc,
+        "input_guidance":      input_guidance,
+        "visionary_contract":  visionary_contract,
         "system_phase":        "sprint_zero_planning",
         "artifacts":           artifacts,
         "conversation":        [],
@@ -668,6 +716,14 @@ def run_workflow(initial_state, config, args):
                 if interrupted or should_stop:
                     break  # break outer step_output loop
 
+            # If the stream exhausted naturally (graph reached END) and we
+            # were neither interrupted nor told to stop at a specific artifact,
+            # break out of the while loop — otherwise we would re-enter
+            # graph.stream() with the same input and replay/no-op forever,
+            # spamming the checkpointer and the tracer on every cycle.
+            if not interrupted:
+                break
+
     return final_artifacts
 
 # ---------------------------------------------------------------------------
@@ -687,6 +743,11 @@ def main():
     else:
         initial_state = build_initial_state(args)
         section("iReDev - Full Sprint Zero + Refinement flow")
+        print(f"  Input guidance: {initial_state.get('input_guidance', '')}")
+        contract = initial_state.get("visionary_contract")
+        if contract:
+            section("Visionary support contract")
+            print(contract)
 
     if args.end_at:
         print(f"  Will stop after: {args.end_at}")

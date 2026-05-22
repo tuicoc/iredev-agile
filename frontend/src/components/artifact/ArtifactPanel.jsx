@@ -2,11 +2,10 @@
 // =============================================================================
 // Right-side panel with smart tabs based on artifact type.
 //
-// interview_record          → tabs: Transcript, Requirements
-// reviewed_interview_record → tabs: Transcript, Requirements
-// product_vision            → tabs: JSON (raw view)
-// elicitation_agenda        → tabs: JSON (raw view)
-// requirement_list          → tabs: JSON (raw view)
+// interview_record          → tabs: Interview
+// product_vision            → tabs: Vision
+// elicitation_agenda        → tabs: Elicitation Agenda
+// requirement_list          → tabs: Requirements
 // user_story_draft          → tabs: JSON (raw view)
 // analyst_estimation        → tabs: JSON (raw view)
 // product_backlog           → tabs: Backlog
@@ -20,7 +19,6 @@ import {
   Check,
   Download,
   X,
-  FileText,
   List,
   ClipboardList,
   CheckSquare,
@@ -65,7 +63,7 @@ function getTabsForType(artifactType) {
   switch (artifactType) {
     case "interview_record":
       return [
-        { id: "interview_requirements", label: "Requirements", icon: List },
+        { id: "interview_requirements", label: "Interview", icon: List },
       ];
     case "requirement_list":
       return [

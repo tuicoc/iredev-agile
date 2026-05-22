@@ -23,3 +23,19 @@ export const REQUEST_TIMEOUT_MS =
 
 /** How long (ms) to wait before trying to reconnect a dropped WebSocket */
 export const WS_RECONNECT_DELAY_MS = 2_000;
+
+const MOCK_QUERY_VALUE =
+  typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("mock")
+    : "";
+
+/** Local UI fixture stage. Use ?mock=agents for full flow or ?mock=distiller. */
+export const AGENT_MOCK_STAGE =
+  MOCK_QUERY_VALUE ||
+  (String(import.meta.env.VITE_USE_AGENT_MOCKS || "").toLowerCase() === "true"
+    ? "agents"
+    : "");
+
+/** Local UI fixture mode: bypass auth/API and load agent artifact mocks. */
+export const AGENT_MOCK_MODE =
+  AGENT_MOCK_STAGE === "agents" || AGENT_MOCK_STAGE === "distiller";

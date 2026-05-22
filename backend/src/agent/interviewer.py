@@ -1,9 +1,18 @@
 """
 interviewer.py - InterviewerAgent
 
-InterviewerAgent executes the reviewed agenda one item at a time. The model
-decides the next conversational move; Python only records the chosen action,
-updates runtime data, and writes the interview artifact.
+InterviewerAgent runs the reviewed agenda one item at a time. The model chooses
+conversational moves through tools; Python records the chosen action, updates
+runtime data, and writes the interview_record artifact.
+
+Design split
+------------
+Tool descriptions name what each tool does and its signature — they exist so
+the model can pick the right tool. They do not teach how to think.
+The ReAct addendum prompt teaches the thinking: turn control, question craft,
+and closure judgment.
+Persona text holds the agent's stable stance only.
+Python only normalizes inputs, advances runtime, and writes the artifact.
 """
 
 from __future__ import annotations
@@ -14,427 +23,424 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from .agenda import AgendaRuntime, AgendaRuntimeItem, TRAP_DRILL_STYLE
+from .agenda import AgendaRuntime
 from .base import BaseAgent, Tool, ToolResult
 
 logger = logging.getLogger(__name__)
 
 
+CoverageStatus = Literal["covered", "gap", "skipped"]
+AssumptionStance = Literal["supports", "weakens", "qualifies", "unclear"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Artifact pieces
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CoverageEntry(BaseModel):
+    point: str = Field(description="Agenda coverage point being judged.")
+    status: CoverageStatus = Field(description="covered when stakeholder evidence settled the point. gap when probed but not settled. skipped when prior evidence or item scope makes more probing unnecessary.")
+    evidence: str = Field(description="Brief evidence text: stakeholder fact for covered; failed probe reason for gap; prior-evidence or scope reason for skipped. Required for every entry.")
+
+
+class AssumptionEvidenceEntry(BaseModel):
+    vision_ref: str = Field(description="Vision id (assumption, concern, or scope) this evidence speaks to. Must come from the current item's vision_refs.")
+    stance: AssumptionStance = Field(description="How the evidence affects the referenced vision element: supports (aligns), weakens (contradicts), qualifies (true only under a condition/subset/boundary), unclear (role could not settle it).")
+    evidence: str = Field(description="Brief stakeholder fact from the dialogue. Do not invent; cite what the role actually said.")
+    implication: str = Field(description="What this evidence may change downstream: requirement, quality expectation, boundary, conflict, gap, or first-release note.")
+
+
 class ELRecord(BaseModel):
     id: str = Field(description="Stable interview record id in EL-NNN format.")
-    item: str = Field(description="Agenda item id that produced this record.")
-    entity: str = Field(description="Entity discussed in this exchange.")
-    step: str = Field(description="Entity step discussed in this exchange.")
-    aspect: str = Field(description="Agenda aspect discussed in this exchange.")
-    trap: str = Field(description="Interview trap used for this exchange.")
-    kind: str = Field(description="Agenda item kind: need, conflict, or concern.")
-    role: str = Field(description="Stakeholder role interviewed.")
-    close: str = Field(description="Completion rule the interviewer was trying to settle.")
-    source: str = Field(description="Agenda source id behind this interview record.")
-    risk: Optional[str] = Field(
-        default=None,
-        description=(
-            "Failure or tension scenario the interview item was designed to resolve "
-            "or bound."
-        ),
-    )
-    concern_ref: Optional[str] = Field(
-        default=None,
-        description="NFR concern id when this record came from a concern agenda item.",
-    )
-    concern_category: Optional[str] = Field(
-        default=None,
-        description="NFR concern category when this record came from a concern agenda item.",
-    )
-    concern_theme: Optional[str] = Field(
-        default=None,
-        description="NFR concern theme when this record came from a concern agenda item.",
-    )
-    rule: Optional[str] = Field(
-        default=None,
-        description=(
-            "Final closure statement captured from the stakeholder when one was "
-            "settled. The grammatical subject is the PRODUCT, not the user: the "
-            "stakeholder describes their experience; this field records what the "
-            "app must therefore do.\n"
-            "\n"
-            "- For need / conflict items, write it as 'The app must <verb> ...', "
-            "'The system must require ...', 'The product must allow ...', or an "
-            "equivalent system-subject form. Avoid 'Users must provide / agree / "
-            "be aware / have / receive ...' — those are user obligations and "
-            "almost always represent a system obligation in disguise.\n"
-            "- For concern items, the rule names what observable quality the "
-            "product must hold: a threshold with units, a named comparator, an "
-            "observable absence ('no spinner visible'), an operating condition "
-            "('before the user shifts attention'), or a named precedent. "
-            "Emotional descriptors alone ('instantly', 'immediately', "
-            "'responsive', 'fast', 'smooth') are not acceptable as the rule.\n"
-            "- Narrow exception: a workflow obligation that exists outside the "
-            "app (an external auditor sign-off the system only records) or a "
-            "legal acceptance whose force is external. In ordinary product "
-            "feature elicitation, default to system subject.\n"
-            "- This field is a closure summary, not a container for every "
-            "independent fact from the dialogue. Atomic facts go into signals."
-        )
-    )
-    align: Optional[Literal["exact", "narrower", "broader", "misaligned"]] = Field(
-        default=None,
-        description="How well the final answer matched the close rule."
-    )
-    talk: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Question and answer turns captured for this agenda item."
-    )
-    signals: List[str] = Field(
-        default_factory=list,
-        description=(
-            "Atomic evidence units captured from the stakeholder's reply. Each "
-            "item should carry ONE independent fact the stakeholder stated: a "
-            "condition, limit, exception, permission, dependency, threshold, "
-            "precedence, observed failure, or observable quality boundary.\n"
-            "\n"
-            "Signals are the main raw material Distiller uses to split one "
-            "interview record into multiple atomic requirements. Keep them "
-            "atomic — do not join independent facts with 'and'.\n"
-            "\n"
-            "Signals may preserve the stakeholder's own phrasing of their "
-            "experience (their lived statement is what it is), but each signal "
-            "must be readable as evidence that justifies a PRODUCT-side rule. "
-            "Avoid signals that read only as user-side duty ('users must "
-            "provide X', 'users have to agree to Y') with no system-side "
-            "consequence; rewrite to expose what the app does or fails to do "
-            "('the app rejects sign-up when email is missing', 'the app must "
-            "present terms before account creation'). A signal that gives "
-            "Distiller no system-side hook is wasted evidence."
-        )
-    )
-    question: Optional[str] = Field(
-        default=None,
-        description="Last interviewer message delivered on this item."
-    )
-    answer: Optional[str] = Field(
-        default=None,
-        description="Rendered answer block used for human review."
-    )
-    status: Optional[Literal["answered", "skipped"]] = Field(
-        default=None,
-        description="Final interview status for this agenda item."
-    )
+    item: str = Field(description="Agenda item id (IT-NNN) that produced this record.")
+    vision_refs: List[str] = Field(default_factory=list, description="Vision ids (assumption / concern / scope) this exchange was meant to clarify.")
+    perspective: str = Field(description="Product role perspective interviewed.")
+    context: str = Field(description="Operating context shown to the stakeholder for this item.")
+    decision_target: Optional[str] = Field(default=None, description="What this exchange was meant to clarify downstream.")
+    close_when: str = Field(description="Stop condition used by the interviewer for this item.")
+    coverage_points: List[str] = Field(default_factory=list, description="Agenda evidence points owned by this item.")
+    coverage: List[CoverageEntry] = Field(default_factory=list, description="Per-point coverage judgment.")
+    signals: List[str] = Field(default_factory=list, description="Atomic stakeholder-stated facts as they were said. One independent fact per entry. Not paraphrases of each other, not synthesis across speakers.")
+    assumption_evidence: List[AssumptionEvidenceEntry] = Field(default_factory=list, description="Evidence about each assumption the answer touched.")
+    gaps: List[str] = Field(default_factory=list, description="Coverage points probed but unresolved. One entry = one concrete missing element.")
+    rule: Optional[str] = Field(default=None, description="Closure summary captured when the item settled. Empty when closing on gaps only.")
+    talk: List[Dict[str, Any]] = Field(default_factory=list, description="Question/answer turns captured for this item.")
+    status: Literal["answered", "partial", "skipped"] = Field(description="Final interview status for this agenda item.")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prompt addendum — taught thinking
+# ─────────────────────────────────────────────────────────────────────────────
 
 _REACT_ADDENDUM = """\
 TURN CONTROL
-- Always inspect TURN STATUS first.
-- If "Pending answer: yes", call record_answer.
-- If "Pending answer: no" and agenda remains open, call ask_question.
-- Call conclude ONLY when the task explicitly says: "AGENDA STATUS: COMPLETE".
-- If the task shows a CURRENT ITEM or says "AGENDA STATUS: OPEN", conclude is forbidden.
-- One tool call per turn.
-- The agenda is a queue of items. Closing one item does not complete the
-  interview. After an item closes, the next turn must work on the next CURRENT
-  ITEM until the task itself says AGENDA STATUS: COMPLETE.
-- If a tool observation says an item remains open, ask a follow-up on that same
-  item. Do not conclude.
+- Inspect TURN STATUS first.
+- If Pending answer: yes → call record_answer.
+- If Pending answer: no and AGENDA STATUS: OPEN → call ask_question.
+- If AGENDA STATUS: COMPLETE → call conclude.
+- One tool call per turn. Closing one item does not complete the interview;
+  the supervisor advances you to the next item automatically.
 
-SUBJECT FRAMING (apply on every record_answer and every ask_question)
-The persona's SUBJECT FRAMING DISCIPLINE governs all your wording. In short:
-the user is the SOURCE of evidence; the product is the SUBJECT of every rule
-and every question.
-- When you record a rule, the subject is the product: "The app must
-  require ...", "The system must allow ...", "The product must present ...".
-  Do NOT record rules as user obligations ("Users must provide ...", "The
-  user must agree to ...", "Users must be aware that ..."); those are the
-  user's experience phrased the wrong way round and they will mislead
-  Distiller into writing user-duty requirements.
-- When you ask a question, frame it around what the PRODUCT must do for
-  the user, not what the user must do. "What does the app need to enforce
-  when X happens?", "What does the app need to show you at X?", "What
-  does the app fail to do today at X?" — not "What must you do when X?".
-- Three temptation patterns the stakeholder will hand you in user-subject
-  form; you record them in product-subject form:
-    user says "to sign up I have to enter my email and password"
-      => rule "The app must require email and password at sign-up"
-    user says "I have to agree to terms first"
-      => rule "The app must present the terms and require acceptance
-              before account creation"
-    user says "I need to know that delete is permanent"
-      => rule "The app must warn the user that delete is permanent
-              before confirming"
+QUESTION CRAFT (apply before ask_question)
+You are talking to a simulated person who lives the situation. They are not a
+designer, an analyst, or a reviewer. They cannot decide product scope; they
+can tell you what they experience.
 
-WHEN CALLING record_answer
-1. Read the pending stakeholder answer and the full local dialogue.
-2. Classify align:
-   - exact: answer settles close and directly addresses the gap plus risk.
-   - narrower: answer settles close for a narrower condition that still
-     addresses the gap plus risk.
-   - broader: answer addresses the topic but leaves the decisive rule incomplete.
-   - misaligned: answer does not address the agenda item.
-3. done=true only when the close rule is now explicit enough that Distiller can
-   use it without guessing and the risk is resolved, bounded, or explicitly
-   left as accepted ambiguity per ACCEPT-AMBIGUITY CLOSE below.
-4. Alignment and done must be internally consistent:
-   - exact or narrower -> done may be true only if rule is concrete and
-     system-subject.
-   - broader or misaligned -> done must be false and rule must be empty.
-5. rule is the shortest settled closure statement, written with the PRODUCT
-   as the subject (see SUBJECT FRAMING). It is not the only source for
-   Distiller and should not hide multiple independent facts in one blob.
-   Leave it empty when done=false.
-6. signals capture only concrete stakeholder evidence stated in this exchange.
-   signals carry the independent facts Distiller will split.
-   Split independent conditions, limits, permissions, dependencies, exceptions,
-   thresholds, quality boundaries, and precedence facts into separate signal
-   strings. Do not merge them with "and" when they could become separate
-   requirements or acceptance criteria. Each signal should be readable as
-   evidence justifying a system-side rule (see SUBJECT FRAMING).
-7. done=true is invalid when rule is empty. If the answer has useful evidence
-   but no settled rule or quality statement, use done=false and ask a follow-up.
-8. Apply PROBE-FIRST RHYTHM and DRILL-BEFORE-CLOSE from the persona.
-   For kind=need and kind=concern, the first stakeholder answer on this
-   item is a reaction to the probe (a foil), not yet a settled rule.
-   Default done=false on the first stakeholder turn for these kinds;
-   close only when ACCEPT-AMBIGUITY CLOSE has explicitly fired in
-   that first reaction, or when at least one follow-up drill has
-   already happened. Outside those two cases, prefer recording
-   signals with done=false and asking a follow-up.
-9. For kind=concern, done=true is invalid when rule contains ONLY an
-   emotional descriptor with no observable anchor. Apply QUALITY
-   BOUNDARY DISCIPLINE before closing: if the load-bearing words in
-   rule reduce to feeling vocabulary ("quickly", "responsive",
-   "fast", "instantly", "immediately", "smooth", "snappy",
-   "intuitive") and no observable absence, comparator, operating
-   condition, or named precedent appears, set done=false, record
-   the descriptor as a signal (it is evidence about the user's
-   experience), and ask the grounded follow-up that turns the
-   descriptor into an observable anchor.
+How to pick what to ask:
+- Look at the current item's coverage_points and vision_refs. Pick the one
+  open point whose settling would most change a downstream requirement, gap,
+  conflict, boundary, or first-release note.
+- If the prior answer was thin or moved off the point, ask the next question
+  that pulls back to the point you still need.
+- If a point was probed and the role could not answer, that is a gap — do not
+  keep probing the same way; either pivot to an adjacent point or close on
+  gap with a reason.
+- If the seed question assumes the stakeholder has already used a product that
+  the project description only proposes, translate it into the current problem
+  moment, comparable workaround, decision boundary, or minimum useful behavior.
+  Do not pretend usage history exists.
 
-ACCEPT-AMBIGUITY CLOSE (for kind=need and kind=conflict)
-A need or conflict item is not always closed by a specific number, scale, or
-precedence. Sometimes the defensible answer is that FLEXIBILITY itself is the
-rule. When the stakeholder explicitly and consistently states across turns
-that they cannot specify exact terms because variation in user experience or
-absence of role authority is the reason, that statement IS the close.
-- Signs flexibility is the close, not a stall:
-  * the stakeholder names the alternatives that must coexist
-    (predefined AND open-ended, structured AND free-form, etc.);
-  * the stakeholder explains WHY a single answer would be wrong;
-  * the stakeholder repeats the same refusal with consistent reasoning
-    across two or more turns.
-- Action: close with rule="The app must support [both X and Y / multiple
-  options / flexibility in Z]" and signals carrying the named alternatives
-  the stakeholder defended. align=narrower is usually correct here.
-- Hard cap: if you have asked the same closure question three times and
-  received the same flexibility answer with consistent reasoning, do not
-  ask a fourth time. Close on flexibility. Asking the same question a
-  fourth time is looping, not drilling.
+How to phrase the question:
+- One open question. Not yes/no, not either/or, not multi-part. No design or
+  feature-confirmation framing ("would you like…", "what features should…").
+- Open with the question itself. No thanks, recap, or praise.
+- The simulated person owns lived experience, not strategy. Ask about
+  situation, current workaround, consequence, boundary, exception, quality
+  expectation, or minimum useful behavior.
 
-WHEN kind=need
-- First ground the stakeholder in the named entity step.
-- Then present the probe as a factual statement framed around the PRODUCT
-  (per SUBJECT FRAMING), not around the user's duties.
-- Drill until the missing PRODUCT rule, limit, dependency, or permission
-  becomes explicit, OR until the stakeholder defensibly settles on
-  flexibility per ACCEPT-AMBIGUITY CLOSE.
+Probing angles available to you (choose what the moment needs; you do not
+have to label or record which one you picked):
+- specify — drill into a vague detail (when, who, how often, with what,
+  inside which moment).
+- negate — when does the rule NOT apply, or should it be blocked?
+- stretch — boundary pressure: peak, simultaneity, absence, load, failure of
+  the normal path, unusual timing.
+- conflict — contrast a tension with prior dialogue, the Product Vision, or
+  another role's evidence. Name both sides neutrally.
+- why-deeper — causality, underlying reason, policy, or risk behind a stated
+  behavior.
+- critical-incident — ask for one concrete moment when the current situation
+  went badly, urgently, ambiguously, or with meaningful consequence.
+- ladder — ask why the named friction matters, then what the stakeholder does
+  next when it is not resolved.
+- boundary — ask what the product or resource should not decide, replace,
+  own, expose, or guarantee from this stakeholder's view.
 
-WHEN kind=conflict
-A conflict item exposes a collision between two reviewed duties or
-concern pressures. Your job here is NOT to drive the resolution. Driving
-resolution from a single stakeholder biases the outcome toward whichever
-side that stakeholder represents; the global resolution requires every
-affected stakeholder's stance side-by-side, which only the human
-reviewer sees at the distiller HITL gate. Capture this stakeholder's
-side only, then close.
+SIGNAL-DRIVEN PROBING (apply before choosing the next question)
+A surfaced signal is a concrete fact the stakeholder just named for the first
+time — a specific misconception, a specific workaround, a specific moment of
+failure, a specific role attribute, a specific consequence. Surface is not
+depth: the stakeholder named it, but the lived detail behind it (when, with
+whom, what happens next, what they tried, what they wish were different) is
+still implicit.
 
-Capture three things from THIS stakeholder alone:
-  (a) HOW the collision lands in their lived role — when they feel
-      it at the named entity step, what the experience looks like,
-      what frustration or uncertainty it creates;
-  (b) WHICH SIDE they personally lean toward and why, in their own
-      role's terms — their lean is evidence of one party's stance,
-      not a global verdict;
-  (c) any concrete preference they would want the product to offer
-      from their side (a default they would accept, a signal they
-      would want to see, an exit they would want to keep open) —
-      still expressed as their stance, not the product's commitment.
+The temptation is to mark the coverage_point as covered and pivot to the next
+point. Don't, unless the lived detail behind the surfaced signal would not
+change any downstream requirement, gap, conflict, boundary, or release choice.
 
-Close criteria for conflict items (done=true) — any of the following
-is sufficient:
-  - align in {exact, narrower} AND (a), (b), and (c) above are
-    visible in signals (one or more of (b) and (c) may be "no lean"
-    or "no preference" when the stakeholder honestly has none);
-  - ACCEPT-AMBIGUITY CLOSE applies (the stakeholder explicitly
-    settles on flexibility itself, with the alternatives named);
-  - the stakeholder explicitly states the collision is not theirs
-    to resolve ("that is a product decision", "I would defer to
-    someone else", "this is not my call") — record that statement
-    in signals and close.
+Self-test before the next question: "Did the last answer name a concrete
+signal whose lived detail is still implicit, and would that detail change a
+downstream decision?" If yes, the next question drills into THAT signal —
+`specify` for the situation behind it, `critical-incident` for a real moment,
+`ladder` for why it matters and what happens next, `why-deeper` for the cause,
+`negate` for when it does not apply, `stretch` for boundary conditions, or
+`boundary` for ownership limits — before pivoting to a different
+coverage_point. Pivoting too early turns surface signals into shallow evidence
+the Distiller cannot lift into a requirement.
 
-The rule on a closed conflict item names the CURRENT stakeholder's
-stance, never a globally enforced product rule. Acceptable rule
-shapes for conflict items:
-  - "The current stakeholder leans toward weighting <X> when <X>
-    and <Y> collide, and would accept the product surfacing both
-    rather than choosing for them."
-  - "The current stakeholder defers the precedence decision to a
-    product-level rule and wants the conflict surfaced rather than
-    hidden."
-  - "The current stakeholder cannot specify a single rule because
-    the collision varies by context, and would accept either side
-    so long as <named condition> holds."
-The distiller picks these stakeholder stances up as evidence and
-emits the unresolved tension as a Conflict object for human review.
+CLOSURE JUDGMENT (apply before record_answer.done = true)
+Your goal is lived evidence that supports, weakens, qualifies, or leaves each
+relevant assumption unclear — not assumption confirmation, and not the
+minimum number of turns.
 
-Do NOT:
-  - re-ask the same closure question after the stakeholder has
-    already given their personal lean; their lean IS their close
-    on this item.
-  - push for a precedence rule, a condition split, or an escalation
-    path that this single stakeholder would not naturally own. When
-    the closure would require negotiating with another role, the
-    collision belongs to HITL, not to this turn.
-  - conflate the stakeholder's personal lean (evidence) with the
-    product's global verdict (not your output). The first closes
-    this item; the second is decided later.
-  - keep drilling once item_turn_count is at 3 or more and the
-    stakeholder's stance has not shifted. Capture what you have and
-    close on stance; the conflict will be raised to HITL by the
-    distiller.
+VERDICT REQUIRED FOR EACH COVERAGE_POINT
 
-WHEN kind=concern (apply QUALITY BOUNDARY DISCIPLINE)
-- Work in quality-probing mode, not rule-clarification mode.
-- Ground the stakeholder in the named entity step and concern theme.
-- Ask for lived examples, operating conditions, tolerable failure,
-  observable absences, comparative anchors, named precedents, and who is
-  affected when the quality fails.
-- Emotional descriptors are NOT qualitative boundaries. "Instantly",
-  "immediately", "quickly", "responsive", "fast", "smooth", "snappy",
-  "promptly" describe how the user feels but give Distiller nothing to
-  test. Treat these as the START of a probe, never the end.
-- When the stakeholder uses an emotional descriptor, ask one grounded
-  follow-up: "When you say 'instantly', what would you actually notice if
-  it were not instant — a spinner appearing, a perceptible wait, a moment
-  where you start looking elsewhere?". Do NOT close on the descriptor
-  alone.
-- done=true only when the rule contains one of:
-  * a concrete threshold or magnitude with a unit,
-  * a comparative anchor with a named comparator ("faster than typing the
-    next word"),
-  * an observable absence ("no spinner appears"),
-  * an operating condition that bounds the failure ("before the user
-    shifts attention away"),
-  * a named precedent the stakeholder genuinely knows.
-- rule is the settled quality statement, written system-subject ("The
-  app must respond before the user shifts attention away from the entry
-  screen"), not "Users must experience instant response".
-- done=true is invalid if rule is empty. done=true is also invalid if
-  rule contains only an emotional descriptor without an observable
-  anchor; ask the grounded follow-up first.
-- Do not invent a numeric threshold for the stakeholder.
-- If the stakeholder gives only examples of frustration or failure,
-  record the evidence with done=false, then ask for the observable
-  anchor (absence / comparator / operating condition / precedent) that
-  would let Distiller write a reviewable NFR.
+Every coverage_point in the current item must receive ONE of three verdicts
+in the coverage array before done=true:
 
-WHEN CALLING ask_question
-- message is either:
-  - a grounded question framed around the product, or
-  - the prepared probe stated as a fact.
-- Frame around the product, not the user (see SUBJECT FRAMING). Prefer
-  "what does the app need to ..." or "what does the app fail to do at ..."
-  over "what must you do when ...".
-- mirror briefly reflects the latest stakeholder concern when one exists.
-- probe=true only when you are presenting the prepared probe itself.
-- Before asking, check: have I asked this same closure question two or
-  more times already? If yes and the stakeholder's answer has not moved,
-  consider ACCEPT-AMBIGUITY CLOSE or QUALITY BOUNDARY follow-up instead
-  of repeating.
+- covered  — the stakeholder's answer directly addressed the point. Quote or
+  summarize in CoverageEntry.evidence.
+- gap      — you ASKED a question targeting this point AND the stakeholder
+  could not settle it. Name the failed probe in CoverageEntry.evidence.
+- skipped  — the point is genuinely duplicated by another covered point,
+  represented by prior settled evidence, or out of scope for this item.
+  Name the reason in CoverageEntry.evidence.
+
+A coverage_point with NO verdict is an OMISSION — you did not address it.
+"Skipped by default" because you did not ask is not allowed; that is silent
+loss. Pursue the omitted point with one targeted follow-up, then assign the
+correct verdict (covered if the answer addresses it, gap if it cannot be
+settled).
+
+Read the answer before judging coverage. Do not mark a point as skipped if
+the answer actually covers it. Do not mark a point as gap if the question
+did not target it — ask the targeted follow-up first.
+
+EXPANSION OVER CHECKLIST — dialogue value comes from what is surfaced
+
+The agenda's coverage_points are a FLOOR, not a ceiling. The value of
+dialogue over reading a document is what the stakeholder surfaces beyond
+the planned floor — a specific moment, a workaround, a quiet concern, a
+boundary they noticed, a tension that did not appear in the agenda.
+
+When the stakeholder names an unexpected lived detail outside the coverage
+list, ask ONE follow-up exploring it before pivoting back to the next
+planned coverage_point. A surfaced detail that becomes a signal is what
+dialogue is for. Do not pivot away from new lived evidence just to tick the
+next coverage_point.
+
+done=true ONLY when ALL of these hold:
+- Every coverage_point has a verdict (covered/gap/skipped) with evidence
+  text — no omissions.
+- Recent answers have stopped surfacing new unexpected signals worth
+  exploring, OR the hard turn limit is reached.
+- The current task's minimum evidence turns have been met.
+- The recorded evidence is specific enough for Distiller to write at least
+  one product-owned obligation, boundary, conflict, or explicit gap without
+  inventing the missing object or acceptance condition.
+
+done=false when:
+- A coverage_point remains without a verdict (omission). Ask the targeted
+  follow-up.
+- A useful point is still unsettled and one non-redundant question would
+  likely settle it. Ask that question.
+- The last answer surfaced a new lived detail worth one follow-up. Pursue
+  it.
+
+If you reach the hard turn limit with uncovered points still without
+verdict, mark them as explicit gaps with a clear "did not pursue due to
+turn limit" reason — explicit gaps are reviewable; silent omissions are
+not.
+
+For each assumption touched by the answer, write one AssumptionEvidenceEntry
+with stance + evidence + implication.
+
+SIGNALS DISCIPLINE
+- signals are atomic stakeholder-stated facts. One independent fact per entry.
+- Do not paraphrase across speakers. Do not synthesize a fact combining two
+  answers. Do not write "the user said X" wrappers. If a fact appears twice
+  in dialogue, keep one entry.
 """
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Agent
+# ─────────────────────────────────────────────────────────────────────────────
 
 class InterviewerAgent(BaseAgent):
     def __init__(self) -> None:
         super().__init__(name="interviewer")
+        custom = (
+            self._raw_config.get("iredev", {})
+            .get("agents", {})
+            .get("interviewer", {})
+            .get("custom_params", {})
+        )
+        self._max_turns_per_item = int(custom.get("max_turns_per_item", 5) or 5)
+        min_turns = int(custom.get("min_turns_per_assumption_item", 2) or 2)
+        self._min_turns_per_assumption_item = max(1, min(min_turns, self._max_turns_per_item))
 
     def _register_tools(self) -> None:
         self.register_tool(Tool(
             name="record_answer",
             description=(
-                "Record the pending stakeholder reply for the current agenda item.\n\n"
-                "Use this tool only when TURN STATUS says Pending answer: yes. "
-                "This tool records evidence for the CURRENT ITEM only; it does not "
-                "complete the whole agenda.\n\n"
+                "Persist the stakeholder's reply for the current agenda item, "
+                "judge coverage, and either keep the item open or close it.\n\n"
+                "Use when TURN STATUS says Pending answer: yes.\n\n"
                 "Arguments:\n"
-                "  align (str, required): exact | narrower | broader | misaligned.\n"
-                "    exact/narrower mean the item may close only if rule is non-empty, system-subject, and addresses the current gap plus risk/tension.\n"
-                "    broader/misaligned mean the item remains open and rule must be empty.\n"
-                "  done (bool, required): true only when the close rule is fully settled.\n"
-                "    Mandatory pairing: broader/misaligned => done=false.\n"
-                "    exact/narrower => done=true only if rule is explicit, non-empty, system-subject, and addresses the current gap plus risk/tension.\n"
-                "    If useful evidence exists but no settled rule/quality statement can be written, use done=false.\n"
-                "    Accepted ambiguity is a valid close for need/conflict items when the stakeholder defensibly settled on flexibility itself as the rule (see ACCEPT-AMBIGUITY CLOSE).\n"
-                "    PROBE-FIRST / DRILL-BEFORE-CLOSE: for kind=need and kind=concern, done=true on the first stakeholder turn of an item is invalid unless ACCEPT-AMBIGUITY CLOSE has explicitly fired in that first reaction. The first answer is evidence about the probe (a foil); turn it into a closure rule with a follow-up. For kind=conflict, the stakeholder's first-turn lean is a valid close — record it.\n"
-                "    QUALITY BOUNDARY DISCIPLINE: for kind=concern, done=true is invalid when rule reduces to emotional descriptors only ('quickly', 'responsive', 'fast', 'instantly', 'immediately', 'smooth', 'snappy', 'intuitive') with no observable anchor (absence, comparator, operating condition, named precedent). Set done=false and ask the grounded follow-up that turns the descriptor into an observable anchor.\n"
-                "  why (str, required): concise reason for the align decision.\n"
-                "  rule (str): settled closure statement written with the PRODUCT as the subject.\n"
-                "    Correct: 'The app must require email and password at sign-up.', 'The system must present the terms before account creation.', 'The product must support both predefined and open-ended descriptors when logging stress.'.\n"
-                "    Incorrect: 'Users must provide email and password.', 'The user must agree to the terms.', 'Users must be aware that delete is permanent.' — these are user obligations and almost always wrong as written (see SUBJECT FRAMING).\n"
-                "    For kind=concern, the rule must contain an observable quality anchor: a threshold with units, a named comparator, an observable absence ('no spinner visible'), an operating condition ('before the user shifts attention'), or a named precedent. Emotional descriptors alone ('instantly', 'immediately', 'responsive', 'fast', 'smooth') are NOT acceptable.\n"
-                "    Keep rule as a closure summary; do not use it to compress every independent condition from the dialogue.\n"
-                "    Mandatory pairing: broader/misaligned => rule=''.\n"
-                "    Leave empty whenever done=false.\n"
-                "  signals (list[str], required): atomic evidence units from the stakeholder's reply.\n"
-                "    Include each independent condition, limit, exception, permission, dependency, threshold, precedence fact, or quality boundary as its own string.\n"
-                "    These signals are the main source Distiller uses to split one interview record into multiple atomic requirements.\n"
-                "    Each signal should be readable as evidence justifying a system-side rule; if a signal reads only as a user duty, rewrite it to expose what the app does or fails to do.\n"
-                "\nConcern items:\n"
-                "  Do not close on examples or frustrations alone. Do not close on emotional descriptors alone. Close only when rule contains an observable quality anchor Distiller can reuse. "
-                "If missing, record signals with done=false so the next turn asks a grounded follow-up about the observable anchor (absence / comparator / operating condition / precedent).\n"
-                'Input: {"align": str, "done": bool, "why": str, "rule": str, "signals": list}'
+                "  done (bool, required): close the item when meaningfully covered.\n"
+                "  rule (str): closure summary; empty when closing on gaps only.\n"
+                "  signals (list[str]): atomic stakeholder-stated facts.\n"
+                "  assumption_evidence (list[dict]): each item is "
+                "{vision_ref, stance, evidence, implication}; "
+                "stance is supports | weakens | qualifies | unclear.\n"
+                "  coverage (list[dict]): each item is {point, status, evidence}; "
+                "status is covered | gap | skipped.\n"
+                "  gaps (list[str]): probed-but-unresolved coverage_points.\n"
+                'Input: {"done": bool, "rule": str, "signals": list, '
+                '"assumption_evidence": list, "coverage": list, "gaps": list}'
             ),
             func=self._tool_record_answer,
         ))
         self.register_tool(Tool(
             name="ask_question",
             description=(
-                "Deliver exactly one interviewer message to the current stakeholder.\n\n"
-                "Use this tool when there is no pending answer, or after record_answer "
-                "keeps the current item open. Ask only about the CURRENT ITEM shown in "
-                "the task. Do not skip ahead.\n\n"
+                "Deliver exactly one open question to the current stakeholder "
+                "for the current agenda item.\n\n"
+                "Use when TURN STATUS says Pending answer: no and "
+                "AGENDA STATUS: OPEN.\n\n"
                 "Arguments:\n"
-                "  message (str, required): either a grounded question or the prepared probe stated as fact.\n"
-                "    Frame around the PRODUCT, not the user: 'What does the app need to enforce at X?', 'What does the app need to show you at X?', 'What does the app fail to do today at X?'. Avoid 'What must you do at X?' — that elicits user obligations, not product rules (see SUBJECT FRAMING).\n"
-                "  mirror (str, required): one short sentence echoing the latest concern from this same stakeholder; "
-                "use an empty string when no prior answer exists for this item.\n"
-                "  probe (bool, required): true only when message is the prepared factual probe.\n"
-                "\nFor kind=concern, ask for lived examples first if needed, then follow up for an observable quality anchor: the absence the user would notice, a comparative anchor, an operating condition that bounds failure, or a named precedent. "
-                "Emotional descriptors ('instantly', 'immediately', 'responsive') are the START of a probe, never an acceptable close — when the stakeholder uses one, ask one grounded follow-up that turns it into an observable condition.\n"
-                "Do not ask the stakeholder to invent a precise number if their role cannot defend one.\n"
-                "If you have asked the same closure question two or more times and the stakeholder keeps giving the same flexibility answer with consistent reasoning, do not ask a fourth time. Either close on flexibility per ACCEPT-AMBIGUITY CLOSE, or move on with done=false and a clear gap.\n"
-                'Input: {"message": str, "mirror": str, "probe": bool}'
+                "  message (str, required): one open question.\n"
+                'Input: {"message": str}'
             ),
             func=self._tool_ask_question,
         ))
         self.register_tool(Tool(
             name="conclude",
             description=(
-                "Write the interview_record artifact for the whole agenda.\n\n"
-                "Hard precondition: call this tool only when the task explicitly states "
-                "'AGENDA STATUS: COMPLETE' and no CURRENT ITEM is shown. Never call it "
-                "because a single item was answered. Never call it while the task states "
-                "'AGENDA STATUS: OPEN'. The tool will reject the call if any agenda item "
-                "is still pending.\n"
+                "Compile the interview_record artifact across the whole agenda.\n\n"
+                "Hard precondition: call only when AGENDA STATUS: COMPLETE.\n"
                 "Input: {}"
             ),
             func=self._tool_conclude,
         ))
 
+    # ── Normalization helpers (no product logic) ─────────────────────────────
+
+    @staticmethod
+    def _normalize_coverage(
+        raw_coverage: Optional[List[Any]],
+    ) -> List[Dict[str, str]]:
+        normalized: List[Dict[str, str]] = []
+        allowed = {"covered", "gap", "skipped"}
+        for raw in raw_coverage or []:
+            if not isinstance(raw, dict):
+                continue
+            point = str(raw.get("point") or "").strip()
+            status = str(raw.get("status") or "").strip().lower()
+            evidence = str(raw.get("evidence") or "").strip()
+            if not point or status not in allowed or not evidence:
+                continue
+            normalized.append({
+                "point": point,
+                "status": status,
+                "evidence": evidence,
+            })
+        return normalized
+
+    @staticmethod
+    def _merge_coverage(
+        existing: Optional[List[Dict[str, Any]]],
+        incoming: List[Dict[str, str]],
+    ) -> List[Dict[str, str]]:
+        merged: Dict[str, Dict[str, str]] = {}
+        for raw in existing or []:
+            if not isinstance(raw, dict):
+                continue
+            point = str(raw.get("point") or "").strip()
+            status = str(raw.get("status") or "").strip().lower()
+            evidence = str(raw.get("evidence") or "").strip()
+            if point and status:
+                merged[point.lower()] = {
+                    "point": point,
+                    "status": status,
+                    "evidence": evidence,
+                }
+        for entry in incoming:
+            merged[entry["point"].lower()] = entry
+        return list(merged.values())
+
+    @staticmethod
+    def _normalize_assumption_evidence(
+        raw_entries: Optional[List[Any]],
+        allowed_refs: Optional[List[str]],
+    ) -> List[Dict[str, str]]:
+        normalized: List[Dict[str, str]] = []
+        allowed_stances = {"supports", "weakens", "qualifies", "unclear"}
+        allowed = {str(ref or "").strip() for ref in allowed_refs or [] if str(ref or "").strip()}
+        for raw in raw_entries or []:
+            if not isinstance(raw, dict):
+                continue
+            ref = str(raw.get("vision_ref") or raw.get("assumption_ref") or "").strip()
+            stance = str(raw.get("stance") or "").strip().lower()
+            evidence = str(raw.get("evidence") or "").strip()
+            implication = str(raw.get("implication") or "").strip()
+            if not ref or stance not in allowed_stances or not evidence or not implication:
+                continue
+            if allowed and ref not in allowed:
+                continue
+            normalized.append({
+                "vision_ref": ref,
+                "stance": stance,
+                "evidence": evidence,
+                "implication": implication,
+            })
+        return normalized
+
+    @staticmethod
+    def _merge_assumption_evidence(
+        existing: Optional[List[Dict[str, Any]]],
+        incoming: List[Dict[str, str]],
+    ) -> List[Dict[str, str]]:
+        merged: List[Dict[str, str]] = []
+        seen = set()
+        for raw in list(existing or []) + incoming:
+            if not isinstance(raw, dict):
+                continue
+            ref = str(raw.get("vision_ref") or raw.get("assumption_ref") or "").strip()
+            stance = str(raw.get("stance") or "").strip().lower()
+            evidence = str(raw.get("evidence") or "").strip()
+            implication = str(raw.get("implication") or "").strip()
+            key = (ref.lower(), stance, evidence.rstrip(".").lower(), implication.rstrip(".").lower())
+            if not ref or not stance or not evidence or not implication or key in seen:
+                continue
+            seen.add(key)
+            merged.append({
+                "vision_ref": ref,
+                "stance": stance,
+                "evidence": evidence,
+                "implication": implication,
+            })
+        return merged
+
+    @staticmethod
+    def _append_unique_text(existing: Optional[List[str]], incoming: List[str]) -> List[str]:
+        result: List[str] = []
+        seen = set()
+        for text in list(existing or []) + list(incoming or []):
+            value = str(text or "").strip()
+            key = value.rstrip(".").lower()
+            if not value or key in seen:
+                continue
+            seen.add(key)
+            result.append(value)
+        return result
+
+    @staticmethod
+    def _coverage_complete(
+        coverage_points: Optional[List[str]],
+        coverage: Optional[List[Dict[str, Any]]],
+    ) -> bool:
+        points = [point.strip() for point in coverage_points or [] if point.strip()]
+        if not points:
+            return False
+        settled = {
+            str(entry.get("point") or "").strip().lower()
+            for entry in coverage or []
+            if (
+                str(entry.get("status") or "").strip().lower() in {"covered", "gap", "skipped"}
+                and str(entry.get("evidence") or "").strip()
+            )
+        }
+        return all(point.lower() in settled for point in points)
+
+    @staticmethod
+    def _has_meaningful_coverage(
+        coverage: Optional[List[Dict[str, Any]]],
+    ) -> bool:
+        return any(
+            str(entry.get("status") or "").strip().lower() == "covered"
+            and str(entry.get("evidence") or "").strip()
+            for entry in coverage or []
+        )
+
+    def _min_turns_for_item(self, item: Any) -> int:
+        return (
+            self._min_turns_per_assumption_item
+            if list(getattr(item, "vision_refs", []) or [])
+            else 1
+        )
+
+    # ── Tools ────────────────────────────────────────────────────────────────
+
     def _tool_record_answer(
         self,
-        align: str = "",
         done: bool = False,
-        why: str = "",
         rule: str = "",
         signals: Optional[List[str]] = None,
+        assumption_evidence: Optional[List[Any]] = None,
+        coverage: Optional[List[Any]] = None,
+        gaps: Optional[List[str]] = None,
         state: Optional[Dict[str, Any]] = None,
         **_: Any,
     ) -> ToolResult:
@@ -442,9 +448,7 @@ class InterviewerAgent(BaseAgent):
         answer = (state.get("enduser_answer") or "").strip()
         if not answer:
             return ToolResult(
-                observation=(
-                    "[record_answer] Pending answer is empty. Call ask_question instead."
-                ),
+                observation="[record_answer] Pending answer is empty. Call ask_question instead.",
                 should_return=False,
             )
 
@@ -469,38 +473,61 @@ class InterviewerAgent(BaseAgent):
             "answer": answer,
             "recorded_at": datetime.now().isoformat(),
         })
-        normalized_align = align.strip().lower() or "misaligned"
-        if normalized_align not in {"exact", "narrower", "broader", "misaligned"}:
-            normalized_align = "misaligned"
-
-        settled_rule = rule.strip()
-        can_close = (
-            bool(done)
-            and normalized_align in {"exact", "narrower"}
-            and bool(settled_rule)
-        )
-
-        item.align = normalized_align  # type: ignore[assignment]
-        item.rule = settled_rule or None
         item.signals = list(item.signals) + [
             signal for signal in (signals or []) if signal and signal not in item.signals
         ]
+        normalized_assumption_evidence = self._normalize_assumption_evidence(
+            assumption_evidence,
+            getattr(item, "vision_refs", []),
+        )
+        item.assumption_evidence = self._merge_assumption_evidence(
+            getattr(item, "assumption_evidence", []),
+            normalized_assumption_evidence,
+        )
+        item.gaps = self._append_unique_text(list(item.gaps), list(gaps or []))
+        normalized_coverage = self._normalize_coverage(coverage)
+        item.coverage = self._merge_coverage(getattr(item, "coverage", []), normalized_coverage)
+        settled_points = {
+            str(entry.get("point") or "").strip().lower()
+            for entry in item.coverage
+            if str(entry.get("status") or "").strip().lower() in {"covered", "skipped"}
+        }
+        if settled_points:
+            item.gaps = [
+                gap for gap in list(item.gaps)
+                if str(gap or "").strip().lower() not in settled_points
+            ]
+        for entry in normalized_coverage:
+            if entry.get("status") == "gap":
+                point = entry.get("point") or ""
+                item.gaps = self._append_unique_text(list(item.gaps), [point])
 
-        if not can_close:
-            reason = "the item remains open for another question."
-            if done and normalized_align in {"exact", "narrower"} and not settled_rule:
-                reason = (
-                    "the model tried to close it without a settled rule or quality "
-                    "statement, so the item remains open for a follow-up."
-                )
-            elif done and normalized_align in {"broader", "misaligned"}:
-                reason = (
-                    "the answer was broader or misaligned, so the item remains open "
-                    "for a follow-up."
+        settled_rule = rule.strip()
+        coverage_complete = self._coverage_complete(
+            getattr(item, "coverage_points", []),
+            getattr(item, "coverage", []),
+        )
+        requested_done = bool(
+            (done and self._has_meaningful_coverage(getattr(item, "coverage", [])))
+            or coverage_complete
+        )
+        turns_recorded = len(getattr(item, "talk", []) or [])
+        min_turns = self._min_turns_for_item(item)
+        min_turns_met = turns_recorded >= min_turns
+        reached_limit = turns_recorded >= self._max_turns_per_item
+        done = bool(requested_done and (min_turns_met or reached_limit))
+
+        if not done and not reached_limit:
+            depth_note = ""
+            if requested_done and not min_turns_met:
+                depth_note = (
+                    f" Minimum evidence turns for this item are {min_turns}; "
+                    f"{turns_recorded} recorded."
                 )
             return ToolResult(
                 observation=(
-                    f"Answer recorded for {item.id}; {reason}"
+                    f"Answer recorded for {item.id}; the item remains open for another question."
+                    f"{depth_note}"
                 ),
                 state_updates={
                     "elicitation_agenda": runtime.model_dump(),
@@ -511,19 +538,20 @@ class InterviewerAgent(BaseAgent):
                 should_return=True,
             )
 
-        item.status = "answered"
+        item.rule = settled_rule or None
+        item.status = "answered" if done else "partial"
         runtime.advance()
         next_item = runtime.current_item()
 
+        status_text = "closed" if done else "marked partial at the item turn limit"
         return ToolResult(
-            observation=f"Answer recorded and item {item.id} closed.",
+            observation=f"Answer recorded and item {item.id} {status_text}.",
             state_updates={
                 "elicitation_agenda": runtime.model_dump(),
                 "enduser_answer": "",
                 "current_question": "",
-                "current_stakeholder_role": next_item.role if next_item else "",
+                "current_stakeholder_role": next_item.perspective if next_item else "",
                 "item_turn_count": 0,
-                "probe_presented": False,
                 "conversation": [],
                 "_agenda_needs_question": True,
             },
@@ -533,14 +561,29 @@ class InterviewerAgent(BaseAgent):
     def _tool_ask_question(
         self,
         message: str = "",
-        mirror: str = "",
-        probe: bool = False,
         state: Optional[Dict[str, Any]] = None,
         **_: Any,
     ) -> ToolResult:
         state = state or {}
+        # Orchestration guard: if a stakeholder answer is pending, the agent
+        # must record it first; delivering a fresh question would silently
+        # discard the prior turn's evidence.
+        if (state.get("enduser_answer") or "").strip():
+            return ToolResult(
+                observation=(
+                    "[ask_question] There is a pending stakeholder answer that has "
+                    "not been recorded. Call record_answer first to persist signals, "
+                    "assumption_evidence, and coverage; then ask the next question."
+                ),
+                should_return=False,
+            )
         runtime = self._load_runtime(state)
-        delivered = f"{mirror.strip()} {message.strip()}".strip() if mirror else message.strip()
+        delivered = message.strip()
+        if not delivered:
+            return ToolResult(
+                observation="[ask_question] message is empty. Ask exactly one open question for the current item.",
+                should_return=False,
+            )
 
         conversation = list(state.get("conversation") or [])
         conversation.append({
@@ -559,7 +602,6 @@ class InterviewerAgent(BaseAgent):
             "current_question": delivered,
             "conversation": conversation,
             "item_turn_count": item_turn_count,
-            "probe_presented": bool(state.get("probe_presented")) or probe,
             "_agenda_needs_question": False,
         }
         if runtime is not None:
@@ -586,8 +628,7 @@ class InterviewerAgent(BaseAgent):
             if current is not None and not runtime.elicitation_complete:
                 return ToolResult(
                     observation=(
-                        "[conclude] Agenda is still open. Conclude is forbidden while "
-                        f"current item {current.id} is pending. Ask the next question "
+                        "[conclude] Agenda is still open. Ask the next question "
                         "or record the pending answer instead."
                     ),
                     should_return=False,
@@ -600,34 +641,40 @@ class InterviewerAgent(BaseAgent):
                     f"A: {turn.get('answer') or '(no answer provided)'}"
                     for turn in talk
                 )
+                final_status: Literal["answered", "partial", "skipped"]
+                if item.status in {"answered", "partial"}:
+                    final_status = item.status
+                else:
+                    final_status = "skipped"
                 record = ELRecord(
                     id=f"EL-{index:03d}",
                     item=item.id,
-                    entity=item.entity,
-                    step=item.step,
-                    aspect=item.aspect,
-                    trap=item.trap,
-                    kind=item.kind,
-                    role=item.role,
-                    close=item.close,
-                    source=item.source,
-                    risk=item.risk,
-                    concern_ref=item.concern_ref,
-                    concern_category=item.concern_category,
-                    concern_theme=item.concern_theme,
-                    rule=item.rule,
-                    align=item.align,
-                    talk=talk,
+                    vision_refs=list(getattr(item, "vision_refs", []) or []),
+                    perspective=item.perspective,
+                    context=item.context,
+                    decision_target=getattr(item, "decision_target", "") or None,
+                    close_when=item.close_when,
+                    coverage_points=list(getattr(item, "coverage_points", []) or []),
+                    coverage=[
+                        CoverageEntry(**entry)
+                        for entry in (getattr(item, "coverage", []) or [])
+                        if isinstance(entry, dict)
+                    ],
                     signals=list(item.signals or []),
-                    question=item.question,
-                    answer=answer_text or None,
-                    status="answered" if talk else "skipped",
+                    assumption_evidence=[
+                        AssumptionEvidenceEntry(**entry)
+                        for entry in (getattr(item, "assumption_evidence", []) or [])
+                        if isinstance(entry, dict)
+                    ],
+                    gaps=list(item.gaps or []),
+                    rule=item.rule,
+                    talk=talk,
+                    status=final_status,
                 ).model_dump()
                 records.append(record)
                 if answer_text:
                     lines.append(
-                        f"[{item.id}] {item.kind}/{item.aspect} | "
-                        f"{item.entity}.{item.step} | {item.role}\n{answer_text}"
+                        f"[{item.id}] {item.perspective}\n{answer_text}"
                     )
 
         notes = "\n\n".join(lines) or "(no answers recorded)"
@@ -653,6 +700,8 @@ class InterviewerAgent(BaseAgent):
             should_return=True,
         )
 
+    # ── Runtime helpers ──────────────────────────────────────────────────────
+
     @staticmethod
     def _load_runtime(state: Optional[Dict[str, Any]]) -> Optional[AgendaRuntime]:
         state = state or {}
@@ -673,31 +722,29 @@ class InterviewerAgent(BaseAgent):
             return None
 
     @staticmethod
-    def _role_detail(vision: Dict[str, Any], role_name: str) -> str:
+    def _role_detail(vision: Dict[str, Any], perspective: str) -> str:
+        lines: List[str] = []
+        wanted = perspective.strip().lower()
         for role in (vision.get("roles") or []):
-            if role.get("name", "").strip().lower() != role_name.strip().lower():
+            if (role.get("name") or "").strip().lower() != wanted:
                 continue
-            lines = [f"  Role kind: {role.get('kind', '')}"]
-            duties = role.get("duties") or []
-            if duties:
-                lines.append("  Duties:")
-                for duty in duties:
-                    lines.append(f"    - {duty.get('rule', '')}")
-            return "\n".join(lines)
-        return ""
+            if role.get("need"):
+                lines.append(f"  Role need: {role.get('need', '')}")
+            lens = role.get("lens") or ""
+            anchor = role.get("anchor") or ""
+            if lens or anchor:
+                lines.append(f"  Role source: [{lens}] {anchor}".rstrip())
+            break
+        return "\n".join(lines)
 
     @staticmethod
-    def _role_memory(
-        runtime: AgendaRuntime,
-        role_name: str,
-        current_id: str,
-    ) -> str:
+    def _role_memory(runtime: AgendaRuntime, perspective: str, current_id: str) -> str:
         rules: List[str] = []
         answers: List[str] = []
         for item in runtime.items:
             if item.id == current_id:
                 break
-            if item.role != role_name:
+            if item.perspective != perspective:
                 continue
             if item.rule:
                 rules.append(item.rule)
@@ -705,11 +752,66 @@ class InterviewerAgent(BaseAgent):
                 answers.append(item.answer)
         lines: List[str] = []
         if rules:
-            lines.append("  Settled rules:")
+            lines.append("  Settled evidence:")
             lines.extend(f"    - {rule}" for rule in rules[-4:])
         if answers:
             lines.append("  Prior answers:")
             lines.extend(f"    - {answer}" for answer in answers[-4:])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _vision_refs_detail(vision: Dict[str, Any], vision_refs: List[str]) -> str:
+        if not vision_refs:
+            return ""
+        wanted = {ref.strip() for ref in vision_refs if ref and ref.strip()}
+        if not wanted:
+            return ""
+
+        assumption_hits = [
+            item for item in (vision.get("assumptions") or [])
+            if item.get("id") in wanted
+        ]
+        concern_hits = [
+            item for item in (vision.get("concerns") or [])
+            if item.get("id") in wanted
+        ]
+        scope_hits = [
+            item for item in (vision.get("scope") or [])
+            if item.get("id") in wanted
+        ]
+
+        if not (assumption_hits or concern_hits or scope_hits):
+            return ""
+
+        def _source_line(item: Dict[str, Any]) -> str:
+            lens = item.get("lens") or ""
+            anchor = item.get("anchor") or ""
+            if not lens and not anchor:
+                return ""
+            return f"    source: [{lens}] {anchor}".rstrip()
+
+        lines = ["VISION ELEMENTS TO CLARIFY:"]
+        for item in assumption_hits:
+            lines.append(f"  - {item.get('id')} [assumption]: {item.get('statement', '')}")
+            if item.get("why_it_matters"):
+                lines.append(f"    why_it_matters: {item.get('why_it_matters')}")
+            source_line = _source_line(item)
+            if source_line:
+                lines.append(source_line)
+        for item in concern_hits:
+            lines.append(f"  - {item.get('id')} [concern]: {item.get('theme', '')}")
+            if item.get("rationale"):
+                lines.append(f"    rationale: {item.get('rationale')}")
+            source_line = _source_line(item)
+            if source_line:
+                lines.append(source_line)
+        for item in scope_hits:
+            lines.append(f"  - {item.get('id')} [scope]: {item.get('item', '')}")
+            if item.get("reason"):
+                lines.append(f"    reason: {item.get('reason')}")
+            source_line = _source_line(item)
+            if source_line:
+                lines.append(source_line)
         return "\n".join(lines)
 
     def _build_task(self, state: Dict[str, Any]) -> str:
@@ -721,7 +823,7 @@ class InterviewerAgent(BaseAgent):
         )
 
         if runtime is None:
-            return "Agenda runtime is unavailable. Call ask_question only if a grounded next step is possible."
+            return "Agenda runtime is unavailable. Do not fabricate; await orchestration."
         if runtime.elicitation_complete:
             return "AGENDA STATUS: COMPLETE\nAll agenda items are complete. Call conclude."
 
@@ -729,89 +831,124 @@ class InterviewerAgent(BaseAgent):
         if item is None:
             return "AGENDA STATUS: COMPLETE\nAgenda is complete. Call conclude."
 
-        answered = sum(1 for agenda_item in runtime.items if agenda_item.status == "answered")
+        answered = sum(1 for agenda_item in runtime.items if agenda_item.status in {"answered", "partial"})
         total = len(runtime.items)
-        role_detail = self._role_detail(vision, item.role)
-        role_memory = self._role_memory(runtime, item.role, item.id)
-        drill = TRAP_DRILL_STYLE.get(item.trap, "")
+        role_detail = self._role_detail(vision, item.perspective)
+        role_memory = self._role_memory(runtime, item.perspective, item.id)
+        assumption_detail = self._vision_refs_detail(
+            vision,
+            list(getattr(item, "vision_refs", []) or []),
+        )
         pending = bool((state.get("enduser_answer") or "").strip())
 
         sections = [
             "AGENDA STATUS: OPEN",
             "Conclude is forbidden while this status is OPEN. Work only on the current item.",
             "",
-            f"AGENDA: {answered}/{total} items closed.",
+            f"AGENDA: {answered}/{total} items closed or partial.",
             "",
             "CURRENT ITEM:",
             f"  id: {item.id}",
-            f"  kind: {item.kind}",
-            f"  entity: {item.entity}",
-            f"  step: {item.step}",
-            f"  role: {item.role}",
-            f"  aspect: {item.aspect}",
-            f"  trap: {item.trap}",
+            f"  vision_refs: {', '.join(getattr(item, 'vision_refs', []) or []) or '(none)'}",
+            f"  decision_target: {getattr(item, 'decision_target', '') or '(not provided)'}",
+            f"  perspective: {item.perspective}",
             "",
-            "STAKEHOLDER CONTEXT:",
+            "PERSPECTIVE CONTEXT:",
+            role_detail or "  (no extra role detail)",
         ]
-        sections.append(role_detail or "  (no extra role detail)")
+        if assumption_detail:
+            sections.extend(["", assumption_detail])
         if role_memory:
             sections.extend(["", "SESSION MEMORY:", role_memory])
 
+        coverage_points = list(getattr(item, "coverage_points", []) or [])
+        min_turns = self._min_turns_for_item(item)
+        turns_recorded = len(getattr(item, "talk", []) or [])
         sections.extend([
             "",
-            "SCENE:",
-            f"  {item.scene}",
+            "FOCUS CONTEXT:",
+            f"  {item.context}",
             "",
             "PRIVATE INTERVIEWER CONTEXT:",
-            f"  baseline: {item.baseline}",
-            f"  risk/tension: {item.risk or '(not provided)'}",
-            f"  probe: {item.probe}",
-            f"  gap: {item.gap}",
-            f"  close: {item.close}",
-        ])
-        if item.peer:
-            sections.append(f"  peer duty: {item.peer}")
-        if item.kind == "concern":
-            sections.extend([
-                "",
-                "NFR CONCERN CONTEXT:",
-                f"  concern_ref: {item.concern_ref or item.source}",
-                f"  category: {item.concern_category or '(not provided)'}",
-                f"  theme: {item.concern_theme or '(not provided)'}",
-                "  mode: quality probing; settle quality evidence, not a business rule.",
-            ])
-        if drill:
-            sections.extend(["", "DRILL STYLE:", f"  {drill}"])
-
-        sections.extend([
+            f"  seed_question: {item.seed_question}",
+            f"  close_when: {item.close_when}",
+            "  coverage_points:",
+            *(
+                [f"    - {point}" for point in coverage_points]
+                if coverage_points
+                else ["    - (not provided; use close_when as the fallback stop condition)"]
+            ),
+            f"  notes: {item.notes or '(not provided)'}",
             "",
             "TURN STATUS:",
-            f"  Turn count: {state.get('item_turn_count', 0)}",
-            f"  Probe presented: {'yes' if state.get('probe_presented') else 'no'}",
+            f"  Turn count for item: {state.get('item_turn_count', 0)}",
+            f"  Recorded answer turns for item: {turns_recorded}",
+            f"  Minimum evidence turns for this item: {min_turns}",
+            f"  Minimum evidence turns met: {'yes' if turns_recorded >= min_turns else 'no'}",
+            f"  Item turn limit: {self._max_turns_per_item}",
             f"  Pending answer: {'yes' if pending else 'no'}",
         ])
 
         conversation = state.get("conversation") or []
         if conversation:
             sections.extend(["", "CURRENT DIALOGUE:"])
-            for turn in conversation[-6:]:
+            for turn in conversation[-8:]:
                 sections.append(
                     f"  [{str(turn.get('role', '')).upper()}] {turn.get('content', '')}"
                 )
         if pending:
-            sections.extend([
-                "",
-                "PENDING ANSWER:",
-                f"  {state.get('enduser_answer', '')}",
-            ])
+            sections.extend(["", "PENDING ANSWER:", f"  {state.get('enduser_answer', '')}"])
+        coverage = list(getattr(item, "coverage", []) or [])
+        if coverage:
+            sections.extend(["", "COVERAGE SO FAR:"])
+            for entry in coverage:
+                if not isinstance(entry, dict):
+                    continue
+                point = entry.get("point", "")
+                status = entry.get("status", "")
+                evidence = entry.get("evidence", "")
+                suffix = f" — {evidence}" if evidence else ""
+                sections.append(f"  - {status}: {point}{suffix}")
+        assumption_evidence = list(getattr(item, "assumption_evidence", []) or [])
+        if assumption_evidence:
+            sections.extend(["", "ASSUMPTION EVIDENCE SO FAR:"])
+            for entry in assumption_evidence:
+                if not isinstance(entry, dict):
+                    continue
+                ref = entry.get("vision_ref") or entry.get("assumption_ref", "")
+                stance = entry.get("stance", "")
+                evidence = entry.get("evidence", "")
+                implication = entry.get("implication", "")
+                sections.append(f"  - {ref} {stance}: {evidence} -> {implication}")
 
         return "\n".join(sections)
 
     def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        # Orchestration decides which tool the LLM must call this turn. The
+        # condition is deterministic; the reasoning (signals / coverage /
+        # assumption_evidence / question wording) is still done by the LLM.
+        #   pending answer + agenda open       → record_answer
+        #   pending answer + agenda complete   → record_answer (persist first)
+        #   no pending     + agenda complete   → conclude
+        #   no pending     + agenda open       → ask_question
+        runtime = self._load_runtime(state)
+        pending = bool((state.get("enduser_answer") or "").strip())
+        agenda_complete = bool(runtime is not None and runtime.elicitation_complete)
+
+        def _force(tool_name: str) -> Dict[str, Any]:
+            return {"type": "function", "function": {"name": tool_name}}
+
+        if pending:
+            tool_choice: Any = _force("record_answer")
+        elif agenda_complete:
+            tool_choice = _force("conclude")
+        else:
+            tool_choice = _force("ask_question")
+
         return self.react(
             state=state,
             task=self._build_task(state),
-            tool_choice="required",
+            tool_choice=tool_choice,
             profile_addendum=_REACT_ADDENDUM,
             include_memory=False,
         )

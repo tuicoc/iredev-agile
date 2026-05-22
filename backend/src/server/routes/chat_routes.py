@@ -137,10 +137,16 @@ def start(current_user, chat_id):
         max_turns = 150
     max_turns = min(max(max_turns, 5), 200)
 
+    from src.config.intake_hint import INTAKE_HINT, VISIONARY_CONTRACT
+    input_guidance = INTAKE_HINT
+    visionary_contract = VISIONARY_CONTRACT
+
     initial_state = {
         # ── Session ───────────────────────────────────────────────────────
         "session_id": req_id,
         "project_description": projDescr,
+        "input_guidance": input_guidance,
+        "visionary_contract": visionary_contract,
         # ── Phase ─────────────────────────────────────────────────────────
         "system_phase": "sprint_zero_planning",
         # ── Artifacts ─────────────────────────────────────────────────────
@@ -148,9 +154,8 @@ def start(current_user, chat_id):
         # ── Interview sub-state ───────────────────────────────────────────
         "conversation": [],
         "turn_count": 0,
-        # max_turns is a SAFETY NET — the interviewer stops on its own
-        # via interview_complete=True when completeness ≥ threshold (0.8).
-        # Only change this if you have a specific token-budget constraint.
+        # max_turns is a global safety net. Each focus item also has its own
+        # turn safety limit inside InterviewerAgent.
         "max_turns": max_turns,
         "interview_complete": False,
         # ── Live requirements draft (populated incrementally per turn) ─────

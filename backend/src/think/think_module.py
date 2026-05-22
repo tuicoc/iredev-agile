@@ -24,7 +24,7 @@ artifact they produce.
 
 The rationale chain therefore looks like:
   LLM Thought → [STRATEGY] block → _react_strategy in state →
-update_requirem?ents reads it → stored in requirement["rationale"] →
+  update_requirements reads it → stored in requirement["rationale"] →
   surfaced in HITL review payload → recorded in history on every HITL edit.
 
 ReAct graph topology
@@ -41,7 +41,8 @@ tool or any tool:
 
   "required"               – model MUST call at least one tool (any tool)
   "auto"                   – model chooses freely (default)
-  {"name": "<tool_name>"}  – model MUST call this specific tool
+  {"type": "function", "function": {"name": "<tool_name>"}}
+                           – model MUST call this specific tool (OpenAI-native shape)
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, create_model
 from langgraph.graph import END, StateGraph
 
 logger = logging.getLogger(__name__)
@@ -123,7 +124,15 @@ def _tc_cache_key(tool_choice: ToolChoice) -> str:
     if isinstance(tool_choice, str):
         return tool_choice
     if isinstance(tool_choice, dict):
-        return f"fn:{tool_choice.get('name', '')}"
+        # Accept the OpenAI-native shape
+        #   {"type": "function", "function": {"name": "<tool>"}}
+        # as well as the legacy shorthand {"name": "<tool>"}.
+        fn_block = tool_choice.get("function")
+        if isinstance(fn_block, dict) and fn_block.get("name"):
+            return f"fn:{fn_block['name']}"
+        if tool_choice.get("name"):
+            return f"fn:{tool_choice['name']}"
+        return f"fn:{tool_choice.get('type', '')}"
     return str(tool_choice)
 
 
@@ -241,11 +250,10 @@ class ThinkModule:
 
     def run_structured(
         self,
-        schema:           Type[BaseModel],
-        system_prompt:    str,
-        user_prompt:      str,
-        memory_messages:  Optional[List[BaseMessage]] = None,
-        include_thinking: bool = False,
+        schema:          Type[BaseModel],
+        system_prompt:   str,
+        user_prompt:     str,
+        memory_messages: Optional[List[BaseMessage]] = None,
     ) -> BaseModel:
         """Run a single structured-output LLM call and return a parsed object.
 
@@ -267,11 +275,6 @@ class ThinkModule:
             Optional recent messages prepended between the system and user
             prompts.  Pass ``None`` (default) to omit — most extraction
             calls are stateless and do not need history.
-        include_thinking:
-            If ``True``, the schema is wrapped with a leading ``thinking``
-            field so the model reasons before filling the result.  The
-            thinking text is logged at INFO level and stripped from the
-            return value — the caller always gets a plain ``schema`` instance.
 
         Returns
         -------
@@ -284,25 +287,7 @@ class ThinkModule:
             Propagates any LLM or validation error to the caller so that the
             tool function can decide how to handle it.
         """
-        if include_thinking:
-            target_schema = create_model(
-                f"_Thinking_{schema.__name__}",
-                thinking=(
-                    str,
-                    Field(
-                        description=(
-                            "Step-by-step reasoning before filling the result. "
-                            "Think through the task carefully before committing "
-                            "to any value in result."
-                        )
-                    ),
-                ),
-                result=(schema, Field(description="The structured output.")),
-            )
-        else:
-            target_schema = schema
-
-        structured_llm = self._llm.with_structured_output(target_schema)
+        structured_llm = self._llm.with_structured_output(schema)
 
         recent: List[BaseMessage] = (memory_messages or [])[-20:]
         messages: List[BaseMessage] = (
@@ -311,19 +296,11 @@ class ThinkModule:
             + [HumanMessage(content=user_prompt)]
         )
 
-        raw = structured_llm.invoke(messages)
-
-        if include_thinking:
-            logger.info(
-                "[ThinkModule] thinking(%s):\n%s",
-                schema.__name__,
-                raw.thinking,
-            )
-            logger.debug("[ThinkModule] run_structured(thinking) finished — schema=%s", schema.__name__)
-            return raw.result
-
-        logger.debug("[ThinkModule] run_structured finished — schema=%s", schema.__name__)
-        return raw
+        result = structured_llm.invoke(messages)
+        logger.debug(
+            "[ThinkModule] run_structured finished — schema=%s", schema.__name__
+        )
+        return result
 
     # ── ReAct graph construction ───────────────────────────────────────────
 

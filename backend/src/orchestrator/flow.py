@@ -6,9 +6,7 @@ Artifact chain
 Phase 1 — Sprint Zero (sprint_zero_planning):
   Step 1  – extract_product_vision         → product_vision               (VisionaryAgent)
   Step 2  – review_product_vision          → reviewed_product_vision      (HITL)
-  Step 3  – build_elicitation_agenda       → elicitation_agenda_artifact  (AgendaAgent 4-pass)
-              Pass A/B/C → aspect_map_artifact (duty mapping + NFR concerns + conflict hooks)
-              Pass D     → elicitation_agenda_artifact (trap-driven item construction + sort)
+  Step 3  – build_elicitation_agenda       → elicitation_agenda_artifact  (AgendaAgent focus pass)
   Step 4  – review_elicitation_agenda      → reviewed_elicitation_agenda  (HITL)
   Step 5  – conduct_requirements_interview → interview_record             (InterviewerAgent)
   Step 6  – review_interview_record        → reviewed_interview_record    (HITL — approve-only)
@@ -23,12 +21,11 @@ Phase 2 — Backlog Refinement (backlog_refinement):
   Step 1 – generate_acceptance_criteria   → validated_product_backlog
   Step 2 – review_validated_backlog       → validated_product_backlog_approved  (HITL)
 
-Phase 3 — Sprint Execution (sprint_execution):  [DISABLED]
-  Phase 3 and Phase 4 are commented out below until they have real steps.
-  Once validated_product_backlog_approved is written, the supervisor finds
-  no further executable step and routes to END, ending the run.
+Phase 3 — Sprint Execution (sprint_execution):
+  Placeholder — steps added incrementally when Sprint N is implemented.
 
-Phase 4 — Sprint Review (sprint_review):  [DISABLED]
+Phase 4 — Sprint Review (sprint_review):
+  Placeholder.
 
 SprintAgent pipeline (Steps 9a → 9c → 9b)
 ──────────────────────────────────────────
@@ -114,9 +111,13 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 produces_artifact="product_vision",
                 agent_name="visionary",
                 description=(
-                    "VisionaryAgent reads project_description and extracts a "
-                    "ProductVision with reader description, flow, roles, duties, NFR concerns, and scope "
-                    "via a structured multi-pass pipeline. "
+                    "VisionaryAgent reads project_description and produces a lean "
+                    "ProductVision: description, intent_summary, target_outcome, "
+                    "notes, known_signals, roles, assumptions, concerns, and "
+                    "scope. Every Role / Assumption / Concern / "
+                    "Boundary carries a single `source` reviewer sentence. The "
+                    "assumption set is the agenda's center; other fields carry "
+                    "reviewer-facing trace and perspective context. "
                     "Re-runs with product_vision_feedback when HITL rejects the artifact."
                 ),
             ),
@@ -142,16 +143,11 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 produces_artifact="elicitation_agenda_artifact",
                 agent_name="agenda",
                 description=(
-                    "AgendaAgent builds the ElicitationAgenda in structured passes:\n"
-                    "  Pass A maps reviewed duties to agenda-ready map entries.\n"
-                    "  Pass B maps reviewed NFR concerns to quality-probe entries.\n"
-                    "  Pass C adds conflict hooks only where duties or concerns may need "
-                    "precedence, scope split, tradeoff boundary, or escalation clarified in dialogue.\n"
-                    "  Combined output: aspect_map_artifact.\n"
-                    "  Pass D constructs scene/probe/gap/close agenda items and orders them by the reviewed flow.\n"
-                    "  Combined output: elicitation_agenda_artifact.\n"
+                    "AgendaAgent builds the ElicitationAgenda as evidence-job items "
+                    "with vision_refs, perspective, context, seed question, decision "
+                    "target, coverage points, and close condition.\n"
                     "Any elicitation_agenda_feedback from a prior HITL rejection is injected "
-                    "so the agent rebuilds from Pass A with reviewer comments."
+                    "so the agent rebuilds with reviewer comments."
                 ),
             ),
             # 4. Human reviews the elicitation agenda (Node: review_elicitation_agenda_turn)
@@ -163,13 +159,14 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 agent_name="human_reviewer",
                 description=(
                     "Human reviewer inspects the ElicitationAgenda before the interview "
-                    "begins — verifying duty coverage, conflict hooks, and item quality. "
-                    "The review shows: the AspectMap, possible conflict entries, "
-                    "and agenda items with entity+step+trap+scene+probe+gap+close. "
+                    "begins — verifying assumption coverage, evidence-job depth, and item quality. "
+                    "The review shows agenda items with assumption refs, decision target, "
+                    "perspective, context, seed question, "
+                    "and close condition. "
                     "• Approved → reviewed_elicitation_agenda written; interview starts. "
-                    "• Rejected → aspect_map_artifact and elicitation_agenda_artifact removed, "
+                    "• Rejected → elicitation_agenda_artifact removed, "
                     "  elicitation_agenda_feedback injected; AgendaAgent rebuilds "
-                    "  all passes using reviewed_product_vision + feedback."
+                    "  using reviewed_product_vision + feedback."
                 ),
             ),
             # 5. Conduct the interview loop (Node: interviewer_turn)
@@ -210,12 +207,14 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 agent_name="distiller",
                 description=(
                     "DistillerAgent runs the synthesis pipeline: "
-                    "Pass 1 interview-grounded requirements → "
-                    "Pass 2 baseline and scope items → "
-                    "Pass 3 final list plus unresolved conflicts. "
-                    "Output: structured requirement_list (FR, NFR, OOS). "
-                    "Any requirement_list_feedback from a prior HITL rejection is "
-                    "injected into all passes."
+                    "map pass — per-record extraction in parallel → "
+                    "vision pass — preserve explicit constraints and excluded "
+                    "responsibilities → "
+                    "final merge & audit pass — pairwise merge, decomposition self-check, "
+                    "and Subject test (rewrite human-subject statements to "
+                    "product-subject). Output: structured requirement_list (FR, NFR, "
+                    "SYS, OOS). Any requirement_list_feedback from a prior HITL "
+                    "rejection is injected into all passes."
                 ),
             ),
             # 8. Human reviews requirement list (Node: review_requirement_list_turn)
@@ -368,35 +367,30 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 ),
             ),
         ],
-        next_phase=None,
+        next_phase="sprint_execution",
     ),
 
-    # ── Phase 3 & Phase 4 are intentionally disabled ───────────────────────────
-    # The workflow ends after Phase 2 (validated_product_backlog_approved).
-    # Supervisor's get_next_action() returns None once no phase has an
-    # executable step, which routes the graph to END. Re-enable these phases
-    # by uncommenting them once Sprint Execution and Sprint Review have real
-    # steps to run.
-    #
-    # PhaseDefinition(
-    #     phase_name="sprint_execution",
-    #     display_name="Sprint N — Execution",
-    #     description=(
-    #         "Iterative sprint cycles. Not yet implemented — placeholder."
-    #     ),
-    #     steps=[],
-    #     next_phase="sprint_review",
-    # ),
-    #
-    # PhaseDefinition(
-    #     phase_name="sprint_review",
-    #     display_name="Sprint Review & Retrospective",
-    #     description=(
-    #         "Human evaluates sprint output. Not yet implemented — placeholder."
-    #     ),
-    #     steps=[],
-    #     next_phase=None,
-    # ),
+    # ── Phase 3: Sprint Execution ──────────────────────────────────────────────
+    PhaseDefinition(
+        phase_name="sprint_execution",
+        display_name="Sprint N — Execution",
+        description=(
+            "Iterative sprint cycles. Not yet implemented — placeholder."
+        ),
+        steps=[],
+        next_phase="sprint_review",
+    ),
+
+    # ── Phase 4: Sprint Review ─────────────────────────────────────────────────
+    PhaseDefinition(
+        phase_name="sprint_review",
+        display_name="Sprint Review & Retrospective",
+        description=(
+            "Human evaluates sprint output. Not yet implemented — placeholder."
+        ),
+        steps=[],
+        next_phase=None,
+    ),
 ]
 
 PHASE_INDEX: Dict[str, PhaseDefinition] = {p.phase_name: p for p in WORKFLOW_PHASES}

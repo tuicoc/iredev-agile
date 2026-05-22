@@ -288,11 +288,10 @@ class BaseAgent(ABC):
 
     def extract_structured(
         self,
-        schema:           Type[BaseModel],
-        system_prompt:    str,
-        user_prompt:      str,
-        include_memory:   bool = False,
-        include_thinking: bool = False,
+        schema:          Type[BaseModel],
+        system_prompt:   str,
+        user_prompt:     str,
+        include_memory:  bool = False,
     ) -> BaseModel:
         """Run a single structured-output LLM call and return a parsed object.
 
@@ -346,7 +345,6 @@ class BaseAgent(ABC):
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             memory_messages=memory_messages,
-            include_thinking=include_thinking,
         )
 
     # ── abstract interface ────────────────────────────────────────────────

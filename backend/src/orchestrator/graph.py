@@ -50,8 +50,8 @@ HITL review order:
        so all three steps (9a → 9c → 9b) re-run with PO feedback.
   On vision rejection: only product_vision is removed from artifacts;
     product_vision_feedback is injected; VisionaryAgent re-runs (visionary_turn).
-  On agenda rejection: elicitation_agenda_artifact and aspect_map_artifact
-    are removed; AgendaAgent rebuilds both passes using reviewed_product_vision
+  On agenda rejection: elicitation_agenda_artifact
+    is removed; AgendaAgent rebuilds using reviewed_product_vision
     + elicitation_agenda_feedback.
 
 Review node design (HITL pattern)
@@ -85,10 +85,12 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from langgraph.graph import END, StateGraph
+from langgraph.store.base import BaseStore
 from langgraph.store.memory import InMemoryStore
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import interrupt
 
+from ..config.intake_hint import VISIONARY_CONTRACT
 from .state import WorkflowState
 from .supervisor import supervisor_node, supervisor_router
 
@@ -104,63 +106,58 @@ _MAX_SPLIT_ROUND            = 2   # mirrors sprint.py constant
 
 ARTIFACT_SUMMARIES: Dict[str, str] = {
 
-    # Sent by interviewer_turn_fn on the very first turn — no artifact yet.
-    "workflow_started": (
-        "## Requirements Interview Started\n\n"
-        "The AI Interviewer has begun a structured requirements discovery session "
-        "with the virtual stakeholder.\n\n"
-        "**What's happening:** The interviewer will ask a series of targeted questions "
-        "to surface business facts, normal paths, exceptions, quality signals, "
-        "and scope boundaries for your project.\n\n"
-        "You can follow the conversation in real time below. "
-        "When the interview is complete, you will be asked to review and approve the "
-        "extracted requirements before the process continues."
-    ),
+    # Opening text for the workflow when a no-artifact intro is needed.
+    "workflow_started": VISIONARY_CONTRACT,
 
     # Sent inside review_elicitation_agenda_turn interrupt — alongside the artifact.
     "elicitation_agenda": (
         "## Elicitation Agenda Ready for Review\n\n"
-        "AgendaAgent has built an **Elicitation Agenda** from the approved "
-        "Product Vision using structured mapping passes.\n\n"
-        "**What's inside:**\n"
-        "- **Aspect Map** — duty-to-agenda entries plus possible conflict hooks\n"
-        "- **Conflict hooks** — places where precedence, scope split, or escalation needs dialogue\n"
-        "- **Concern items** — quality probes derived from reviewed NFR concerns\n"
-        "- **Agenda items** — one scene/probe/gap/close bundle per entry, sorted by flow order\n\n"
+        "AgendaAgent has turned the approved Product Vision into evidence jobs. "
+        "Each agenda item asks one role to answer from one concrete scene so the "
+        "next interview can settle real product decisions.\n\n"
+        "**What's inside (per item):**\n"
+        "- **vision_refs** — the assumptions, concerns, roles, or scope boundaries this item covers\n"
+        "- **perspective** — the role that will answer from lived use or impact\n"
+        "- **context** — the operating moment the EndUser will step into\n"
+        "- **decision_target** — the downstream fork this evidence should move\n"
+        "- **seed_question** — the opening interview probe\n"
+        "- **coverage_points** and **close_when** — what evidence must be settled before moving on\n\n"
         "**Your action:** Review the agenda below. "
-        "If duty coverage, conflict hooks, and item quality look correct, click **Accept** "
-        "to start the interview. If entries are missing or items are too generic, "
-        "click **Request Changes** — all passes will be rebuilt with your feedback."
+        "If coverage and item quality look correct, click **Accept** "
+        "to start the interview. If roles are missing, evidence jobs are too generic, or coverage is thin, "
+        "click **Request Changes** — the agenda will be rebuilt with your feedback."
     ),
 
     # Sent inside review_product_vision_turn interrupt — alongside the artifact.
     "product_vision": (
         "## Product Vision Ready for Review\n\n"
-        "VisionaryAgent has analysed your project description and produced a "
-        "**Product Vision** — the entity flow spine that drives all downstream "
-        "agenda building, elicitation, and requirement synthesis.\n\n"
+        "VisionaryAgent has read the project intent in two passes: first to capture "
+        "the product direction and role inventory, then to surface the first-release "
+        "forks, quality concerns, and scope boundaries downstream agents must respect.\n\n"
         "**What's inside:**\n"
-        "- **Flow** — domain entities with lifecycle steps and active links between them\n"
-        "- **Roles** — stakeholders with reviewable duties anchored to concrete flow moments\n"
-        "- **NFR concerns** — quality softgoals to operationalize during interview\n"
-        "- **Scope** — explicitly excluded capabilities, each with a reason\n\n"
+        "- **Intent and outcome** — what the input is asking for and what should improve\n"
+        "- **Known signals** — concrete facts the input gave about today's situation\n"
+        "- **Roles** — product users and affected roles, including meaningful subgroups when the input separates them\n"
+        "- **Assumptions** — first-release design forks, each with a stated / implied / inferred lens and an anchor\n"
+        "- **Concerns** — user-perceptible quality topics to carry into elicitation\n"
+        "- **Scope** — responsibilities the product should not take on\n\n"
         "**Your action:** Review the vision below. "
-        "If the flow, stakeholder duties, NFR concerns, and scope boundaries accurately represent your project, "
-        "click **Accept** to proceed to the elicitation agenda. "
-        "If entities are missing, duties are wrong, NFR concerns are off, or scope boundaries are incorrect, "
+        "If everything reads truthfully, click **Accept** to proceed to the elicitation agenda. "
+        "If the direction is wrong, an assumption's lens/anchor is off, a role is missing, or scope is incomplete, "
         "click **Request Changes** — the vision will be regenerated with your feedback."
     ),
 
     # Sent inside review_interview_record_turn interrupt — alongside the artifact.
     "interview_record": (
         "## Requirements Interview Complete\n\n"
-        "The AI Interviewer has finished the discovery session and compiled the "
-        "stakeholder dialogue into an **Interview Record**.\n\n"
+        "InterviewerAgent has driven each agenda item with the EndUser role and compiled "
+        "the resulting dialogue into an **Interview Record**.\n\n"
         "**What's inside:**\n"
-        "- All agenda items that were discussed\n"
-        "- The full question/answer dialogue captured for each item\n"
-        "- The stakeholder role and close rule for each item\n\n"
-        "**Your action:** Review the requirements below. "
+        "- The question/answer turns for each agenda item\n"
+        "- Coverage verdicts for the planned evidence points\n"
+        "- Signals, gaps, and assumption evidence captured during the interview\n"
+        "- The stakeholder role, context, and close rule for each item\n\n"
+        "**Your action:** Review the interview record below. "
         "If everything looks correct, click **Accept** to proceed to the Requirement List. "
         "This gate is view-only; requirement-level feedback belongs at the next review."
     ),
@@ -168,17 +165,14 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
     # Sent inside review_requirement_list_turn interrupt — alongside the artifact.
     "requirement_list": (
         "## Requirement List Ready for Review\n\n"
-        "DistillerAgent has synthesised all elicitation answers into a structured "
-        "**Requirement List** — the authoritative specification used to build the "
-        "Product Backlog.\n\n"
+        "DistillerAgent has translated interview evidence and the approved Product Vision "
+        "into product-side obligations the team can build from.\n\n"
         "**What's inside:**\n"
-        "- Functional Requirements (FR) — grounded in interview evidence or clear product baselines\n"
-        "- Non-Functional Requirements (NFR) — explicit quality boundaries only\n"
-        "- Out-of-Scope items (OOS) — reviewed Product Vision scope boundaries\n"
-        "- Traceability: entity, step, aspect, and source per requirement\n"
-        "- Acceptance criteria (≥1 per FR/NFR)\n"
-        "- Conflicts (if any) — semantic contradictions requiring reviewer resolution\n\n"
-        "**Note:** No CON type — constraints were removed (design_decisions no longer exist in ProductVision).\n\n"
+        "- **FR / NFR / SYS / OOS** items, with OOS preserved from reviewed vision scope\n"
+        "- **confidence** (`confirmed` or `inferred`) so reviewers can see where synthesis translated evidence\n"
+        "- **trace_refs** back to signals, talk turns, assumption evidence, and Product Vision refs\n"
+        "- **Implementation parity axes**: trigger, product object, observable outcome, condition, and participation structure\n"
+        "- **Acceptance criteria**, gaps, and conflicts when the evidence requires reviewer resolution\n\n"
         "**Your action:** Review the requirement list below. "
         "If conflicts are present, provide resolutions in your feedback — synthesis will re-run. "
         "Once conflict-free, click **Accept** to hand it to the Sprint Agent. "
@@ -188,14 +182,14 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
     # Sent inside review_product_backlog_turn interrupt — alongside the artifact.
     "product_backlog": (
         "## Initial Product Backlog Ready\n\n"
-        "The Sprint Agent (Product Owner) and Analyst Agent (Technical Lead) have "
-        "collaborated to build the initial **Product Backlog**.\n\n"
+        "SprintAgent and AnalystAgent have built the first reviewable backlog from the "
+        "approved Requirement List.\n\n"
         "**What's inside:**\n"
-        "- Each item written as: *As a \\<role\\>, I can \\<capability\\>, so that \\<benefit\\>*\n"
-        "- Fibonacci story point estimates from the Analyst (Technical Lead)\n"
-        "- WSJF priority scores with dependency-aware ranking\n"
-        "- INVEST quality flags per story\n"
-        "- Dependency map (blocked_by / blocks)\n\n"
+        "- User stories written from requirement traces\n"
+        "- Analyst estimates, INVEST checks, risks, dependencies, and split proposals\n"
+        "- Any accepted split proposals applied before backlog assembly\n"
+        "- WSJF priority scores and dependency-aware ordering\n"
+        "- Planning status and quality warnings for stories that still need refinement\n\n"
         "**Your action:** Review the backlog below. "
         "Click **Accept** to hand it to the Analyst for Acceptance Criteria generation. "
         "Click **Request Changes** to send it back for revision — describe what "
@@ -206,13 +200,11 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
     # Sent inside review_validated_product_backlog_turn interrupt — alongside the artifact.
     "validated_product_backlog": (
         "## Validated Product Backlog Ready\n\n"
-        "The Analyst Agent has written Acceptance Criteria for every PBI:\n\n"
+        "AnalystAgent has generated acceptance criteria for the approved Product Backlog.\n\n"
         "**What was done:**\n"
-        "- **Acceptance Criteria** — 2–5 Given-When-Then criteria written per story, "
-        "derived from original elicitation evidence and the user story capability clause\n"
-        "- **Status** — every story with AC is now marked `ready`\n\n"
-        "**Note:** INVEST validation and story point estimation were completed during "
-        "backlog creation and are preserved unchanged.\n\n"
+        "- **Acceptance Criteria** — Given-When-Then criteria written from requirement traces and story capability clauses\n"
+        "- **Readiness update** — stories with usable acceptance criteria are marked ready\n"
+        "- **Preserved planning data** — estimates, dependencies, WSJF ordering, and INVEST results remain from backlog creation\n\n"
         "**Your action:** Review the validated backlog below. "
         "Click **Accept** to mark all `ready` stories available for Sprint planning. "
         "Click **Request Changes** to send the backlog back for AC re-generation — "
@@ -225,9 +217,26 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
 # Lazy agent singletons
 # ─────────────────────────────────────────────────────────────────────────────
 
-@lru_cache(maxsize=1)
-def _default_store() -> InMemoryStore:
-    return InMemoryStore()
+_store_override: Optional[BaseStore] = None
+_inmemory_store_singleton: Optional[InMemoryStore] = None
+
+
+def configure_default_store(store: BaseStore) -> None:
+    """Install a process-wide store used by _sync_artifacts_to_store +
+    get_artifact_from_store. Server boot calls this with a PostgresStore so
+    artifact reads/writes share the same persistent backend as the graph.
+    """
+    global _store_override
+    _store_override = store
+
+
+def _default_store() -> BaseStore:
+    if _store_override is not None:
+        return _store_override
+    global _inmemory_store_singleton
+    if _inmemory_store_singleton is None:
+        _inmemory_store_singleton = InMemoryStore()
+    return _inmemory_store_singleton
 
 
 @lru_cache(maxsize=1)
@@ -325,22 +334,14 @@ def interviewer_turn_fn(state: WorkflowState) -> Dict[str, Any]:
 def agenda_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     """Run AgendaAgent — Sprint Zero step 3 (build_elicitation_agenda).
 
-    Dispatches to build_aspect_map or build_agenda_items based on state:
-      build_aspect_map (Pass A/B/C):    produces aspect_map_artifact.
-      build_agenda_items (Pass D):      produces elicitation_agenda_artifact
-                                        and state["elicitation_agenda"].
-
-    Routes unconditionally to supervisor after each pass. Supervisor re-fires
-    agenda_turn until elicitation_agenda_artifact is present, then routes to
-    review_elicitation_agenda_turn (HITL step 4).
-    Also called after HITL rejection when elicitation_agenda_feedback is present.
+    Produces elicitation_agenda_artifact and state["elicitation_agenda"] from
+    the reviewed assumption-centered Product Vision.
     """
     updates = _get_agenda().process(state)
     artifacts_out = updates.get("artifacts") or {}
     logger.debug(
-        "agenda_turn updates: %s | aspect_map=%s | agenda_artifact=%s | runtime=%s",
+        "agenda_turn updates: %s | agenda_artifact=%s | runtime=%s",
         list(updates.keys()),
-        "present" if artifacts_out.get("aspect_map_artifact") else "MISSING",
         "present" if artifacts_out.get("elicitation_agenda_artifact") else "MISSING",
         "present" if updates.get("elicitation_agenda") else "MISSING",
     )
@@ -367,11 +368,9 @@ def _agenda_boundary_reset_updates() -> Dict[str, Any]:
         "current_question": "",
         "enduser_answer": "",
         "conversation": [],
-        "_force_probe_next": False,
         "_agenda_needs_question": True,
         "_agenda_needs_followup": False,
         "item_turn_count": 0,
-        "probe_presented": False,
     }
 
 
@@ -380,16 +379,23 @@ def enduser_turn_fn(state: WorkflowState) -> Dict[str, Any]:
 
     Resolves current_stakeholder_role from the agenda runtime before each attempt.
 
-    AgendaRuntimeItem v5 carries a single `role` string per item — there is no
-    multi-stakeholder cursor.  Role resolution priority:
+    AgendaRuntimeItem carries a single `perspective` string per item — there is no
+    multi-stakeholder cursor. Role resolution is strict:
       1. state["current_stakeholder_role"] — written by record_answer on advance.
-      2. item.role — read directly from the current AgendaRuntimeItem.
-      3. "" — fallback; EndUserAgent will use its config persona.
+      2. item.perspective — read directly from the current AgendaRuntimeItem.
+      3. no fallback persona; missing perspective returns to interviewer.
 
     EndUserAgent.respond sets should_return=True inside its own ReAct loop only.
     The edge from enduser_turn always returns to interviewer_turn — the enduser
     can never terminate the interview.
     """
+    if not (state.get("current_question") or "").strip():
+        logger.warning("enduser_turn_fn: current_question missing; returning to interviewer.")
+        return {
+            "enduser_answer": "",
+            "_agenda_needs_question": True,
+        }
+
     # ── Resolve current stakeholder from agenda runtime ───────────────────────
     resolved_role = (state.get("current_stakeholder_role") or "").strip()
     if not resolved_role:
@@ -409,9 +415,20 @@ def enduser_turn_fn(state: WorkflowState) -> Dict[str, Any]:
                 )
                 item    = runtime.current_item()
                 if item:
-                    resolved_role = getattr(item, "role", "") or ""
+                    resolved_role = getattr(item, "perspective", "") or ""
             except Exception as exc:
                 logger.warning("enduser_turn_fn: failed to resolve stakeholder from agenda: %s", exc)
+
+    if not resolved_role:
+        logger.warning("enduser_turn_fn: perspective missing; refusing fallback persona.")
+        return {
+            "current_question": "",
+            "enduser_answer": "",
+            "_agenda_needs_question": True,
+            "errors": (state.get("errors") or []) + [
+                "EndUser turn skipped because current agenda perspective is missing."
+            ],
+        }
 
     for attempt in range(1, _ENDUSER_MAX_ATTEMPTS + 1):
         augmented_state = dict(state)
@@ -610,19 +627,18 @@ def review_elicitation_agenda_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     After resume:
       approved=True  → write reviewed_elicitation_agenda sentinel;
                        flow → conduct_requirements_interview.
-      approved=False → remove aspect_map_artifact + elicitation_agenda_artifact,
+      approved=False → remove elicitation_agenda_artifact,
                        inject elicitation_agenda_feedback; flow returns to
-                       agenda_turn so all passes are rebuilt using
+                       agenda_turn so the agenda is rebuilt using
                        reviewed_product_vision + feedback.
     """
     artifacts  = dict(state.get("artifacts") or {})
     agenda     = artifacts.get("elicitation_agenda_artifact", {})
-    aspect_map = artifacts.get("aspect_map_artifact", {})
 
     interrupt_value = {
         "review_type":    "elicitation_agenda",
         "artifact_data":  agenda,
-        "review_payload": _build_elicitation_agenda_review_payload(agenda, aspect_map),
+        "review_payload": _build_elicitation_agenda_review_payload(agenda),
         "ui_summary":     ARTIFACT_SUMMARIES["elicitation_agenda"],
     }
     reviewer_response: Dict[str, Any] = interrupt(interrupt_value)
@@ -648,9 +664,8 @@ def review_elicitation_agenda_turn_fn(state: WorkflowState) -> Dict[str, Any]:
             "elicitation_agenda_feedback": None,
         }
 
-    # On rejection: remove both artifacts so AgendaAgent rebuilds all passes.
+    # On rejection: remove the agenda artifact so AgendaAgent rebuilds.
     artifacts.pop("elicitation_agenda_artifact", None)
-    artifacts.pop("aspect_map_artifact", None)
     logger.info("[ReviewElicitationAgenda] REJECTED. Feedback: %s", feedback or "(none)")
     agenda_feedback = feedback or "The reviewer did not provide specific feedback."
     return {
@@ -658,7 +673,6 @@ def review_elicitation_agenda_turn_fn(state: WorkflowState) -> Dict[str, Any]:
         "elicitation_agenda_feedback": agenda_feedback,
         # Reset live state keys so AgendaAgent rebuilds all passes cleanly.
         "elicitation_agenda":         None,
-        "aspect_map":                 None,
     }
 
 
@@ -710,16 +724,8 @@ def review_requirement_list_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     approved = bool(reviewer_response.get("approved", False))
     feedback = (reviewer_response.get("feedback") or "").strip()
 
-    # Conflict gate: re-run only Pass 3 of distiller with resolution feedback.
-    # Pass 1 and Pass 2 candidates from the previous run are carried over
-    # so the LLM does not have to re-synthesise interview-grounded items
-    # and baseline items it already produced. The reviewer's resolution is
-    # injected as both the standard feedback (visible to every pass) and
-    # the CONFLICT FEEDBACK ADHERENCE block in Pass 3 (visible only when
-    # carryover conflicts are present).
+    # Conflict gate: always re-run distiller with resolution feedback
     if has_conflicts:
-        carryover_items = list(requirements)
-        carryover_conflicts = list(conflicts)
         artifacts.pop("requirement_list", None)
         resolution_feedback = (
             f"CONFLICT RESOLUTION REQUIRED: The following conflicts were detected:\n"
@@ -731,18 +737,14 @@ def review_requirement_list_turn_fn(state: WorkflowState) -> Dict[str, Any]:
         )
         logger.info(
             "[ReviewRequirementList] CONFLICT GATE — %d conflict(s). "
-            "Re-running distiller Pass 3 only with %d carried-over candidate(s).",
+            "Re-running distiller with resolution feedback.",
             len(conflicts),
-            len(carryover_items),
         )
         return {
-            "artifacts":                  artifacts,
-            "_needs_srs_synthesis":       True,
-            "interview_complete":         False,
-            "requirement_list_feedback":  resolution_feedback,
-            "_distiller_pass3_only":      True,
-            "_pass3_carryover_items":     carryover_items,
-            "_pass3_carryover_conflicts": carryover_conflicts,
+            "artifacts":                artifacts,
+            "_needs_srs_synthesis":     True,
+            "interview_complete":       False,
+            "requirement_list_feedback": resolution_feedback,
         }
 
     if approved:
@@ -915,9 +917,6 @@ def review_validated_product_backlog_turn_fn(state: WorkflowState) -> Dict[str, 
 
     if approved:
         artifacts["validated_product_backlog_approved"] = validated
-        _sync_artifacts_to_store(
-            state, {"artifacts": {"validated_product_backlog_approved": validated}}
-        )
         logger.info(
             "[AnalystReview] APPROVED — %d ready PBIs, %d total AC.",
             len([
@@ -945,135 +944,94 @@ def review_validated_product_backlog_turn_fn(state: WorkflowState) -> Dict[str, 
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_product_vision_review_payload(vision: Dict[str, Any]) -> Dict[str, Any]:
-    """Build the structured payload shown when reviewing product_vision."""
-    flow  = vision.get("flow") or {}
-    roles = vision.get("roles") or []
-    scope = vision.get("scope") or []
-    concerns = vision.get("nfr_concerns") or []
+    """Build the structured payload shown when reviewing product_vision.
 
+    The product_vision schema is lean: description / intent_summary /
+    target_outcome, known_signals, roles, assumptions, concerns, and scope
+    boundaries. Every Role / Assumption / Concern / Boundary carries a
+    `lens` (stated / implied / inferred) and a natural-language `anchor`.
+    """
+    roles = vision.get("roles") or []
     return {
         "description": vision.get("description", ""),
-        "flow": {
-            "entities": [
-                {
-                    "name": entity.get("name"),
-                    "kind": entity.get("kind"),
-                    "related_to": entity.get("related_to"),
-                    "purpose": entity.get("purpose"),
-                    "steps": entity.get("steps", []),
-                    "order": entity.get("order"),
-                    "signal": entity.get("signal"),
-                }
-                for entity in (flow.get("entities") or [])
-            ],
-            "links":    flow.get("links", []),
-        },
+        "intent_summary": vision.get("intent_summary", ""),
+        "target_outcome": vision.get("target_outcome", ""),
+        "known_signals": list(vision.get("known_signals") or []),
         "roles": [
             {
+                "id": role.get("id"),
                 "name": role.get("name"),
-                "kind": role.get("kind"),
-                "duties": [
-                    {
-                        "id":       duty.get("id"),
-                        "rule":     duty.get("rule"),
-                        "risk":     duty.get("risk"),
-                        "aspect":   duty.get("aspect"),
-                        "entity":   duty.get("entity"),
-                        "step":     duty.get("step"),
-                        "entity_refs": duty.get("entity_refs", []),
-                        "flow_step_refs": duty.get("flow_step_refs", []),
-                        "priority": duty.get("priority"),
-                    }
-                    for duty in (role.get("duties") or [])
-                ],
+                "need": role.get("need"),
+                "lens": role.get("lens", ""),
+                "anchor": role.get("anchor", ""),
             }
             for role in roles
         ],
-        "nfr_concerns": [
+        "assumptions": [
+            {
+                "id": item.get("id"),
+                "statement": item.get("statement"),
+                "why_it_matters": item.get("why_it_matters"),
+                "lens": item.get("lens", ""),
+                "anchor": item.get("anchor", ""),
+            }
+            for item in (vision.get("assumptions") or [])
+        ],
+        "concerns": [
             {
                 "id": concern.get("id"),
-                "category": concern.get("category"),
                 "theme": concern.get("theme"),
-                "attached_to": concern.get("attached_to", []),
-                "affected_roles": concern.get("affected_roles", []),
+                "affected_roles": list(concern.get("affected_roles") or []),
                 "rationale": concern.get("rationale"),
+                "lens": concern.get("lens", ""),
+                "anchor": concern.get("anchor", ""),
             }
-            for concern in concerns
+            for concern in (vision.get("concerns") or [])
         ],
         "scope": [
             {
-                "id":     item.get("id"),
-                "item":   item.get("item"),
+                "id": item.get("id"),
+                "item": item.get("item"),
                 "reason": item.get("reason"),
+                "lens": item.get("lens", ""),
+                "anchor": item.get("anchor", ""),
             }
-            for item in scope
+            for item in (vision.get("scope") or [])
         ],
+        "notes": vision.get("notes", ""),
     }
 
 
 def _build_elicitation_agenda_review_payload(
     agenda: Dict[str, Any],
-    aspect_map: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build the structured payload shown when reviewing elicitation_agenda_artifact.
 
-    Shows:
-      • aspect map entries for ordinary needs and possible conflicts
-      • agenda items with context, probe, gap, and close rule
+    Shows evidence-job agenda items with perspective, scene, decision target,
+    and close condition. Items may attach to assumptions, concerns, or scope
+    boundaries from the vision; items with multiple refs carry a merge_anchor.
     """
-    source_map = aspect_map or {}
-
-    am_entries = [
-        {
-            "id":     e.get("id"),
-            "entity": e.get("entity"),
-            "step":   e.get("step"),
-            "role":   e.get("role"),
-            "aspect": e.get("aspect"),
-            "source": e.get("source"),
-            "kind":   e.get("kind"),
-            "peer":   e.get("peer"),
-            "note":   e.get("note"),
-            "risk":   e.get("risk"),
-            "concern_ref": e.get("concern_ref"),
-            "concern_category": e.get("concern_category"),
-            "concern_theme": e.get("concern_theme"),
-        }
-        for e in (source_map.get("entries") or [])
-    ]
-
     items = []
     for item in agenda.get("items") or []:
         items.append({
-            "id":       item.get("id"),
-            "entity":   item.get("entity"),
-            "step":     item.get("step"),
-            "role":     item.get("role"),
-            "aspect":   item.get("aspect"),
-            "trap":     item.get("trap"),
-            "kind":     item.get("kind"),
-            "baseline": item.get("baseline"),
-            "scene":    item.get("scene"),
-            "risk":     item.get("risk"),
-            "probe":    item.get("probe"),
-            "gap":      item.get("gap"),
-            "close":    item.get("close"),
-            "source":   item.get("source"),
-            "peer":     item.get("peer"),
-            "concern_ref": item.get("concern_ref"),
-            "concern_category": item.get("concern_category"),
-            "concern_theme": item.get("concern_theme"),
+            "id": item.get("id"),
+            "vision_refs": list(item.get("vision_refs") or []),
+            "perspective": item.get("perspective"),
+            "context": item.get("context"),
+            "decision_target": item.get("decision_target", ""),
+            "seed_question": item.get("seed_question"),
+            "coverage_points": list(item.get("coverage_points") or []),
+            "close_when": item.get("close_when"),
+            "merge_anchor": item.get("merge_anchor", ""),
+            "notes": item.get("notes"),
         })
 
     return {
-        "session_id":     agenda.get("session_id", ""),
-        "created_at":     agenda.get("created_at", ""),
-        "summary":        agenda.get("summary", {}),
-        "map_summary":    source_map.get("summary", {}),
-        "aspect_entries": am_entries,
-        "total_items":    len(items),
-        "items":          items,
-        "flow":           agenda.get("flow", ""),
+        "session_id":  agenda.get("session_id", ""),
+        "created_at":  agenda.get("created_at", ""),
+        "total_items": len(items),
+        "items":       items,
+        "notes":       agenda.get("notes", ""),
     }
 
 
@@ -1081,7 +1039,12 @@ def _build_requirement_list_review_payload(
     req_list: Dict[str, Any],
     requirements: list,
 ) -> Dict[str, Any]:
-    """Build the structured payload shown when reviewing requirement_list."""
+    """Build the structured payload shown when reviewing requirement_list.
+
+    The Requirement schema is now lean: id, type, stakeholder, statement,
+    rationale, trace_refs, acceptance_criteria, priority, status, and
+    threshold_needed (NFR only). Display fields stay in sync.
+    """
     by_type: Dict[str, int] = {}
     req_summaries = []
     for r in requirements:
@@ -1095,12 +1058,9 @@ def _build_requirement_list_review_payload(
             "stakeholder":         r.get("stakeholder"),
             "statement":           r.get("statement"),
             "rationale":           r.get("rationale", "(not provided)"),
-            "category":            r.get("category"),
-            "concern_theme":       r.get("concern_theme"),
-            "requires_threshold":  r.get("requires_threshold", False),
-            "entity_refs":         r.get("entity_refs", []),
-            "flow_step_refs":      r.get("flow_step_refs", []),
-            "acceptance_criteria": r.get("acceptance_criteria", []),
+            "trace_refs":          list(r.get("trace_refs") or []),
+            "threshold_needed":    bool(r.get("threshold_needed", False)),
+            "acceptance_criteria": list(r.get("acceptance_criteria") or []),
         })
 
     return {
@@ -1110,6 +1070,8 @@ def _build_requirement_list_review_payload(
         "by_type":           by_type,
         "items":             req_summaries,
         "has_conflicts":     bool(req_list.get("conflicts") or []),
+        "gap_count":         len(req_list.get("gaps") or []),
+        "gaps":              req_list.get("gaps", []),
         "conflicts":         [
             {
                 "id": c.get("id") or f"CF-{i + 1:02d}",
@@ -1159,39 +1121,37 @@ def _build_interview_review_payload(
 ) -> Dict[str, Any]:
     """Build the structured payload shown when reviewing interview_record.
 
-    Schema matches InterviewerAgent conclude output.
+    Schema matches the lean ELRecord shape: no focus_kind/focus_ref/covered_refs,
+    no techniques, no coverage_note. Each agenda item carries vision_refs,
+    perspective, scene, coverage, signals, assumption_evidence, gaps, and talk.
     """
     item_summaries = []
     for item in elicitation_items:
-        # Truncate long answers for display but keep enough context
-        answer = item.get("answer", "") or ""
-        answer_preview = answer[:200] + "…" if len(answer) > 200 else answer
+        talk = item.get("talk") or []
+        last_answer = (talk[-1].get("answer") if talk else "") or ""
+        answer_preview = last_answer[:200] + "…" if len(last_answer) > 200 else last_answer
 
         item_summaries.append({
-            "id":          item.get("id"),
-            "item":        item.get("item"),
-            "entity":      item.get("entity"),
-            "step":        item.get("step"),
-            "aspect":      item.get("aspect"),
-            "trap":        item.get("trap"),
-            "kind":        item.get("kind"),
-            "close":       item.get("close"),
-            "source":      item.get("source"),
-            "risk":        item.get("risk"),
-            "concern_ref": item.get("concern_ref"),
-            "concern_category": item.get("concern_category"),
-            "concern_theme": item.get("concern_theme"),
-            "stakeholder": item.get("role"),
-            "question":    item.get("question", "(not recorded)"),
-            "answer":      answer_preview,
-            "turn_count":  len(item.get("talk") or []),
-            "status":      item.get("status"),
+            "id":               item.get("id"),
+            "item":             item.get("item"),
+            "vision_refs":     list(item.get("vision_refs") or item.get("assumption_refs") or []),
+            "decision_target":  item.get("decision_target"),
+            "context":          item.get("context"),
+            "close_when":       item.get("close_when"),
+            "coverage_points":  list(item.get("coverage_points") or []),
+            "coverage":         list(item.get("coverage") or []),
+            "stakeholder":      item.get("perspective"),
+            "signals":          list(item.get("signals") or []),
+            "assumption_evidence": list(item.get("assumption_evidence") or []),
+            "gaps":             list(item.get("gaps") or []),
+            "rule":             item.get("rule"),
+            "answer_preview":   answer_preview,
+            "turn_count":       len(talk),
+            "status":           item.get("status"),
         })
 
     return {
         "project_description": record.get("project_description", ""),
-        # interview_record from _tool_conclude does not carry completeness_score,
-        # gaps_identified, total_turns, or notes — omit to avoid misleading None values.
         "total_items":         len(elicitation_items),
         "elicitation_items":   item_summaries,
     }
@@ -1225,15 +1185,12 @@ def _build_product_backlog_review_payload(backlog: Dict[str, Any]) -> Dict[str, 
                 "requirement_id": trace.get("requirement_id"),
                 "requirement_type": trace.get("requirement_type"),
                 "stakeholder": trace.get("stakeholder"),
-                "entity": trace.get("entity"),
-                "step": trace.get("step"),
-                "aspect": trace.get("aspect"),
+                "trace_refs": list(trace.get("trace_refs") or []),
+                "threshold_needed": bool(trace.get("threshold_needed", False)),
                 "priority": trace.get("priority"),
-                "source": trace.get("source"),
-                "origin": trace.get("origin"),
                 "statement": trace.get("statement"),
                 "rationale": trace.get("rationale"),
-                "acceptance_criteria": trace.get("acceptance_criteria", []),
+                "acceptance_criteria": list(trace.get("acceptance_criteria") or []),
             },
             "story_points":  est.get("story_points"),
             "priority_rank": pri.get("priority_rank"),
@@ -1248,7 +1205,7 @@ def _build_product_backlog_review_payload(backlog: Dict[str, Any]) -> Dict[str, 
         "total_stories":   len(items),
         "methodology":     backlog.get("methodology", {}),
         "quality_warnings": backlog.get("quality_warnings", {}),
-        "notes":           backlog.get("pass_notes", ""),
+        "notes":           backlog.get("notes", ""),
         "stories":         story_summaries,
     }
 
@@ -1279,15 +1236,12 @@ def _build_validated_product_backlog_review_payload(validated: Dict[str, Any]) -
                 "requirement_id": trace.get("requirement_id"),
                 "requirement_type": trace.get("requirement_type"),
                 "stakeholder": trace.get("stakeholder"),
-                "entity": trace.get("entity"),
-                "step": trace.get("step"),
-                "aspect": trace.get("aspect"),
+                "trace_refs": list(trace.get("trace_refs") or []),
+                "threshold_needed": bool(trace.get("threshold_needed", False)),
                 "priority": trace.get("priority"),
-                "source": trace.get("source"),
-                "origin": trace.get("origin"),
                 "statement": trace.get("statement"),
                 "rationale": trace.get("rationale"),
-                "acceptance_criteria": trace.get("acceptance_criteria", []),
+                "acceptance_criteria": list(trace.get("acceptance_criteria") or []),
             },
             "story_points":  est.get("story_points"),
             "priority_rank": (item.get("prioritization") or {}).get("priority_rank"),
@@ -1306,6 +1260,7 @@ def _build_validated_product_backlog_review_payload(validated: Dict[str, Any]) -
         })
 
     return {
+        "notes":              validated.get("notes", ""),
         "refinement_summary": validated.get("refinement_summary", ""),
         "refinement_stats":   validated.get("refinement_stats", {}),
         "pbis":               pbi_summaries,

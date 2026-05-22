@@ -33,6 +33,7 @@
 # =============================================================================
 
 import json
+import os
 import time
 import re
 import threading
@@ -47,7 +48,8 @@ from ..data.database import (
 )
 from ..auth.auth_utils import get_user_id_for_token_ws
 from src.orchestrator import build_graph
-from src.orchestrator.graph import ARTIFACT_SUMMARIES
+from src.orchestrator.graph import ARTIFACT_SUMMARIES, configure_default_store
+from src.memory.short_term import create_langgraph_postgres
 
 log = logging.getLogger(__name__)
 
@@ -149,7 +151,47 @@ class WSHandler:
         self._completion_sent: set[str] = set()
         self._conversation_ctx: Dict[str, Dict[str, Any]] = {}
 
-        self.graph = build_graph()
+        # Held so the pool's lifetime matches the handler's. Closed by the
+        # runtime when the process exits; no explicit shutdown hook needed.
+        self._lg_pool = None
+        self.graph = self._build_graph_for_server()
+
+    def _build_graph_for_server(self):
+        """Build the LangGraph workflow with Postgres-backed checkpointer + store.
+
+        Falls back to LangGraph's in-memory backends if IREDEV_PG_CONNECTION is
+        unset or Postgres init fails (e.g. local dev without Docker). The
+        fallback is single-process only — restart or scale-out will lose state.
+        """
+        pg_conn = os.getenv("IREDEV_PG_CONNECTION")
+        if not pg_conn:
+            log.warning(
+                "[WS] IREDEV_PG_CONNECTION not set — workflow state will not "
+                "survive restart and cannot be shared across worker processes."
+            )
+            return build_graph()
+
+        try:
+            min_conn = int(os.getenv("LG_MIN_CONN", "1"))
+            max_conn = int(os.getenv("LG_MAX_CONN", "10"))
+            checkpointer, store, pool = create_langgraph_postgres(
+                pg_conn, min_size=min_conn, max_size=max_conn
+            )
+        except Exception as exc:
+            log.error(
+                "[WS] Postgres checkpointer/store init failed (%s) — falling "
+                "back to in-memory state. Multi-user/restart will lose state.",
+                exc,
+                exc_info=True,
+            )
+            return build_graph()
+
+        # Bind the same Postgres store to graph.py's artifact-sync helpers so
+        # _sync_artifacts_to_store + get_artifact_from_store share one backend.
+        configure_default_store(store)
+        self._lg_pool = pool
+        log.info("[WS] LangGraph state bound to Postgres (multi-user ready)")
+        return build_graph(checkpointer=checkpointer, store=store)
 
     # =========================================================================
     # Token streaming
@@ -445,9 +487,10 @@ class WSHandler:
                 "running": False,
                 "complete": True,
             })
-            if chat_id in self._completion_sent:
-                return
-            self._completion_sent.add(chat_id)
+            with self._state_lock:
+                if chat_id in self._completion_sent:
+                    return
+                self._completion_sent.add(chat_id)
 
             mess_id = str(uuid.uuid4())
             accum = self._send_token_stream(
@@ -502,15 +545,12 @@ class WSHandler:
             "agendaItemId": item.get("id"),
             "agendaItemIndex": (current_index + 1) if current_index is not None else None,
             "agendaTotalItems": total_items,
-            "stakeholderRole": item.get("role"),
-            "entity": item.get("entity"),
-            "step": item.get("step"),
-            "aspect": item.get("aspect"),
-            "kind": item.get("kind"),
-            "trap": item.get("trap"),
-            "close": item.get("close"),
-            "risk": item.get("risk"),
-            "source": item.get("source"),
+            "stakeholderRole": item.get("perspective"),
+            "focusKind": item.get("focus_kind"),
+            "focusRef": item.get("focus_ref"),
+            "coveredRefs": item.get("covered_refs"),
+            "closeWhen": item.get("close_when"),
+            "coveragePoints": item.get("coverage_points"),
         }
         return {k: v for k, v in meta.items() if v not in (None, "")}
 
