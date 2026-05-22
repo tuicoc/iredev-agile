@@ -21,12 +21,11 @@ Phase 2 — Backlog Refinement (backlog_refinement):
   Step 1 – generate_acceptance_criteria   → validated_product_backlog
   Step 2 – review_validated_backlog       → validated_product_backlog_approved  (HITL)
 
-Phase 3 — Sprint Execution (sprint_execution):  [DISABLED]
-  Phase 3 and Phase 4 are commented out below until they have real steps.
-  Once validated_product_backlog_approved is written, the supervisor finds
-  no further executable step and routes to END, ending the run.
+Phase 3 — Sprint Execution (sprint_execution):
+  Placeholder — steps added incrementally when Sprint N is implemented.
 
-Phase 4 — Sprint Review (sprint_review):  [DISABLED]
+Phase 4 — Sprint Review (sprint_review):
+  Placeholder.
 
 SprintAgent pipeline (Steps 9a → 9c → 9b)
 ──────────────────────────────────────────
@@ -368,35 +367,30 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 ),
             ),
         ],
-        next_phase=None,
+        next_phase="sprint_execution",
     ),
 
-    # ── Phase 3 & Phase 4 are intentionally disabled ───────────────────────────
-    # The workflow ends after Phase 2 (validated_product_backlog_approved).
-    # Supervisor's get_next_action() returns None once no phase has an
-    # executable step, which routes the graph to END. Re-enable these phases
-    # by uncommenting them once Sprint Execution and Sprint Review have real
-    # steps to run.
-    #
-    # PhaseDefinition(
-    #     phase_name="sprint_execution",
-    #     display_name="Sprint N — Execution",
-    #     description=(
-    #         "Iterative sprint cycles. Not yet implemented — placeholder."
-    #     ),
-    #     steps=[],
-    #     next_phase="sprint_review",
-    # ),
-    #
-    # PhaseDefinition(
-    #     phase_name="sprint_review",
-    #     display_name="Sprint Review & Retrospective",
-    #     description=(
-    #         "Human evaluates sprint output. Not yet implemented — placeholder."
-    #     ),
-    #     steps=[],
-    #     next_phase=None,
-    # ),
+    # ── Phase 3: Sprint Execution ──────────────────────────────────────────────
+    PhaseDefinition(
+        phase_name="sprint_execution",
+        display_name="Sprint N — Execution",
+        description=(
+            "Iterative sprint cycles. Not yet implemented — placeholder."
+        ),
+        steps=[],
+        next_phase="sprint_review",
+    ),
+
+    # ── Phase 4: Sprint Review ─────────────────────────────────────────────────
+    PhaseDefinition(
+        phase_name="sprint_review",
+        display_name="Sprint Review & Retrospective",
+        description=(
+            "Human evaluates sprint output. Not yet implemented — placeholder."
+        ),
+        steps=[],
+        next_phase=None,
+    ),
 ]
 
 PHASE_INDEX: Dict[str, PhaseDefinition] = {p.phase_name: p for p in WORKFLOW_PHASES}

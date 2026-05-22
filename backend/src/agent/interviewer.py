@@ -52,106 +52,6 @@ class AssumptionEvidenceEntry(BaseModel):
 
 class ELRecord(BaseModel):
     id: str = Field(description="Stable interview record id in EL-NNN format.")
-<<<<<<< Updated upstream
-    item: str = Field(description="Agenda item id that produced this record.")
-    entity: str = Field(description="Entity discussed in this exchange.")
-    step: str = Field(description="Entity step discussed in this exchange.")
-    aspect: str = Field(description="Agenda aspect discussed in this exchange.")
-    trap: str = Field(description="Interview trap used for this exchange.")
-    kind: str = Field(description="Agenda item kind: need, conflict, or concern.")
-    role: str = Field(description="Stakeholder role interviewed.")
-    close: str = Field(description="Completion rule the interviewer was trying to settle.")
-    source: str = Field(description="Agenda source id behind this interview record.")
-    risk: Optional[str] = Field(
-        default=None,
-        description=(
-            "Failure or tension scenario the interview item was designed to resolve "
-            "or bound."
-        ),
-    )
-    concern_ref: Optional[str] = Field(
-        default=None,
-        description="NFR concern id when this record came from a concern agenda item.",
-    )
-    concern_category: Optional[str] = Field(
-        default=None,
-        description="NFR concern category when this record came from a concern agenda item.",
-    )
-    concern_theme: Optional[str] = Field(
-        default=None,
-        description="NFR concern theme when this record came from a concern agenda item.",
-    )
-    rule: Optional[str] = Field(
-        default=None,
-        description=(
-            "Final closure statement captured from the stakeholder when one was "
-            "settled. The grammatical subject is the PRODUCT, not the user: the "
-            "stakeholder describes their experience; this field records what the "
-            "app must therefore do.\n"
-            "\n"
-            "- For need / conflict items, write it as 'The app must <verb> ...', "
-            "'The system must require ...', 'The product must allow ...', or an "
-            "equivalent system-subject form. Avoid 'Users must provide / agree / "
-            "be aware / have / receive ...' — those are user obligations and "
-            "almost always represent a system obligation in disguise.\n"
-            "- For concern items, the rule names what observable quality the "
-            "product must hold: a threshold with units, a named comparator, an "
-            "observable absence ('no spinner visible'), an operating condition "
-            "('before the user shifts attention'), or a named precedent. "
-            "Emotional descriptors alone ('instantly', 'immediately', "
-            "'responsive', 'fast', 'smooth') are not acceptable as the rule.\n"
-            "- Narrow exception: a workflow obligation that exists outside the "
-            "app (an external auditor sign-off the system only records) or a "
-            "legal acceptance whose force is external. In ordinary product "
-            "feature elicitation, default to system subject.\n"
-            "- This field is a closure summary, not a container for every "
-            "independent fact from the dialogue. Atomic facts go into signals."
-        )
-    )
-    align: Optional[Literal["exact", "narrower", "broader", "misaligned"]] = Field(
-        default=None,
-        description="How well the final answer matched the close rule."
-    )
-    talk: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Question and answer turns captured for this agenda item."
-    )
-    signals: List[str] = Field(
-        default_factory=list,
-        description=(
-            "Atomic evidence units captured from the stakeholder's reply. Each "
-            "item should carry ONE independent fact the stakeholder stated: a "
-            "condition, limit, exception, permission, dependency, threshold, "
-            "precedence, observed failure, or observable quality boundary.\n"
-            "\n"
-            "Signals are the main raw material Distiller uses to split one "
-            "interview record into multiple atomic requirements. Keep them "
-            "atomic — do not join independent facts with 'and'.\n"
-            "\n"
-            "Signals may preserve the stakeholder's own phrasing of their "
-            "experience (their lived statement is what it is), but each signal "
-            "must be readable as evidence that justifies a PRODUCT-side rule. "
-            "Avoid signals that read only as user-side duty ('users must "
-            "provide X', 'users have to agree to Y') with no system-side "
-            "consequence; rewrite to expose what the app does or fails to do "
-            "('the app rejects sign-up when email is missing', 'the app must "
-            "present terms before account creation'). A signal that gives "
-            "Distiller no system-side hook is wasted evidence."
-        )
-    )
-    question: Optional[str] = Field(
-        default=None,
-        description="Last interviewer message delivered on this item."
-    )
-    answer: Optional[str] = Field(
-        default=None,
-        description="Rendered answer block used for human review."
-    )
-    status: Optional[Literal["answered", "skipped"]] = Field(
-        default=None,
-        description="Final interview status for this agenda item."
-    )
-=======
     item: str = Field(description="Agenda item id (IT-NNN) that produced this record.")
     vision_refs: List[str] = Field(default_factory=list, description="Vision ids (assumption / concern / scope) this exchange was meant to clarify.")
     perspective: str = Field(description="Product role perspective interviewed.")
@@ -166,7 +66,6 @@ class ELRecord(BaseModel):
     rule: Optional[str] = Field(default=None, description="Closure summary captured when the item settled. Empty when closing on gaps only.")
     talk: List[Dict[str, Any]] = Field(default_factory=list, description="Question/answer turns captured for this item.")
     status: Literal["answered", "partial", "skipped"] = Field(description="Final interview status for this agenda item.")
->>>>>>> Stashed changes
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -182,220 +81,6 @@ TURN CONTROL
 - One tool call per turn. Closing one item does not complete the interview;
   the supervisor advances you to the next item automatically.
 
-<<<<<<< Updated upstream
-SUBJECT FRAMING (apply on every record_answer and every ask_question)
-The persona's SUBJECT FRAMING DISCIPLINE governs all your wording. In short:
-the user is the SOURCE of evidence; the product is the SUBJECT of every rule
-and every question.
-- When you record a rule, the subject is the product: "The app must
-  require ...", "The system must allow ...", "The product must present ...".
-  Do NOT record rules as user obligations ("Users must provide ...", "The
-  user must agree to ...", "Users must be aware that ..."); those are the
-  user's experience phrased the wrong way round and they will mislead
-  Distiller into writing user-duty requirements.
-- When you ask a question, frame it around what the PRODUCT must do for
-  the user, not what the user must do. "What does the app need to enforce
-  when X happens?", "What does the app need to show you at X?", "What
-  does the app fail to do today at X?" — not "What must you do when X?".
-- Three temptation patterns the stakeholder will hand you in user-subject
-  form; you record them in product-subject form:
-    user says "to sign up I have to enter my email and password"
-      => rule "The app must require email and password at sign-up"
-    user says "I have to agree to terms first"
-      => rule "The app must present the terms and require acceptance
-              before account creation"
-    user says "I need to know that delete is permanent"
-      => rule "The app must warn the user that delete is permanent
-              before confirming"
-
-WHEN CALLING record_answer
-1. Read the pending stakeholder answer and the full local dialogue.
-2. Classify align:
-   - exact: answer settles close and directly addresses the gap plus risk.
-   - narrower: answer settles close for a narrower condition that still
-     addresses the gap plus risk.
-   - broader: answer addresses the topic but leaves the decisive rule incomplete.
-   - misaligned: answer does not address the agenda item.
-3. done=true only when the close rule is now explicit enough that Distiller can
-   use it without guessing and the risk is resolved, bounded, or explicitly
-   left as accepted ambiguity per ACCEPT-AMBIGUITY CLOSE below.
-4. Alignment and done must be internally consistent:
-   - exact or narrower -> done may be true only if rule is concrete and
-     system-subject.
-   - broader or misaligned -> done must be false and rule must be empty.
-5. rule is the shortest settled closure statement, written with the PRODUCT
-   as the subject (see SUBJECT FRAMING). It is not the only source for
-   Distiller and should not hide multiple independent facts in one blob.
-   Leave it empty when done=false.
-6. signals capture only concrete stakeholder evidence stated in this exchange.
-   signals carry the independent facts Distiller will split.
-   Split independent conditions, limits, permissions, dependencies, exceptions,
-   thresholds, quality boundaries, and precedence facts into separate signal
-   strings. Do not merge them with "and" when they could become separate
-   requirements or acceptance criteria. Each signal should be readable as
-   evidence justifying a system-side rule (see SUBJECT FRAMING).
-7. done=true is invalid when rule is empty. If the answer has useful evidence
-   but no settled rule or quality statement, use done=false and ask a follow-up.
-8. Apply PROBE-FIRST RHYTHM and DRILL-BEFORE-CLOSE from the persona.
-   For kind=need and kind=concern, the first stakeholder answer on this
-   item is a reaction to the probe (a foil), not yet a settled rule.
-   Default done=false on the first stakeholder turn for these kinds;
-   close only when ACCEPT-AMBIGUITY CLOSE has explicitly fired in
-   that first reaction, or when at least one follow-up drill has
-   already happened. Outside those two cases, prefer recording
-   signals with done=false and asking a follow-up.
-9. For kind=concern, done=true is invalid when rule contains ONLY an
-   emotional descriptor with no observable anchor. Apply QUALITY
-   BOUNDARY DISCIPLINE before closing: if the load-bearing words in
-   rule reduce to feeling vocabulary ("quickly", "responsive",
-   "fast", "instantly", "immediately", "smooth", "snappy",
-   "intuitive") and no observable absence, comparator, operating
-   condition, or named precedent appears, set done=false, record
-   the descriptor as a signal (it is evidence about the user's
-   experience), and ask the grounded follow-up that turns the
-   descriptor into an observable anchor.
-
-ACCEPT-AMBIGUITY CLOSE (for kind=need and kind=conflict)
-A need or conflict item is not always closed by a specific number, scale, or
-precedence. Sometimes the defensible answer is that FLEXIBILITY itself is the
-rule. When the stakeholder explicitly and consistently states across turns
-that they cannot specify exact terms because variation in user experience or
-absence of role authority is the reason, that statement IS the close.
-- Signs flexibility is the close, not a stall:
-  * the stakeholder names the alternatives that must coexist
-    (predefined AND open-ended, structured AND free-form, etc.);
-  * the stakeholder explains WHY a single answer would be wrong;
-  * the stakeholder repeats the same refusal with consistent reasoning
-    across two or more turns.
-- Action: close with rule="The app must support [both X and Y / multiple
-  options / flexibility in Z]" and signals carrying the named alternatives
-  the stakeholder defended. align=narrower is usually correct here.
-- Hard cap: if you have asked the same closure question three times and
-  received the same flexibility answer with consistent reasoning, do not
-  ask a fourth time. Close on flexibility. Asking the same question a
-  fourth time is looping, not drilling.
-
-WHEN kind=need
-- First ground the stakeholder in the named entity step.
-- Then present the probe as a factual statement framed around the PRODUCT
-  (per SUBJECT FRAMING), not around the user's duties.
-- Drill until the missing PRODUCT rule, limit, dependency, or permission
-  becomes explicit, OR until the stakeholder defensibly settles on
-  flexibility per ACCEPT-AMBIGUITY CLOSE.
-
-WHEN kind=conflict
-A conflict item exposes a collision between two reviewed duties or
-concern pressures. Your job here is NOT to drive the resolution. Driving
-resolution from a single stakeholder biases the outcome toward whichever
-side that stakeholder represents; the global resolution requires every
-affected stakeholder's stance side-by-side, which only the human
-reviewer sees at the distiller HITL gate. Capture this stakeholder's
-side only, then close.
-
-Capture three things from THIS stakeholder alone:
-  (a) HOW the collision lands in their lived role — when they feel
-      it at the named entity step, what the experience looks like,
-      what frustration or uncertainty it creates;
-  (b) WHICH SIDE they personally lean toward and why, in their own
-      role's terms — their lean is evidence of one party's stance,
-      not a global verdict;
-  (c) any concrete preference they would want the product to offer
-      from their side (a default they would accept, a signal they
-      would want to see, an exit they would want to keep open) —
-      still expressed as their stance, not the product's commitment.
-
-Close criteria for conflict items (done=true) — any of the following
-is sufficient:
-  - align in {exact, narrower} AND (a), (b), and (c) above are
-    visible in signals (one or more of (b) and (c) may be "no lean"
-    or "no preference" when the stakeholder honestly has none);
-  - ACCEPT-AMBIGUITY CLOSE applies (the stakeholder explicitly
-    settles on flexibility itself, with the alternatives named);
-  - the stakeholder explicitly states the collision is not theirs
-    to resolve ("that is a product decision", "I would defer to
-    someone else", "this is not my call") — record that statement
-    in signals and close.
-
-The rule on a closed conflict item names the CURRENT stakeholder's
-stance, never a globally enforced product rule. Acceptable rule
-shapes for conflict items:
-  - "The current stakeholder leans toward weighting <X> when <X>
-    and <Y> collide, and would accept the product surfacing both
-    rather than choosing for them."
-  - "The current stakeholder defers the precedence decision to a
-    product-level rule and wants the conflict surfaced rather than
-    hidden."
-  - "The current stakeholder cannot specify a single rule because
-    the collision varies by context, and would accept either side
-    so long as <named condition> holds."
-The distiller picks these stakeholder stances up as evidence and
-emits the unresolved tension as a Conflict object for human review.
-
-Do NOT:
-  - re-ask the same closure question after the stakeholder has
-    already given their personal lean; their lean IS their close
-    on this item.
-  - push for a precedence rule, a condition split, or an escalation
-    path that this single stakeholder would not naturally own. When
-    the closure would require negotiating with another role, the
-    collision belongs to HITL, not to this turn.
-  - conflate the stakeholder's personal lean (evidence) with the
-    product's global verdict (not your output). The first closes
-    this item; the second is decided later.
-  - keep drilling once item_turn_count is at 3 or more and the
-    stakeholder's stance has not shifted. Capture what you have and
-    close on stance; the conflict will be raised to HITL by the
-    distiller.
-
-WHEN kind=concern (apply QUALITY BOUNDARY DISCIPLINE)
-- Work in quality-probing mode, not rule-clarification mode.
-- Ground the stakeholder in the named entity step and concern theme.
-- Ask for lived examples, operating conditions, tolerable failure,
-  observable absences, comparative anchors, named precedents, and who is
-  affected when the quality fails.
-- Emotional descriptors are NOT qualitative boundaries. "Instantly",
-  "immediately", "quickly", "responsive", "fast", "smooth", "snappy",
-  "promptly" describe how the user feels but give Distiller nothing to
-  test. Treat these as the START of a probe, never the end.
-- When the stakeholder uses an emotional descriptor, ask one grounded
-  follow-up: "When you say 'instantly', what would you actually notice if
-  it were not instant — a spinner appearing, a perceptible wait, a moment
-  where you start looking elsewhere?". Do NOT close on the descriptor
-  alone.
-- done=true only when the rule contains one of:
-  * a concrete threshold or magnitude with a unit,
-  * a comparative anchor with a named comparator ("faster than typing the
-    next word"),
-  * an observable absence ("no spinner appears"),
-  * an operating condition that bounds the failure ("before the user
-    shifts attention away"),
-  * a named precedent the stakeholder genuinely knows.
-- rule is the settled quality statement, written system-subject ("The
-  app must respond before the user shifts attention away from the entry
-  screen"), not "Users must experience instant response".
-- done=true is invalid if rule is empty. done=true is also invalid if
-  rule contains only an emotional descriptor without an observable
-  anchor; ask the grounded follow-up first.
-- Do not invent a numeric threshold for the stakeholder.
-- If the stakeholder gives only examples of frustration or failure,
-  record the evidence with done=false, then ask for the observable
-  anchor (absence / comparator / operating condition / precedent) that
-  would let Distiller write a reviewable NFR.
-
-WHEN CALLING ask_question
-- message is either:
-  - a grounded question framed around the product, or
-  - the prepared probe stated as a fact.
-- Frame around the product, not the user (see SUBJECT FRAMING). Prefer
-  "what does the app need to ..." or "what does the app fail to do at ..."
-  over "what must you do when ...".
-- mirror briefly reflects the latest stakeholder concern when one exists.
-- probe=true only when you are presenting the prepared probe itself.
-- Before asking, check: have I asked this same closure question two or
-  more times already? If yes and the stakeholder's answer has not moved,
-  consider ACCEPT-AMBIGUITY CLOSE or QUALITY BOUNDARY follow-up instead
-  of repeating.
-=======
 QUESTION CRAFT (apply before ask_question)
 You are talking to a simulated person who lives the situation. They are not a
 designer, an analyst, or a reviewer. They cannot decide product scope; they
@@ -535,7 +220,6 @@ SIGNALS DISCIPLINE
 - Do not paraphrase across speakers. Do not synthesize a fact combining two
   answers. Do not write "the user said X" wrappers. If a fact appears twice
   in dialogue, keep one entry.
->>>>>>> Stashed changes
 """
 
 
@@ -564,34 +248,6 @@ class InterviewerAgent(BaseAgent):
                 "judge coverage, and either keep the item open or close it.\n\n"
                 "Use when TURN STATUS says Pending answer: yes.\n\n"
                 "Arguments:\n"
-<<<<<<< Updated upstream
-                "  align (str, required): exact | narrower | broader | misaligned.\n"
-                "    exact/narrower mean the item may close only if rule is non-empty, system-subject, and addresses the current gap plus risk/tension.\n"
-                "    broader/misaligned mean the item remains open and rule must be empty.\n"
-                "  done (bool, required): true only when the close rule is fully settled.\n"
-                "    Mandatory pairing: broader/misaligned => done=false.\n"
-                "    exact/narrower => done=true only if rule is explicit, non-empty, system-subject, and addresses the current gap plus risk/tension.\n"
-                "    If useful evidence exists but no settled rule/quality statement can be written, use done=false.\n"
-                "    Accepted ambiguity is a valid close for need/conflict items when the stakeholder defensibly settled on flexibility itself as the rule (see ACCEPT-AMBIGUITY CLOSE).\n"
-                "    PROBE-FIRST / DRILL-BEFORE-CLOSE: for kind=need and kind=concern, done=true on the first stakeholder turn of an item is invalid unless ACCEPT-AMBIGUITY CLOSE has explicitly fired in that first reaction. The first answer is evidence about the probe (a foil); turn it into a closure rule with a follow-up. For kind=conflict, the stakeholder's first-turn lean is a valid close — record it.\n"
-                "    QUALITY BOUNDARY DISCIPLINE: for kind=concern, done=true is invalid when rule reduces to emotional descriptors only ('quickly', 'responsive', 'fast', 'instantly', 'immediately', 'smooth', 'snappy', 'intuitive') with no observable anchor (absence, comparator, operating condition, named precedent). Set done=false and ask the grounded follow-up that turns the descriptor into an observable anchor.\n"
-                "  why (str, required): concise reason for the align decision.\n"
-                "  rule (str): settled closure statement written with the PRODUCT as the subject.\n"
-                "    Correct: 'The app must require email and password at sign-up.', 'The system must present the terms before account creation.', 'The product must support both predefined and open-ended descriptors when logging stress.'.\n"
-                "    Incorrect: 'Users must provide email and password.', 'The user must agree to the terms.', 'Users must be aware that delete is permanent.' — these are user obligations and almost always wrong as written (see SUBJECT FRAMING).\n"
-                "    For kind=concern, the rule must contain an observable quality anchor: a threshold with units, a named comparator, an observable absence ('no spinner visible'), an operating condition ('before the user shifts attention'), or a named precedent. Emotional descriptors alone ('instantly', 'immediately', 'responsive', 'fast', 'smooth') are NOT acceptable.\n"
-                "    Keep rule as a closure summary; do not use it to compress every independent condition from the dialogue.\n"
-                "    Mandatory pairing: broader/misaligned => rule=''.\n"
-                "    Leave empty whenever done=false.\n"
-                "  signals (list[str], required): atomic evidence units from the stakeholder's reply.\n"
-                "    Include each independent condition, limit, exception, permission, dependency, threshold, precedence fact, or quality boundary as its own string.\n"
-                "    These signals are the main source Distiller uses to split one interview record into multiple atomic requirements.\n"
-                "    Each signal should be readable as evidence justifying a system-side rule; if a signal reads only as a user duty, rewrite it to expose what the app does or fails to do.\n"
-                "\nConcern items:\n"
-                "  Do not close on examples or frustrations alone. Do not close on emotional descriptors alone. Close only when rule contains an observable quality anchor Distiller can reuse. "
-                "If missing, record signals with done=false so the next turn asks a grounded follow-up about the observable anchor (absence / comparator / operating condition / precedent).\n"
-                'Input: {"align": str, "done": bool, "why": str, "rule": str, "signals": list}'
-=======
                 "  done (bool, required): close the item when meaningfully covered.\n"
                 "  rule (str): closure summary; empty when closing on gaps only.\n"
                 "  signals (list[str]): atomic stakeholder-stated facts.\n"
@@ -603,7 +259,6 @@ class InterviewerAgent(BaseAgent):
                 "  gaps (list[str]): probed-but-unresolved coverage_points.\n"
                 'Input: {"done": bool, "rule": str, "signals": list, '
                 '"assumption_evidence": list, "coverage": list, "gaps": list}'
->>>>>>> Stashed changes
             ),
             func=self._tool_record_answer,
         ))
@@ -615,21 +270,8 @@ class InterviewerAgent(BaseAgent):
                 "Use when TURN STATUS says Pending answer: no and "
                 "AGENDA STATUS: OPEN.\n\n"
                 "Arguments:\n"
-<<<<<<< Updated upstream
-                "  message (str, required): either a grounded question or the prepared probe stated as fact.\n"
-                "    Frame around the PRODUCT, not the user: 'What does the app need to enforce at X?', 'What does the app need to show you at X?', 'What does the app fail to do today at X?'. Avoid 'What must you do at X?' — that elicits user obligations, not product rules (see SUBJECT FRAMING).\n"
-                "  mirror (str, required): one short sentence echoing the latest concern from this same stakeholder; "
-                "use an empty string when no prior answer exists for this item.\n"
-                "  probe (bool, required): true only when message is the prepared factual probe.\n"
-                "\nFor kind=concern, ask for lived examples first if needed, then follow up for an observable quality anchor: the absence the user would notice, a comparative anchor, an operating condition that bounds failure, or a named precedent. "
-                "Emotional descriptors ('instantly', 'immediately', 'responsive') are the START of a probe, never an acceptable close — when the stakeholder uses one, ask one grounded follow-up that turns it into an observable condition.\n"
-                "Do not ask the stakeholder to invent a precise number if their role cannot defend one.\n"
-                "If you have asked the same closure question two or more times and the stakeholder keeps giving the same flexibility answer with consistent reasoning, do not ask a fourth time. Either close on flexibility per ACCEPT-AMBIGUITY CLOSE, or move on with done=false and a clear gap.\n"
-                'Input: {"message": str, "mirror": str, "probe": bool}'
-=======
                 "  message (str, required): one open question.\n"
                 'Input: {"message": str}'
->>>>>>> Stashed changes
             ),
             func=self._tool_ask_question,
         ))

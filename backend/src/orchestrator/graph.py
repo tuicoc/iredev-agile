@@ -724,16 +724,8 @@ def review_requirement_list_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     approved = bool(reviewer_response.get("approved", False))
     feedback = (reviewer_response.get("feedback") or "").strip()
 
-    # Conflict gate: re-run only Pass 3 of distiller with resolution feedback.
-    # Pass 1 and Pass 2 candidates from the previous run are carried over
-    # so the LLM does not have to re-synthesise interview-grounded items
-    # and baseline items it already produced. The reviewer's resolution is
-    # injected as both the standard feedback (visible to every pass) and
-    # the CONFLICT FEEDBACK ADHERENCE block in Pass 3 (visible only when
-    # carryover conflicts are present).
+    # Conflict gate: always re-run distiller with resolution feedback
     if has_conflicts:
-        carryover_items = list(requirements)
-        carryover_conflicts = list(conflicts)
         artifacts.pop("requirement_list", None)
         resolution_feedback = (
             f"CONFLICT RESOLUTION REQUIRED: The following conflicts were detected:\n"
@@ -745,18 +737,14 @@ def review_requirement_list_turn_fn(state: WorkflowState) -> Dict[str, Any]:
         )
         logger.info(
             "[ReviewRequirementList] CONFLICT GATE — %d conflict(s). "
-            "Re-running distiller Pass 3 only with %d carried-over candidate(s).",
+            "Re-running distiller with resolution feedback.",
             len(conflicts),
-            len(carryover_items),
         )
         return {
-            "artifacts":                  artifacts,
-            "_needs_srs_synthesis":       True,
-            "interview_complete":         False,
-            "requirement_list_feedback":  resolution_feedback,
-            "_distiller_pass3_only":      True,
-            "_pass3_carryover_items":     carryover_items,
-            "_pass3_carryover_conflicts": carryover_conflicts,
+            "artifacts":                artifacts,
+            "_needs_srs_synthesis":     True,
+            "interview_complete":       False,
+            "requirement_list_feedback": resolution_feedback,
         }
 
     if approved:
@@ -929,9 +917,6 @@ def review_validated_product_backlog_turn_fn(state: WorkflowState) -> Dict[str, 
 
     if approved:
         artifacts["validated_product_backlog_approved"] = validated
-        _sync_artifacts_to_store(
-            state, {"artifacts": {"validated_product_backlog_approved": validated}}
-        )
         logger.info(
             "[AnalystReview] APPROVED — %d ready PBIs, %d total AC.",
             len([

@@ -21,4 +21,4 @@ cp .env.example .env
 python -m src.server.app
 ```
 
-Runs at `http://localhost:8000` 
+Runs at `http://localhost:8000`
