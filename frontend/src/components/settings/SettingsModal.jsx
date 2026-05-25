@@ -8,7 +8,7 @@ import { Modal }       from '../ui/Modal'
 import { useAuth }     from '../../context/AuthContext'
 import { LoadingSpinner } from '../ui/LoadingSpinner'
 
-const TABS = ['Profile', 'Appearance', 'Process', 'API']
+const TABS = ['Profile', 'Process', 'API']
 
 export function SettingsModal({ open, onClose }) {
   const [activeTab, setActiveTab] = useState('Profile')
@@ -34,7 +34,6 @@ export function SettingsModal({ open, onClose }) {
 
       {/* Tab content */}
       {activeTab === 'Profile'    && <ProfileTab />}
-      {activeTab === 'Appearance' && <AppearanceTab />}
       {activeTab === 'Process'    && <ProcessTab />}
       {activeTab === 'API'        && <ApiTab />}
     </Modal>
@@ -45,7 +44,6 @@ export function SettingsModal({ open, onClose }) {
 function ProfileTab() {
   const { user, logout, authLoading } = useAuth()
   const [name,  setName]  = useState(user?.name  || '')
-  const [email, setEmail] = useState(user?.email || '')
   const [saved, setSaved] = useState(false)
 
   async function handleSave(e) {
@@ -74,7 +72,6 @@ function ProfileTab() {
 
       <form onSubmit={handleSave} className="space-y-3">
         <SettingsField label="Display name" value={name} onChange={e => setName(e.target.value)} />
-        <SettingsField label="Email" type="email" value={email} onChange={e => setEmail(e.target.value)} />
 
         <div className="flex items-center justify-between pt-1">
           <button
@@ -96,61 +93,6 @@ function ProfileTab() {
           </button>
         </div>
       </form>
-    </div>
-  )
-}
-
-// ── Appearance tab ────────────────────────────────────────────────────────────
-function AppearanceTab() {
-  const [theme,    setTheme]    = useState('light')   // 'light' | 'dark' | 'system'
-  const [fontSize, setFontSize] = useState('default') // 'small' | 'default' | 'large'
-
-  return (
-    <div className="space-y-5">
-      {/* Theme */}
-      <div>
-        <div className="text-[12px] font-medium text-[#4A4038] mb-2">Theme</div>
-        <div className="flex gap-2">
-          {['light', 'dark', 'system'].map((t) => (
-            <button
-              key={t}
-              onClick={() => setTheme(t)}
-              className={`flex-1 h-8 rounded-lg text-[12px] font-medium capitalize
-                          border transition-colors ${
-                            theme === t
-                              ? 'border-[#B86F50] bg-[#F5E3D7] text-[#B86F50]'
-                              : 'border-[#E2D6C5] text-[#776B60] hover:border-[#CEC0AE]'
-                          }`}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-        <p className="text-[11px] text-[#A89C91] mt-1.5">
-          Dark mode applies on next page load.
-        </p>
-      </div>
-
-      {/* Font size */}
-      <div>
-        <div className="text-[12px] font-medium text-[#4A4038] mb-2">Font size</div>
-        <div className="flex gap-2">
-          {['small', 'default', 'large'].map((s) => (
-            <button
-              key={s}
-              onClick={() => setFontSize(s)}
-              className={`flex-1 h-8 rounded-lg text-[12px] font-medium capitalize
-                          border transition-colors ${
-                            fontSize === s
-                              ? 'border-[#B86F50] bg-[#F5E3D7] text-[#B86F50]'
-                              : 'border-[#E2D6C5] text-[#776B60] hover:border-[#CEC0AE]'
-                          }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
@@ -208,34 +150,19 @@ function ProcessTab() {
 
 // ── API tab ───────────────────────────────────────────────────────────────────
 function ApiTab() {
-  const [apiKey,   setApiKey]   = useState('')
   const [model,    setModel]    = useState('claude-sonnet-4-5')
-  const [maxTokens,setMaxTokens]= useState(4096)
   const [saved,    setSaved]    = useState(false)
 
   function handleSave(e) {
     e.preventDefault()
     // Persist to backend or localStorage
-    localStorage.setItem('api_settings', JSON.stringify({ model, maxTokens }))
+    localStorage.setItem('api_settings', JSON.stringify({ model }))
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
 
   return (
     <form onSubmit={handleSave} className="space-y-4">
-      {/* API Key */}
-      <div>
-        <label className="block text-[12px] font-medium text-[#4A4038] mb-1.5">
-          API Key <span className="text-[#A89C91] font-normal">(optional — uses server key if blank)</span>
-        </label>
-        <input
-          type="password"
-          value={apiKey}
-          onChange={e => setApiKey(e.target.value)}
-          placeholder="sk-ant-api03-••••"
-          className={settingsInputClass}
-        />
-      </div>
 
       {/* Model selector */}
       <div>
@@ -251,25 +178,6 @@ function ApiTab() {
         </select>
       </div>
 
-      {/* Max tokens */}
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <label className="text-[12px] font-medium text-[#4A4038]">Max tokens</label>
-          <span className="text-[12px] font-mono text-[#776B60]">{maxTokens.toLocaleString()}</span>
-        </div>
-        <input
-          type="range"
-          min={256}
-          max={8192}
-          step={256}
-          value={maxTokens}
-          onChange={e => setMaxTokens(Number(e.target.value))}
-          className="w-full accent-[#B86F50]"
-        />
-        <div className="flex justify-between text-[10px] text-[#B0A49A] mt-0.5">
-          <span>256</span><span>8192</span>
-        </div>
-      </div>
 
       <button
         type="submit"

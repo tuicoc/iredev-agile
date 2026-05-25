@@ -188,17 +188,6 @@ export function LoginPage() {
           </div>
         </div>
 
-        {/* Demo credentials hint */}
-        <div
-          className="mt-4 p-3 bg-[#FFFDF8]/60 rounded-xl border border-[#E2D6C5]
-                        text-[11px] text-[#776B60] text-center"
-        >
-          Demo:{" "}
-          <span className="font-mono text-[#4A4038]">demo@example.com</span>
-          {" / "}
-          <span className="font-mono text-[#4A4038]">password123</span>
-        </div>
-
         <p className="text-center text-[11px] text-[#B0A49A] mt-4">
           By continuing you agree to our{" "}
           <span className="underline cursor-pointer">Terms</span> and{" "}

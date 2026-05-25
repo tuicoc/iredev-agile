@@ -71,32 +71,9 @@ export function ChatInput({ onSend, disabled, isStreaming = disabled, onCancel }
           {/* Bottom action row — sits inside the card */}
           <div
             className="absolute bottom-0 left-0 right-0
-                          flex items-center justify-between px-3 pb-3 pt-1"
+                          flex items-center justify-end px-3 pb-3 pt-1"
           >
-            {/* Left: attach button */}
-            <Tooltip text="Attach files">
-              <button
-                disabled={inputDisabled}
-                className="w-8 h-8 flex items-center justify-center rounded-lg
-                           text-[#A89C91] hover:text-[#776B60] hover:bg-[#EFE6D8]
-                           disabled:opacity-40 transition-colors"
-              >
-                <Paperclip size={16} />
-              </button>
-            </Tooltip>
-
-            {/* Right: mic + send-or-stop */}
             <div className="flex items-center gap-1.5">
-              <Tooltip text="Voice input">
-                <button
-                  disabled={inputDisabled}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg
-                             text-[#A89C91] hover:text-[#776B60] hover:bg-[#EFE6D8]
-                             disabled:opacity-40 transition-colors"
-                >
-                  <Mic size={15} />
-                </button>
-              </Tooltip>
 
               {isStreaming ? (
                 // ── Stop button — shown while AI is generating ──────────────
