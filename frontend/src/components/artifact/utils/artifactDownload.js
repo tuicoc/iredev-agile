@@ -54,13 +54,13 @@ function safeParse(str) {
 function convertToMarkdown(data, artifactType, title) {
   if (!data) return `# ${title || "Artifact"}\n\n\`\`\`json\nnull\n\`\`\`\n`;
   switch (artifactType) {
-    case "product_vision":            return mdProductVision(data, title);
-    case "elicitation_agenda":        return mdElicitationAgenda(data, title);
-    case "interview_record":          return mdInterviewRecord(data, title);
-    case "requirement_list":          return mdRequirementList(data, title);
-    case "product_backlog":           return mdProductBacklog(data, title);
+    case "product_vision": return mdProductVision(data, title);
+    case "elicitation_agenda": return mdElicitationAgenda(data, title);
+    case "interview_record": return mdInterviewRecord(data, title);
+    case "requirement_list": return mdRequirementList(data, title);
+    case "product_backlog": return mdProductBacklog(data, title);
     case "validated_product_backlog": return mdValidatedBacklog(data, title);
-    default:                          return mdFallback(data, title);
+    default: return mdFallback(data, title);
   }
 }
 
@@ -158,7 +158,8 @@ function mdElicitationAgenda(d, title) {
       const id = item.id || item.item_id || `IT-${i + 1}`;
       const perspective = item.perspective || item.role || "Stakeholder";
       const target = item.decision_target || item.elicitation_goal || "Evidence job";
-      md += `### ${id}: ${target}\n\n`;
+      md += `### ${id}\n\n`;
+      md += `- **Decision Target:** ${target}\n`;
       md += `- **Perspective:** ${perspective}\n`;
       if (item.status && item.status !== "planned") md += `- **Status:** ${item.status}\n`;
       if (item.context || item.scene || item.baseline)
@@ -197,7 +198,7 @@ function mdInterviewRecord(d, title) {
     items.forEach((item, i) => {
       const id = item.id || `EL-${i + 1}`;
       const stakeholder = item.perspective || item.role || item.stakeholder || "Stakeholder";
-      const topic = item.decision_target || item.item || id;
+      const topic = item.decision_target || item.elicitation_goal || item.item || item.seed_question || item.question || id;
       md += `### ${id}: ${topic}\n\n`;
       md += `- **Perspective:** ${stakeholder}\n`;
       md += `- **Status:** ${item.status || "-"}\n`;
@@ -491,79 +492,138 @@ function generatePdf(markdownText, filename) {
   const maxW = pageW - marginL - marginR;
   let y = marginTop;
 
+  // ── Measure text width helper ──────────────────────────────────────────
+  function textWidth(text, size, style) {
+    doc.setFontSize(size);
+    doc.setFont("helvetica", style);
+    return doc.getTextWidth(text);
+  }
+
+  // ── Parse inline **bold** segments ─────────────────────────────────────
+  // Returns array of { text, bold } objects.
+  function parseInlineBold(str) {
+    const segments = [];
+    const re = /\*\*(.+?)\*\*/g;
+    let last = 0;
+    let m;
+    while ((m = re.exec(str)) !== null) {
+      if (m.index > last) segments.push({ text: str.slice(last, m.index), bold: false });
+      segments.push({ text: m[1], bold: true });
+      last = re.lastIndex;
+    }
+    if (last < str.length) segments.push({ text: str.slice(last), bold: false });
+    return segments;
+  }
+
+  // ── Render a line with mixed bold/normal segments ──────────────────────
+  function renderMixedLine(segments, fontSize, indent) {
+    const lineHeight = fontSize * 0.45;
+    let x = marginL + indent;
+    const availW = maxW - indent;
+
+    // Simple approach: walk segments, wrap when x exceeds margin
+    for (const seg of segments) {
+      const style = seg.bold ? "bold" : "normal";
+      doc.setFontSize(fontSize);
+      doc.setFont("helvetica", style);
+
+      // Split into words for wrapping
+      const words = seg.text.split(/( +)/); // preserve spaces
+      for (const word of words) {
+        if (!word) continue;
+        const ww = doc.getTextWidth(word);
+        if (x + ww > marginL + availW && x > marginL + indent) {
+          // Wrap to next line
+          y += lineHeight;
+          x = marginL + indent;
+          if (y + lineHeight > pageH - marginBot) { doc.addPage(); y = marginTop; }
+        }
+        doc.text(word, x, y);
+        x += ww;
+      }
+    }
+    y += lineHeight;
+  }
+
+  // ── Render a plain text line (headings, no inline bold) ────────────────
+  function renderPlainLine(text, fontSize, fontStyle, indent) {
+    doc.setFontSize(fontSize);
+    doc.setFont("helvetica", fontStyle);
+    const lineHeight = fontSize * 0.45;
+    const wrappedLines = doc.splitTextToSize(text, maxW - indent);
+    for (const wl of wrappedLines) {
+      if (y + lineHeight > pageH - marginBot) { doc.addPage(); y = marginTop; }
+      doc.text(wl, marginL + indent, y);
+      y += lineHeight;
+    }
+  }
+
   const lines = markdownText.split("\n");
 
   for (const line of lines) {
     const trimmed = line.trimEnd();
 
-    // Determine style
-    let fontSize = 10;
-    let fontStyle = "normal";
-    let prefix = "";
-
+    // ── Headings (render entirely bold, no inline parsing) ──────────────
     if (trimmed.startsWith("### ")) {
-      fontSize = 12;
-      fontStyle = "bold";
-      prefix = trimmed.slice(4);
-    } else if (trimmed.startsWith("## ")) {
-      fontSize = 14;
-      fontStyle = "bold";
-      prefix = trimmed.slice(3);
-    } else if (trimmed.startsWith("# ")) {
-      fontSize = 18;
-      fontStyle = "bold";
-      prefix = trimmed.slice(2);
-    } else if (trimmed.startsWith("---")) {
-      // Draw horizontal rule
+      renderPlainLine(trimmed.slice(4).replace(/\*\*/g, ""), 12, "bold", 0);
+      y += 2;
+      continue;
+    }
+    if (trimmed.startsWith("## ")) {
+      renderPlainLine(trimmed.slice(3).replace(/\*\*/g, ""), 14, "bold", 0);
+      y += 2;
+      continue;
+    }
+    if (trimmed.startsWith("# ")) {
+      renderPlainLine(trimmed.slice(2).replace(/\*\*/g, ""), 18, "bold", 0);
+      y += 2;
+      continue;
+    }
+
+    // ── Horizontal rule ────────────────────────────────────────────────
+    if (trimmed.startsWith("---")) {
       if (y + 4 > pageH - marginBot) { doc.addPage(); y = marginTop; }
       y += 2;
       doc.setDrawColor(180, 180, 180);
       doc.line(marginL, y, pageW - marginR, y);
       y += 4;
       continue;
-    } else if (trimmed === "") {
+    }
+
+    // ── Blank line ─────────────────────────────────────────────────────
+    if (trimmed === "") {
       y += 3;
       if (y > pageH - marginBot) { doc.addPage(); y = marginTop; }
       continue;
-    } else {
-      // Strip markdown bold markers for display
-      prefix = trimmed.replace(/\*\*/g, "").replace(/~~/g, "");
     }
 
-    if (prefix === "") prefix = trimmed.replace(/\*\*/g, "").replace(/~~/g, "");
-
-    // Handle list prefix indentation
+    // ── Content lines — handle indentation ─────────────────────────────
     let indent = 0;
-    if (prefix.startsWith("  - ") || prefix.startsWith("  ")) {
+    let content = trimmed;
+
+    // Nested list items (indented by 2+ spaces)
+    if (/^ {2,}- /.test(content)) {
       indent = 4;
-      prefix = prefix.trimStart();
-      if (prefix.startsWith("- ")) prefix = "  • " + prefix.slice(2);
-    } else if (prefix.startsWith("- ")) {
-      prefix = "• " + prefix.slice(2);
-    } else if (/^\d+\.\s/.test(prefix)) {
-      // keep numbered lists as-is
-    } else if (prefix.startsWith("> ")) {
-      prefix = "  " + prefix.slice(2);
+      content = "  • " + content.trimStart().slice(2);
+    } else if (content.startsWith("- ")) {
+      content = "• " + content.slice(2);
+    } else if (/^\d+\.\s/.test(content)) {
+      // numbered list — keep as-is
+    } else if (content.startsWith("> ")) {
       indent = 2;
+      content = "  " + content.slice(2);
     }
 
-    doc.setFontSize(fontSize);
-    doc.setFont("helvetica", fontStyle);
+    // Strip ~~ (strikethrough) — PDF can't render it
+    content = content.replace(/~~/g, "");
 
-    const wrappedLines = doc.splitTextToSize(prefix, maxW - indent);
-    const lineHeight = fontSize * 0.45;
-
-    for (const wl of wrappedLines) {
-      if (y + lineHeight > pageH - marginBot) {
-        doc.addPage();
-        y = marginTop;
-      }
-      doc.text(wl, marginL + indent, y);
-      y += lineHeight;
+    // ── Check if line has inline **bold** segments ─────────────────────
+    if (content.includes("**")) {
+      const segments = parseInlineBold(content);
+      renderMixedLine(segments, 10, indent);
+    } else {
+      renderPlainLine(content, 10, "normal", indent);
     }
-
-    // Extra spacing after headings
-    if (fontSize > 10) y += 2;
   }
 
   doc.save(`${filename}.pdf`);
