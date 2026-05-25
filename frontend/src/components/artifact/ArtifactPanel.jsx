@@ -17,7 +17,6 @@ import { useState, useMemo, useEffect } from "react";
 import {
   Copy,
   Check,
-  Download,
   X,
   List,
   ClipboardList,
@@ -27,6 +26,7 @@ import {
 } from "lucide-react";
 import { Tooltip } from "../ui";
 import { ArtifactFeedbackBar } from "./ArtifactFeedbackBar";
+import { DownloadDropdown } from "./DownloadDropdown";
 import {
   TranscriptView,
   RequirementsView,
@@ -185,20 +185,7 @@ export function ArtifactPanel({
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function handleDownload() {
-    const content =
-      typeof artifact?.content === "string"
-        ? artifact.content
-        : JSON.stringify(artifact?.content ?? {}, null, 2);
-    const blob = new Blob([content], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = Object.assign(document.createElement("a"), {
-      href: url,
-      download: `${(artifact?.title || "artifact").replace(/\s+/g, "-").toLowerCase()}.json`,
-    });
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+
 
   const iconBtn =
     "w-7 h-7 flex items-center justify-center rounded-md " +
@@ -272,11 +259,13 @@ export function ArtifactPanel({
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>
           </Tooltip>
-          <Tooltip text="Download">
-            <button onClick={handleDownload} className={iconBtn}>
-              <Download size={14} />
-            </button>
-          </Tooltip>
+          <DownloadDropdown
+            data={parsedData}
+            rawContent={artifact?.content}
+            artifactType={artifactType}
+            title={artifact?.title || getArtifactDisplayName(artifactType)}
+            iconBtnClass={iconBtn}
+          />
           <div className="w-px h-4 bg-[#E2D6C5] mx-0.5" />
           <Tooltip text="Close">
             <button onClick={onClose} className={iconBtn}>

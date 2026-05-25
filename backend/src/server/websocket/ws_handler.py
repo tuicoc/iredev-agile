@@ -93,6 +93,15 @@ REVIEW_AGENT_NAMES = {
     "validated_product_backlog": "Analyst Agent",
 }
 
+ARTIFACT_TITLES = {
+    "product_vision": "Product Vision",
+    "elicitation_agenda": "Elicitation Agenda",
+    "interview_record": "Interview Record",
+    "requirement_list": "Requirement List",
+    "product_backlog": "Product Backlog",
+    "validated_product_backlog": "Validated Product Backlog",
+}
+
 NODE_STATUS = {
     "visionary_turn": {
         "agentName": "Visionary Agent",
@@ -375,6 +384,7 @@ class WSHandler:
         # Build display artifact from the review payload
         artifact_display = {
             "id": artifact_id,
+            "title": ARTIFACT_TITLES.get(review_type, review_type.replace("_", " ").title()),
             "content": json.dumps(record_content, indent=2, ensure_ascii=False),
             "language": "json",
             "type": review_type,
@@ -629,6 +639,7 @@ class WSHandler:
 
             artifact_display = {
                 "id": artifact_id,
+                "title": ARTIFACT_TITLES.get(review_type, review_type.replace("_", " ").title()),
                 "content": json.dumps(artifacts.get(review_file), indent=2, ensure_ascii=False),
                 "language": "json",
                 "type": review_type,
