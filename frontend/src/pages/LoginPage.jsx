@@ -46,7 +46,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F7F3EA] flex items-center justify-center px-4">
+    <div className="min-h-screen bg-white flex items-center justify-center px-4">
       <div className="w-full max-w-[380px]">
         {/* Logo + heading */}
         <div className="flex flex-col items-center mb-8">
@@ -56,10 +56,10 @@ export function LoginPage() {
           >
             <span className="text-white text-lg font-semibold">C</span>
           </div>
-          <h1 className="text-[22px] font-semibold text-[#211914]">
+          <h1 className="text-[22px] font-semibold text-[#1A1A1A]">
             {mode === "login" ? "Welcome back" : "Create your account"}
           </h1>
-          <p className="text-[13px] text-[#776B60] mt-1">
+          <p className="text-[13px] text-[#6B6B6B] mt-1">
             {mode === "login"
               ? "Sign in to continue to CARA"
               : "Start chatting with CARA today"}
@@ -68,7 +68,7 @@ export function LoginPage() {
 
         {/* Form card */}
         <div
-          className="bg-[#FFFDF8] rounded-2xl border border-[#E2D6C5]
+          className="bg-[#FFFFFF] rounded-2xl border border-[#E5E5E5]
                         shadow-[0_2px_12px_rgba(0,0,0,0.06)] p-6"
         >
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -155,8 +155,8 @@ export function LoginPage() {
 
           {/* Mode toggle */}
           <div
-            className="mt-5 pt-4 border-t border-[#E9DFD1]
-                          text-center text-[12px] text-[#776B60]"
+            className="mt-5 pt-4 border-t border-[#E8E8E8]
+                          text-center text-[12px] text-[#6B6B6B]"
           >
             {mode === "login" ? (
               <>
@@ -188,7 +188,7 @@ export function LoginPage() {
           </div>
         </div>
 
-        <p className="text-center text-[11px] text-[#B0A49A] mt-4">
+        <p className="text-center text-[11px] text-[#A8A8A8] mt-4">
           By continuing you agree to our{" "}
           <span className="underline cursor-pointer">Terms</span> and{" "}
           <span className="underline cursor-pointer">Privacy Policy</span>
@@ -198,9 +198,9 @@ export function LoginPage() {
   );
 }
 
-const labelClass = "block text-[12px] font-medium text-[#4A4038] mb-1.5";
+const labelClass = "block text-[12px] font-medium text-[#3A3A3A] mb-1.5";
 const inputClass =
-  "w-full h-9 px-3 bg-[#FCF8F1] border border-[#E2D6C5] rounded-lg " +
-  "text-[13px] text-[#211914] placeholder:text-[#B0A49A] " +
+  "w-full h-9 px-3 bg-[#F8F8F8] border border-[#E5E5E5] rounded-lg " +
+  "text-[13px] text-[#1A1A1A] placeholder:text-[#A8A8A8] " +
   "focus:outline-none focus:ring-2 focus:ring-[#B86F50]/20 " +
   "focus:border-[#B86F50]/60 transition-all";

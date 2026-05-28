@@ -20,6 +20,7 @@ import {
   deleteChat    as apiDeleteChat,
   startReq,
   createProjectChat,
+  getOrCreateBaseProject,
 } from "../services/chatService";
 import { uid }     from "../utils/helpers";
 import {
@@ -537,8 +538,10 @@ export function useChat() {
         const msgs = await apiFetchMessages(id, newSubChat);
         const decorated = decorateMessages(msgs);
         setMessages(
-          newSubChat === 0 && projectId && decorated.length === 0
-            ? [caraPromptMessage()]
+          newSubChat === 0 && projectId
+            ? (decorated.length === 0
+                ? [caraPromptMessage()]
+                : [caraPromptMessage(), ...decorated])
             : decorated
         );
       } catch {
@@ -706,21 +709,29 @@ export function useChat() {
       const processConfig = normalizeProcessConfig(
         processConfigOverride || activeProcessConfig,
       );
-      let chatId = activeChatId;
-      const hasRequirementUserTurn = messages.some((m) => m.role === "user");
-      const startsRequirementProcess =
-        subChat === 0 &&
-        !!activeProjectId &&
-        !hasRequirementUserTurn;
 
-      // Create top-level chat if no active chat
+      let chatId          = activeChatId;
+      let currentProjId   = activeProjectId;   // may be updated below
+      let currentSubChat  = subChat;            // may be updated below
+
+      const hasRequirementUserTurn = messages.some((m) => m.role === "user");
+
+      // Create a new chat if none is active
       if (!chatId) {
         const title  = trimmed.slice(0, 50) + (trimmed.length > 50 ? "…" : "");
         const tempId = `temp_${uid()}`;
         setActiveChatId(tempId);
         chatId = tempId;
         try {
-          const serverChat = await apiCreateChat(title);
+          if (!currentProjId) {
+            // No project context → assign to hidden base project
+            currentProjId  = await getOrCreateBaseProject();
+            currentSubChat = 0;
+            setActiveProjectId(currentProjId);
+            setSubChat(0);
+            setMessages([caraPromptMessage()]);
+          }
+          const serverChat = await createProjectChat(currentProjId, title);
           setActiveChatId(serverChat.id);
           chatId = serverChat.id;
         } catch {
@@ -729,6 +740,12 @@ export function useChat() {
           return;
         }
       }
+
+      // Compute after base-project resolution so local vars are authoritative
+      const startsRequirementProcess =
+        currentSubChat === 0 &&
+        !!currentProjId &&
+        !hasRequirementUserTurn;
 
       const localId = `local_${uid()}`;
       setMessages((prev) => [...prev, { id: localId, role: "user", content: trimmed }]);
@@ -740,7 +757,7 @@ export function useChat() {
       }
 
       try {
-        const saved = await apiSendMessage(chatId, trimmed, subChat);
+        const saved = await apiSendMessage(chatId, trimmed, currentSubChat);
         setMessages((prev) => prev.map((m) => (m.id === localId ? saved : m)));
         if (startsRequirementProcess) {
           saveChatProcessConfig(chatId, processConfig);
@@ -753,7 +770,7 @@ export function useChat() {
             chatId,
           );
         } else {
-          wsService.sendChatMessage(chatId, `ph_${uid()}`, trimmed, subChat);
+          wsService.sendChatMessage(chatId, `ph_${uid()}`, trimmed, currentSubChat);
         }
       } catch {
         placeholderIdRef.current = null;

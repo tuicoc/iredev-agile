@@ -58,6 +58,7 @@ function convertToMarkdown(data, artifactType, title) {
     case "elicitation_agenda": return mdElicitationAgenda(data, title);
     case "interview_record": return mdInterviewRecord(data, title);
     case "requirement_list": return mdRequirementList(data, title);
+    case "user_story_draft": return mdUserStoryDraft(data, title);
     case "product_backlog": return mdProductBacklog(data, title);
     case "validated_product_backlog": return mdValidatedBacklog(data, title);
     default: return mdFallback(data, title);
@@ -330,6 +331,78 @@ function getRequirementItems(d) {
   if (Array.isArray(d?.requirements)) return d.requirements;
   if (Array.isArray(d?.requirements_identified)) return d.requirements_identified;
   return [];
+}
+
+// ── User Story Draft ────────────────────────────────────────────────────────
+function mdUserStoryDraft(d, title) {
+  let md = `# ${title || "User Story Draft"}\n\n`;
+  const stories = getUserStories(d);
+  const dropped = asArray(d.dropped);
+  const sourceCount = new Set(stories.flatMap(storySourceIds)).size;
+  const reshaped = stories.filter((story) => {
+    const op = story.reshape_op || "carry";
+    return op !== "carry" && op !== "none";
+  }).length;
+
+  md += `**Stories:** ${d.total_stories ?? stories.length}`;
+  md += ` | **Sources:** ${sourceCount}`;
+  md += ` | **Reshaped:** ${reshaped}`;
+  md += ` | **Dropped:** ${dropped.length}\n\n`;
+
+  if (stories.length) {
+    md += `## Draft Stories\n\n`;
+    stories.forEach((story, index) => {
+      const id = story.source_story_id || story.id || `ST-${index + 1}`;
+      const trace = story.requirement_trace || {};
+      const sources = storySourceIds(story);
+
+      md += `### ${id}: ${story.title || story.description || id}\n\n`;
+      if (story.type) md += `- **Type:** ${String(story.type).replace(/_/g, " ")}\n`;
+      if (story.domain) md += `- **Domain:** ${story.domain}\n`;
+      md += `- **Reshape:** ${String(story.reshape_op || "carry").replace(/_/g, " ")}\n`;
+      if (sources.length) md += `- **Source Requirements:** ${sources.join(", ")}\n`;
+      if (story.description) md += `- **Description:** ${story.description}\n`;
+      if (story.thought) md += `- **Shaping Rationale:** ${story.thought}\n`;
+      if (trace.requirement_id) md += `- **Trace Requirement:** ${trace.requirement_id}\n`;
+      if (trace.stakeholder) md += `- **Stakeholder:** ${trace.stakeholder}\n`;
+      if (trace.statement) md += `- **Requirement Statement:** ${trace.statement}\n`;
+      if (trace.rationale) md += `- **Requirement Rationale:** ${trace.rationale}\n`;
+      if (asArray(trace.trace_refs).length) md += `- **Trace Refs:** ${asArray(trace.trace_refs).join(", ")}\n`;
+      if (asArray(trace.merged_requirement_ids).length) {
+        md += `- **Merged Requirement IDs:** ${asArray(trace.merged_requirement_ids).join(", ")}\n`;
+      }
+      if (asArray(trace.acceptance_criteria).length) {
+        md += `- **Source Acceptance Criteria:** ${asArray(trace.acceptance_criteria).map(txt).join("; ")}\n`;
+      }
+      md += "\n";
+    });
+  }
+
+  if (dropped.length) {
+    md += `## Dropped Requirements\n\n`;
+    dropped.forEach((item, index) => {
+      const ids = asArray(item.requirement_ids);
+      md += `- **${ids.join(", ") || `Drop ${index + 1}`}:** ${txt(item.reason)}\n`;
+    });
+    md += "\n";
+  }
+
+  const notes = d.notes || d.pass_notes;
+  if (notes) md += hr() + `## Shaping Notes\n\n${notes}\n`;
+  if (d.rebuild_feedback) md += hr() + `## Reviewer Feedback Applied\n\n${d.rebuild_feedback}\n`;
+  return md;
+}
+
+function getUserStories(d) {
+  if (Array.isArray(d?.stories)) return d.stories;
+  if (Array.isArray(d?.items)) return d.items;
+  return [];
+}
+
+function storySourceIds(story) {
+  const ids = asArray(story.source_requirement_ids);
+  if (ids.length) return ids;
+  return story.source_requirement_id ? [story.source_requirement_id] : [];
 }
 
 // ── Product Backlog ──────────────────────────────────────────────────────────

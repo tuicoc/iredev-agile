@@ -16,6 +16,7 @@ const AGENT_BY_ARTIFACT = {
   elicitation_agenda: "Agenda Agent",
   interview_record: "Interviewer Agent",
   requirement_list: "Distiller Agent",
+  user_story_draft: "Sprint Agent",
   product_backlog: "Sprint Agent",
   validated_product_backlog: "Analyst Agent",
 };
@@ -37,6 +38,7 @@ function agentNameFor(message) {
   if (content.includes("Elicitation Agenda")) return "Agenda Agent";
   if (content.includes("Requirements Interview")) return "Interviewer Agent";
   if (content.includes("Requirement List")) return "Distiller Agent";
+  if (content.includes("User Story Draft")) return "Sprint Agent";
   if (content.includes("Product Backlog")) return "Sprint Agent";
   if (content.includes("Acceptance Criteria") || content.includes("Validated Product Backlog")) {
     return "Analyst Agent";
@@ -60,7 +62,7 @@ function ConversationContext({ meta }) {
   if (!parts.length) return null;
 
   return (
-    <span className="text-[10.5px] font-normal leading-snug text-[#9A8F84]">
+    <span className="text-[10.5px] font-normal leading-snug text-[#9A9A9A]">
       {" "}
       · {parts.join(" · ")}
     </span>
@@ -85,7 +87,8 @@ export function MessageBubble({ message, onOpenArtifact, onRetry }) {
         <div
           className={`w-7 h-7 rounded-full flex items-center justify-center
                          flex-shrink-0 mt-0.5 shadow-sm
-                         ${message.isRevision ? "bg-[#7A644F]" : "bg-[#B86F50]"}`}
+                         ${message.isRevision ? "bg-[#525252]" : ""}`}
+                         style={!message.isRevision ? { background: "linear-gradient(135deg, #E07840 0%, #C04898 100%)" } : undefined}
         >
           {message.isRevision ? (
             <RotateCcw size={12} className="text-white" />
@@ -102,7 +105,7 @@ export function MessageBubble({ message, onOpenArtifact, onRetry }) {
       >
         {!isUser && (
           <div
-            className={`flex flex-wrap items-baseline gap-x-1 text-[11px] font-medium leading-snug text-[#776B60] mt-0.5 ${
+            className={`flex flex-wrap items-baseline gap-x-1 text-[11px] font-medium leading-snug text-[#6B6B6B] mt-0.5 ${
               isEnduser ? "justify-end text-right" : ""
             }`}
           >
@@ -115,11 +118,11 @@ export function MessageBubble({ message, onOpenArtifact, onRetry }) {
 
         {/* Revision label */}
         {message.isRevision && (
-          <div className="flex items-center gap-1.5 text-[11px] text-[#7A644F] font-medium -mb-1">
+          <div className="flex items-center gap-1.5 text-[11px] text-[#525252] font-medium -mb-1">
             <RotateCcw size={11} />
             Revision v{message.iteration}
             {message.revisionComment && (
-              <span className="text-[#776B60] font-normal">
+              <span className="text-[#6B6B6B] font-normal">
                 — "{message.revisionComment}"
               </span>
             )}
@@ -131,12 +134,12 @@ export function MessageBubble({ message, onOpenArtifact, onRetry }) {
           <div
             className={`text-[14px] leading-[1.65] ${
               isUser
-                ? "bg-[#ECE3D6] text-[#211914] px-4 py-2.5 rounded-[18px] rounded-br-[4px]"
+                ? "bg-[#EFEFEF] text-[#1A1A1A] px-4 py-2.5 rounded-[18px] rounded-br-[4px]"
                 : isEnduser
                   ? "bg-[#DDE8E0] text-[#17221D] px-4 py-2.5 rounded-[18px] rounded-br-[4px] border border-[#C6D7CB]"
                   : isInterviewer
-                    ? "bg-[#FFFDF8] text-[#211914] px-4 py-2.5 rounded-[18px] rounded-bl-[4px] border border-[#E2D6C5]"
-                    : "text-[#211914] px-0 py-0"
+                    ? "bg-[#FFFFFF] text-[#1A1A1A] px-4 py-2.5 rounded-[18px] rounded-bl-[4px] border border-[#E5E5E5]"
+                    : "text-[#1A1A1A] px-0 py-0"
             }`}
           >
             {isUser || isConversationAgent ? (
@@ -149,8 +152,8 @@ export function MessageBubble({ message, onOpenArtifact, onRetry }) {
             )}
             {message.cancelled && (
               <div className="mt-2 inline-flex items-center gap-1.5 rounded-full
-                              border border-[#D8CBBB] bg-[#F6F1E8] px-2 py-1
-                              text-[11px] font-medium text-[#776B60]">
+                              border border-[#DEDEDE] bg-[#F7F7F7] px-2 py-1
+                              text-[11px] font-medium text-[#6B6B6B]">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#B86F50]" />
                 Generation stopped
               </div>
@@ -183,7 +186,7 @@ export function MessageBubble({ message, onOpenArtifact, onRetry }) {
         <div
           className={`w-7 h-7 rounded-full flex items-center
                         justify-center flex-shrink-0 mt-0.5 shadow-sm ${
-                          isEnduser ? "bg-[#4F7B63]" : "bg-[#776B60]"
+                          isEnduser ? "bg-[#4F7B63]" : "bg-[#6B6B6B]"
                         }`}
         >
           <span className="text-white text-[10px] font-semibold">{avatarInitial}</span>

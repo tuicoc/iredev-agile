@@ -103,6 +103,7 @@ class ProductVision(BaseModel):
     intent_summary: str = Field(description="One sentence on what the project intent is asking for.")
     target_outcome: str = Field(description="One sentence on the outcome the product should help create for its users or affected roles.")
     notes: str = Field(description="Reviewer-facing audit paragraph combining per-pass notes plus the generation mode used.")
+    generation_summary: str = Field(default="", description="Machine-readable compact summary of all decisions made in this run — populated by Python after assembly, used as re-generation anchor on feedback re-runs.")
     known_signals: List[str] = Field(default_factory=list, description="Independent concrete facts about the world or work that the input named. One per entry; combine paraphrases.")
     roles: List[Role] = Field(default_factory=list)
     assumptions: List[Assumption] = Field(default_factory=list)
@@ -568,14 +569,47 @@ class VisionaryAgent(BaseAgent):
         """Visionary uses structured extraction only."""
 
     @staticmethod
-    def _user_prompt(signal: str, feedback: Optional[str]) -> str:
+    def _user_prompt(
+        signal: str,
+        feedback: Optional[str],
+        prev_summary: Optional[str] = None,
+    ) -> str:
         text = f"Project intent:\n{signal}"
         if feedback:
+            if prev_summary:
+                text += (
+                    "\n\nPrevious generation summary — decisions the reviewer did NOT "
+                    "criticize; reproduce these faithfully for every aspect the "
+                    "feedback does not explicitly address:\n"
+                    f"{prev_summary}"
+                )
             text += (
-                "\n\nReviewer feedback to address before regenerating any field:\n"
+                "\n\nREVIEWER FEEDBACK — YOU MUST ADDRESS EVERY POINT BELOW:\n"
                 f"{feedback}"
             )
         return text
+
+    @staticmethod
+    def _build_generation_summary(vision: "ProductVision", mode: str) -> str:
+        roles = "; ".join(
+            f"{r.name} [{r.lens}]" for r in vision.roles
+        ) or "(none)"
+        assumptions = "; ".join(
+            f"{a.id} {a.axis}: {a.statement[:80]}" for a in vision.assumptions
+        ) or "(none)"
+        concerns = "; ".join(
+            f"{c.id} {c.theme} → {', '.join(c.affected_roles)}" for c in vision.concerns
+        ) or "(none)"
+        scope = "; ".join(
+            f"{b.id}: {b.item[:70]}" for b in vision.scope
+        ) or "(none)"
+        return (
+            f"Roles: {roles}.\n"
+            f"Assumptions: {assumptions}.\n"
+            f"Concerns: {concerns}.\n"
+            f"Scope: {scope}.\n"
+            f"Mode: {mode}."
+        )
 
     @staticmethod
     def _resolve_mode(state: Dict[str, Any]) -> str:
@@ -588,14 +622,25 @@ class VisionaryAgent(BaseAgent):
             return "fidelity"
         return raw
 
-    def _system(self, body: str) -> str:
-        return f"{self.profile.prompt}\n\n{body}"
+    def _system(self, body: str, feedback_mode: bool = False) -> str:
+        preamble = (
+            "FEEDBACK RE-RUN — The user message contains the previous generation "
+            "summary and reviewer feedback. Follow all feedback points exactly. "
+            "For aspects the feedback does not address, reproduce the spirit of "
+            "the previous decisions listed in the summary.\n\n"
+        ) if feedback_mode else ""
+        return f"{preamble}{self.profile.prompt}\n\n{body}"
 
-    def _pass1(self, signal: str, feedback: Optional[str]) -> ReadingPass:
+    def _pass1(
+        self,
+        signal: str,
+        feedback: Optional[str],
+        prev_summary: Optional[str],
+    ) -> ReadingPass:
         return self.extract_structured(
             schema=ReadingPass,
-            system_prompt=self._system(_READ_BODY),
-            user_prompt=self._user_prompt(signal, feedback),
+            system_prompt=self._system(_READ_BODY, feedback_mode=bool(feedback)),
+            user_prompt=self._user_prompt(signal, feedback, prev_summary),
             include_memory=False,
         )
 
@@ -604,14 +649,15 @@ class VisionaryAgent(BaseAgent):
         signal: str,
         reading: ReadingPass,
         feedback: Optional[str],
+        prev_summary: Optional[str],
     ) -> ForksPass:
         body = _FORKS_BODY.format(
             reading=json.dumps(reading.model_dump(), indent=2, ensure_ascii=False),
         )
         return self.extract_structured(
             schema=ForksPass,
-            system_prompt=self._system(body),
-            user_prompt=self._user_prompt(signal, feedback),
+            system_prompt=self._system(body, feedback_mode=bool(feedback)),
+            user_prompt=self._user_prompt(signal, feedback, prev_summary),
             include_memory=False,
         )
 
@@ -621,6 +667,7 @@ class VisionaryAgent(BaseAgent):
         reading: ReadingPass,
         forks: ForksPass,
         feedback: Optional[str],
+        prev_summary: Optional[str],
     ) -> InferredPass:
         body = _INFERRED_BODY.format(
             reading=json.dumps(reading.model_dump(), indent=2, ensure_ascii=False),
@@ -628,8 +675,8 @@ class VisionaryAgent(BaseAgent):
         )
         return self.extract_structured(
             schema=InferredPass,
-            system_prompt=self._system(body),
-            user_prompt=self._user_prompt(signal, feedback),
+            system_prompt=self._system(body, feedback_mode=bool(feedback)),
+            user_prompt=self._user_prompt(signal, feedback, prev_summary),
             include_memory=False,
         )
 
@@ -762,26 +809,34 @@ class VisionaryAgent(BaseAgent):
         feedback = (state.get("product_vision_feedback") or "").strip() or None
         mode = self._resolve_mode(state)
 
+        # Pull the generation_summary from the previous run (survives rejection
+        # because state["product_vision"] is not cleared — only
+        # artifacts["product_vision"] is popped).  Used as re-generation anchor.
+        prev_vision = state.get("product_vision") or {}
+        prev_summary: Optional[str] = prev_vision.get("generation_summary") or None
+
         logger.info(
-            "[VisionaryAgent] Building Product Vision — mode=%s, 3 passes (Pass 3 %s).",
+            "[VisionaryAgent] Building Product Vision — mode=%s, 3 passes (Pass 3 %s)%s.",
             mode,
             "active" if mode == "coverage" else "skipped",
+            " [feedback re-run]" if feedback else "",
         )
 
         try:
-            reading = self._pass1(signal, feedback)
+            reading = self._pass1(signal, feedback, prev_summary)
             self._enforce_lens_pass1(reading)
 
-            forks = self._pass2(signal, reading, feedback)
+            forks = self._pass2(signal, reading, feedback, prev_summary)
             self._enforce_lens_pass2(forks)
 
             inferred: Optional[InferredPass] = None
             if mode == "coverage":
-                inferred = self._pass3(signal, reading, forks, feedback)
+                inferred = self._pass3(signal, reading, forks, feedback, prev_summary)
                 self._enforce_lens_pass3(inferred)
 
             vision = self._assemble(reading, forks, inferred, mode)
             self._assign_ids(vision)
+            vision.generation_summary = self._build_generation_summary(vision, mode)
         except Exception as exc:
             logger.error("[VisionaryAgent] Pipeline failed: %s", exc, exc_info=True)
             return {}

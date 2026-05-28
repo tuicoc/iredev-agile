@@ -21,11 +21,11 @@ export function Tooltip({ text, children }) {
       {show && (
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2
                         px-2 py-1 text-[11px] leading-tight text-white
-                        bg-[#211914] rounded-md whitespace-nowrap
+                        bg-[#1A1A1A] rounded-md whitespace-nowrap
                         pointer-events-none z-50 shadow-sm">
           {text}
           <div className="absolute top-full left-1/2 -translate-x-1/2
-                          border-4 border-transparent border-t-[#211914]" />
+                          border-4 border-transparent border-t-[#1A1A1A]" />
         </div>
       )}
     </div>

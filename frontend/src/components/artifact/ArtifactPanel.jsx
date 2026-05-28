@@ -6,7 +6,7 @@
 // product_vision            → tabs: Vision
 // elicitation_agenda        → tabs: Elicitation Agenda
 // requirement_list          → tabs: Requirements
-// user_story_draft          → tabs: JSON (raw view)
+// user_story_draft          → tabs: User Stories
 // analyst_estimation        → tabs: JSON (raw view)
 // product_backlog           → tabs: Backlog
 // product_backlog_approved  → tabs: Backlog
@@ -21,8 +21,13 @@ import {
   List,
   ClipboardList,
   CheckSquare,
+  ListChecks,
   Code2,
-  File,
+  FileText,
+  Lightbulb,
+  BookOpen,
+  LayoutList,
+  Sparkles,
 } from "lucide-react";
 import { Tooltip } from "../ui";
 import { ArtifactFeedbackBar } from "./ArtifactFeedbackBar";
@@ -33,6 +38,7 @@ import {
   InterviewRecordRequirementsView,
 } from "./views/InterviewRecordView";
 import { ProductBacklogView } from "./views/ProductBacklogView";
+import { UserStoryDraftView } from "./views/UserStoryDraftView";
 import { ValidatedBacklogView } from "./views/ValidatedBacklogView";
 import ProductVisionView from "./views/ProductVisionView";
 import { ElicitationAgendaView } from "./views/ElicitationAgendaView";
@@ -72,6 +78,8 @@ function getTabsForType(artifactType) {
       ];
     case "product_backlog":
       return [{ id: "backlog", label: "Backlog", icon: ClipboardList }];
+    case "user_story_draft":
+      return [{ id: "user_stories", label: "User Stories", icon: ListChecks }];
     case "product_vision":
       return [{ id: "vision", label: "Vision", icon: List }];
     case "elicitation_agenda":
@@ -97,9 +105,24 @@ export function getArtifactDisplayName(artifactType) {
     user_story_draft: "User Story Draft",
     analyst_estimation: "Analyst Estimation",
     product_backlog: "Product Backlog",
-    validated_product_backlog: "Validated Product Backlog",
+    validated_product_backlog: "Validated Backlog",
   };
   return NAMES[artifactType] || String(artifactType || "artifact").replace(/_/g, " ");
+}
+
+// ── Icon per artifact type ────────────────────────────────────────────────────
+function getArtifactIcon(artifactType) {
+  const icons = {
+    interview_record: BookOpen,
+    product_vision: Lightbulb,
+    elicitation_agenda: List,
+    requirement_list: ClipboardList,
+    user_story_draft: ListChecks,
+    product_backlog: LayoutList,
+    validated_product_backlog: CheckSquare,
+    analyst_estimation: Sparkles,
+  };
+  return icons[artifactType] || FileText;
 }
 
 // ── JSON fallback view ────────────────────────────────────────────────────────
@@ -114,14 +137,14 @@ function JsonView({ content }) {
 
   const lines = (pretty || "").split("\n");
   return (
-    <div className="h-full bg-[#F6F1E8] p-4 overflow-auto">
-      <pre className="text-[11.5px] font-mono text-[#302822] leading-relaxed">
+    <div className="h-full bg-[#F7F7F7] p-4 overflow-auto">
+      <pre className="text-[11.5px] font-mono text-[#1A1A1A] leading-relaxed">
         {lines.map((line, i) => (
           <div
             key={i}
             className="flex gap-4 hover:bg-black/[0.025] px-1 rounded"
           >
-            <span className="select-none text-[#B0A49A] text-right w-6 flex-shrink-0">
+            <span className="select-none text-[#A8A8A8] text-right w-6 flex-shrink-0">
               {i + 1}
             </span>
             <span>{line || " "}</span>
@@ -189,7 +212,7 @@ export function ArtifactPanel({
 
   const iconBtn =
     "w-7 h-7 flex items-center justify-center rounded-md " +
-    "text-[#776B60] hover:text-[#211914] hover:bg-[#ECE3D6] transition-colors";
+    "text-[#6B6B6B] hover:text-[#1A1A1A] hover:bg-[#EFEFEF] transition-colors";
 
   // ── Render active tab content ───────────────────────────────────────────────
   function renderTabContent() {
@@ -206,6 +229,8 @@ export function ArtifactPanel({
         return <RequirementsView data={parsedData} />;
       case "backlog":
         return <ProductBacklogView data={parsedData} />;
+      case "user_stories":
+        return <UserStoryDraftView data={parsedData} />;
       case "validated":
         return <ValidatedBacklogView data={parsedData} />;
       case "vision":
@@ -219,19 +244,19 @@ export function ArtifactPanel({
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#FFFDF8] panel-enter">
+    <div className="flex flex-col h-full bg-white panel-enter">
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div
         className="flex items-center gap-3 px-4 h-[52px]
-                      border-b border-[#E2D6C5] bg-[#FBF7F0] flex-shrink-0"
+                      border-b border-[#E5E5E5] bg-[#FAFAFA] flex-shrink-0"
       >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-[13px] font-semibold text-[#211914] truncate leading-tight">
+            <span className="text-[13px] font-semibold text-[#1A1A1A] truncate leading-tight">
               {artifact?.title || "Artifact"}
             </span>
             {artifact?.iteration && (
-              <span className="px-1.5 py-0.5 bg-[#ECE3D6] rounded text-[10px] font-medium text-[#776B60] flex-shrink-0">
+              <span className="px-1.5 py-0.5 bg-[#EFEFEF] rounded text-[10px] font-medium text-[#6B6B6B] flex-shrink-0">
                 v{artifact.iteration}
               </span>
             )}
@@ -245,7 +270,7 @@ export function ArtifactPanel({
               </span>
             )}
           </div>
-          <div className="text-[10.5px] text-[#776B60] capitalize leading-tight">
+          <div className="text-[10.5px] text-[#6B6B6B] capitalize leading-tight">
             {getArtifactDisplayName(artifactType)}
             {artifact?.awaitingFeedback && (
               <span className="ml-1.5 text-[#B86F50]">· awaiting feedback</span>
@@ -266,7 +291,7 @@ export function ArtifactPanel({
             title={artifact?.title || getArtifactDisplayName(artifactType)}
             iconBtnClass={iconBtn}
           />
-          <div className="w-px h-4 bg-[#E2D6C5] mx-0.5" />
+          <div className="w-px h-4 bg-[#E5E5E5] mx-0.5" />
           <Tooltip text="Close">
             <button onClick={onClose} className={iconBtn}>
               <X size={14} />
@@ -276,36 +301,35 @@ export function ArtifactPanel({
       </div>
 
       {artifactList.length > 1 && (
-        <div className="flex gap-1 px-4 border-b border-[#E2D6C5] bg-[#FBF7F0] flex-shrink-0 overflow-y-auto w-full">
+        <div className="flex items-center gap-1.5 px-3 py-2 border-b border-[#E5E5E5] bg-[#FAFAFA] flex-shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden">
           {artifactList.map((tab, idx) => {
             const isActive =
               tab.id === artifact?.messageId ||
               (tab.artifact.type === artifact?.type &&
                 tab.artifact.iteration === artifact?.iteration);
+            const AIcon = getArtifactIcon(tab.artifact.type);
             return (
               <button
                 key={idx}
                 onClick={() =>
                   setOpenArtifact({ ...tab.artifact, messageId: tab.id })
                 }
-                className={`whitespace-nowrap flex items-center gap-1.5 px-3 py-2.5 text-[12px] font-medium
-                            border-b-2 -mb-px transition-colors ${
+                className={`whitespace-nowrap flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5
+                            rounded-lg text-[11.5px] font-medium transition-all duration-150 ${
                               isActive
-                                ? "border-[#B86F50] text-[#B86F50]"
-                                : "border-transparent text-[#776B60] hover:text-[#211914]"
+                                ? "bg-[#1A1A1A] text-white shadow-sm"
+                                : "text-[#6B6B6B] hover:bg-[#EFEFEF] hover:text-[#1A1A1A]"
                             }`}
               >
-                <File size={12} />
+                <AIcon size={11} className={isActive ? "opacity-90" : "opacity-70"} />
                 {getArtifactDisplayName(tab.artifact.type)}
                 {tab.artifact.iteration && (
-                  <span className="text-[10px] font-semibold text-inherit opacity-75">
+                  <span className={`text-[9.5px] font-semibold ${isActive ? "opacity-75" : "opacity-60"}`}>
                     v{tab.artifact.iteration}
                   </span>
                 )}
                 {tab.artifact.accepted && (
-                  <span className="text-[10px] font-medium text-green-700">
-                    Accepted
-                  </span>
+                  <Check size={9} className={isActive ? "opacity-80" : "text-[#3A6642]"} />
                 )}
               </button>
             );
@@ -315,7 +339,7 @@ export function ArtifactPanel({
 
       {/* ── Tab bar ─────────────────────────────────────────────────────── */}
       {tabs.length > 1 && (
-        <div className="flex gap-1 px-4 border-b border-[#E2D6C5] bg-[#FBF7F0] flex-shrink-0">
+        <div className="flex gap-1 px-4 border-b border-[#E5E5E5] bg-[#FAFAFA] flex-shrink-0">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             return (
@@ -326,7 +350,7 @@ export function ArtifactPanel({
                             border-b-2 -mb-px transition-colors ${
                               tab.id === activeTab
                                 ? "border-[#B86F50] text-[#B86F50]"
-                                : "border-transparent text-[#776B60] hover:text-[#211914]"
+                                : "border-transparent text-[#6B6B6B] hover:text-[#1A1A1A]"
                             }`}
               >
                 <Icon size={12} />

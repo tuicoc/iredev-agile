@@ -75,12 +75,12 @@ function InvestScore({ item }) {
   const hasResult = quality.invest_pass !== undefined || failed.length > 0;
 
   if (!hasResult) {
-    return <span className="text-[10px] text-[#A89C91]">INVEST not evaluated</span>;
+    return <span className="text-[10px] text-[#A0A0A0]">INVEST not evaluated</span>;
   }
 
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[9.5px] font-semibold uppercase text-[#A89C91]">INVEST</span>
+      <span className="text-[9.5px] font-semibold uppercase text-[#A0A0A0]">INVEST</span>
       {INVEST_KEYS.map((key, index) => {
         const ok = !failed.includes(key);
         return (
@@ -106,20 +106,20 @@ function ScoreRail({ item }) {
   const status = planning.status ?? item.status;
 
   return (
-    <div className="mt-2 grid gap-x-4 gap-y-1 text-[10.5px] text-[#776B60] sm:grid-cols-2">
+    <div className="mt-2 grid gap-x-4 gap-y-1 text-[10.5px] text-[#6B6B6B] sm:grid-cols-2">
       <span>
-        <span className="font-semibold text-[#4A4038]">Story points:</span>{" "}
+        <span className="font-semibold text-[#3A3A3A]">Story points:</span>{" "}
         <span className={pointsTone(storyPoints) === "red" ? "text-red-600 font-semibold" : ""}>
           {storyPoints}
         </span>
       </span>
-      <span><span className="font-semibold text-[#4A4038]">Priority rank:</span> {rank || "-"}</span>
+      <span><span className="font-semibold text-[#3A3A3A]">Priority rank:</span> {rank || "-"}</span>
       <span>
-        <span className="font-semibold text-[#4A4038]">WSJF score:</span>{" "}
+        <span className="font-semibold text-[#3A3A3A]">WSJF score:</span>{" "}
         {wsjf === undefined ? "-" : Number(wsjf).toFixed(2)}
       </span>
       <span>
-        <span className="font-semibold text-[#4A4038]">Planning:</span>{" "}
+        <span className="font-semibold text-[#3A3A3A]">Planning:</span>{" "}
         <span className={statusTone(status) === "amber" ? "text-amber-700 font-medium" : ""}>
           {String(status || "-").replace(/_/g, " ")}
         </span>
@@ -133,8 +133,8 @@ function PbiCard({ item, index }) {
   const itemId = item.id || item.pbi_id || `PBI-${index + 1}`;
 
   return (
-    <article className="rounded-xl border border-[#E2D6C5] bg-[#FFFDF8]">
-      <div className="px-3 py-2.5 border-b border-[#E9DFD1] bg-[#FCF8F1]">
+    <article className="rounded-xl border border-[#E5E5E5] bg-[#FFFFFF]">
+      <div className="px-3 py-2.5 border-b border-[#E8E8E8] bg-[#F8F8F8]">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="font-mono text-[10px] text-[#B86F50]">{itemId}</span>
           <Tag tone={typeTone(item.type)}>{String(item.type || "").replace(/_/g, " ")}</Tag>
@@ -143,11 +143,11 @@ function PbiCard({ item, index }) {
             <Tag key={tag}>{tag}</Tag>
           ))}
         </div>
-        <h4 className="mt-2 text-[12.5px] font-semibold leading-snug text-[#211914]">
+        <h4 className="mt-2 text-[12.5px] font-semibold leading-snug text-[#1A1A1A]">
           {item.title || item.description || itemId}
         </h4>
         {item.description && (
-          <p className="mt-1 text-[10.5px] leading-relaxed text-[#776B60]">
+          <p className="mt-1 text-[10.5px] leading-relaxed text-[#6B6B6B]">
             {item.description}
           </p>
         )}
@@ -157,16 +157,16 @@ function PbiCard({ item, index }) {
       <div className="px-3 py-2.5 space-y-2">
         <InvestScore item={item} />
         {(asArray(dependencies.blocked_by).length > 0 || asArray(dependencies.blocks).length > 0) && (
-          <p className="text-[10.5px] leading-relaxed text-[#776B60]">
-            <span className="font-semibold text-[#4A4038]">Dependencies: </span>
+          <p className="text-[10.5px] leading-relaxed text-[#6B6B6B]">
+            <span className="font-semibold text-[#3A3A3A]">Dependencies: </span>
             {asArray(dependencies.blocked_by).map((dep) => `blocked by ${dep}`).join(", ")}
             {asArray(dependencies.blocked_by).length > 0 && asArray(dependencies.blocks).length > 0 ? "; " : ""}
             {asArray(dependencies.blocks).map((dep) => `blocks ${dep}`).join(", ")}
           </p>
         )}
         {(analysis.feasibility_notes || analysis.estimation_reasoning || trace.statement) && (
-          <details className="text-[10.5px] leading-relaxed text-[#776B60]">
-            <summary className="cursor-pointer font-semibold text-[#4A4038]">
+          <details className="text-[10.5px] leading-relaxed text-[#6B6B6B]">
+            <summary className="cursor-pointer font-semibold text-[#3A3A3A]">
               Analysis and requirement trace
             </summary>
             <div className="mt-2 space-y-1.5">
@@ -225,10 +225,10 @@ export function ProductBacklogView({ data }) {
     items.filter((item) => (item.planning?.status ?? item.status) === "needs_refinement").length;
 
   return (
-    <div className="h-full overflow-auto bg-[#FFFDF8]">
+    <div className="h-full overflow-auto bg-[#FFFFFF]">
       <div className="p-4 space-y-3">
-        <div className="rounded-xl border border-[#E2D6C5] bg-[#FBF7F0] p-3">
-          <div className="flex items-center gap-2 text-[12px] font-semibold text-[#211914]">
+        <div className="rounded-xl border border-[#E5E5E5] bg-[#F8F8F8] p-3">
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-[#1A1A1A]">
             <ClipboardList size={14} className="text-[#B86F50]" />
             Product Backlog
           </div>

@@ -1,7 +1,5 @@
 import {
   ClipboardList,
-  FileCheck2,
-  MessageSquareText,
   ShieldAlert,
   Target,
 } from "lucide-react";
@@ -64,8 +62,8 @@ function DetailLine({ label, value }) {
 
   return (
     <div className="grid gap-0.5 sm:grid-cols-[74px_1fr]">
-      <dt className="text-[10px] font-semibold text-[#A89C91]">{label}</dt>
-      <dd className="text-[10.5px] leading-relaxed text-[#4A4038]">{value}</dd>
+      <dt className="text-[10px] font-semibold text-[#A0A0A0]">{label}</dt>
+      <dd className="text-[10.5px] leading-relaxed text-[#3A3A3A]">{value}</dd>
     </div>
   );
 }
@@ -78,19 +76,19 @@ function ChatBubble({ side, speaker, topic, content, closeRule }) {
       <div
         className={`max-w-[82%] rounded-2xl border px-3 py-2.5 ${
           isLeft
-            ? "rounded-tl-sm border-[#E2D6C5] bg-[#F6F1E8]"
-            : "rounded-tr-sm border-[#D8CBBB] bg-[#ECE3D6]"
+            ? "rounded-tl-sm border-[#E5E5E5] bg-[#F7F7F7]"
+            : "rounded-tr-sm border-[#DEDEDE] bg-[#EFEFEF]"
         }`}
       >
         <div className="mb-1 flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] font-semibold text-[#211914]">{speaker}</span>
-          {topic && <span className="text-[9.5px] text-[#A89C91]">{topic}</span>}
+          <span className="text-[10px] font-semibold text-[#1A1A1A]">{speaker}</span>
+          {topic && <span className="text-[9.5px] text-[#A0A0A0]">{topic}</span>}
         </div>
-        <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-[#302822]">
+        <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-[#1A1A1A]">
           {content || "-"}
         </p>
         {closeRule && (
-          <div className="mt-1.5 text-[9.5px] leading-relaxed text-[#776B60]">
+          <div className="mt-1.5 text-[9.5px] leading-relaxed text-[#6B6B6B]">
             Close when: {closeRule}
           </div>
         )}
@@ -108,8 +106,8 @@ function CompactList({ items, emptyLabel }) {
       {rows.map((item, index) => (
         <li
           key={index}
-          className="rounded-lg border border-[#E9DFD1] bg-[#F6F1E8] px-2.5 py-2
-                     text-[10.5px] leading-relaxed text-[#4A4038]"
+          className="rounded-lg border border-[#E8E8E8] bg-[#F7F7F7] px-2.5 py-2
+                     text-[10.5px] leading-relaxed text-[#3A3A3A]"
         >
           {text(item)}
         </li>
@@ -124,41 +122,37 @@ function CoverageList({ coverage, planned }) {
   if (!rows.length && !plannedRows.length) return null;
 
   return (
-    <details className="border-t border-[#E9DFD1] px-3 py-2 text-[10.5px] text-[#776B60]">
-      <summary className="cursor-pointer font-semibold text-[#4A4038]">
+    <div className="border-t border-[#E8E8E8] px-3 py-2.5 space-y-2">
+      <div className="text-[10px] font-semibold text-[#6B6B6B] uppercase tracking-wide">
         Coverage ({rows.length + plannedRows.length})
-      </summary>
-      <div className="mt-2 space-y-2">
-        {plannedRows.length > 0 && (
-          <div>
-            <div className="mb-1.5 text-[10px] font-semibold text-[#776B60]">
-              Planned
-            </div>
-            <ul className="space-y-1">
-              {plannedRows.map((entry, index) => (
-                <li key={index} className="flex gap-2 text-[10.5px] leading-relaxed text-[#4A4038]">
-                  <span className="font-mono text-[#B86F50]">-</span>
-                  <span>{text(entry)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {rows.map((entry, index) => (
-          <div key={index} className="rounded-lg border border-[#E9DFD1] bg-[#F6F1E8] px-2.5 py-2">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Tag tone={statusTone(entry.status)}>{entry.status}</Tag>
-              <span className="font-medium text-[#4A4038]">{entry.point}</span>
-            </div>
-            {entry.evidence && (
-              <p className="mt-1 text-[10px] leading-relaxed text-[#776B60]">
-                {entry.evidence}
-              </p>
-            )}
-          </div>
-        ))}
       </div>
-    </details>
+      {plannedRows.length > 0 && (
+        <div>
+          <div className="mb-1.5 text-[10px] font-semibold text-[#A0A0A0]">Planned</div>
+          <ul className="space-y-1">
+            {plannedRows.map((entry, index) => (
+              <li key={index} className="flex gap-2 text-[10.5px] leading-relaxed text-[#3A3A3A]">
+                <span className="font-mono text-[#B86F50]">–</span>
+                <span>{text(entry)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {rows.map((entry, index) => (
+        <div key={index} className="rounded-lg border border-[#E8E8E8] bg-[#F7F7F7] px-2.5 py-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Tag tone={statusTone(entry.status)}>{entry.status}</Tag>
+            <span className="font-medium text-[#3A3A3A]">{entry.point}</span>
+          </div>
+          {entry.evidence && (
+            <p className="mt-1 text-[10px] leading-relaxed text-[#6B6B6B]">
+              {entry.evidence}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -170,8 +164,8 @@ function InterviewItem({ item, index }) {
   const closeRule = item.close_when || item.close || item.rule;
 
   return (
-    <article className="rounded-lg border border-[#E2D6C5] bg-[#FFFDF8]">
-      <div className="border-b border-[#E9DFD1] bg-[#FCF8F1] px-3 py-2.5">
+    <article className="rounded-lg border border-[#E5E5E5] bg-[#FFFFFF]">
+      <div className="border-b border-[#E8E8E8] bg-[#F8F8F8] px-3 py-2.5">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="font-mono text-[10px] text-[#B86F50]">
             {item.id || `EL-${index + 1}`}
@@ -180,11 +174,11 @@ function InterviewItem({ item, index }) {
           <Tag tone="warm">{stakeholder}</Tag>
           <Tag tone={statusTone(item.status)}>{item.status}</Tag>
         </div>
-        <p className="mt-1.5 text-[12px] font-semibold leading-relaxed text-[#211914]">
+        <p className="mt-1.5 text-[12px] font-semibold leading-relaxed text-[#1A1A1A]">
           {topic}
         </p>
         {item.context && (
-          <p className="mt-1 text-[10.5px] leading-relaxed text-[#776B60]">
+          <p className="mt-1 text-[10.5px] leading-relaxed text-[#6B6B6B]">
             {item.context}
           </p>
         )}
@@ -192,25 +186,25 @@ function InterviewItem({ item, index }) {
 
       <div className="space-y-3 px-3 py-3">
         {item.rule && (
-          <p className="rounded-lg border border-[#E9DFD1] bg-[#F6F1E8] px-3 py-2
-                        text-[10.5px] leading-relaxed text-[#4A4038]">
+          <p className="rounded-lg border border-[#E8E8E8] bg-[#F7F7F7] px-3 py-2
+                        text-[10.5px] leading-relaxed text-[#3A3A3A]">
             {item.rule}
           </p>
         )}
 
         {item.answer && !turns.length && (
-          <p className="rounded-lg border border-[#E9DFD1] bg-[#F6F1E8] px-3 py-2
-                        text-[10.5px] leading-relaxed text-[#4A4038]">
+          <p className="rounded-lg border border-[#E8E8E8] bg-[#F7F7F7] px-3 py-2
+                        text-[10.5px] leading-relaxed text-[#3A3A3A]">
             {item.answer}
           </p>
         )}
 
         {turns.length > 0 && (
-          <details className="rounded-lg border border-[#E9DFD1] bg-[#FBF7F0] px-3 py-2 text-[10.5px] text-[#776B60]">
-            <summary className="cursor-pointer font-semibold text-[#4A4038]">
+          <div className="rounded-lg border border-[#E8E8E8] bg-[#F8F8F8] px-3 py-3">
+            <div className="mb-2.5 text-[10px] font-semibold text-[#6B6B6B] uppercase tracking-wide">
               Dialogue ({turns.length})
-            </summary>
-            <div className="mt-3 space-y-3">
+            </div>
+            <div className="space-y-3">
               {turns.map((turn, turnIndex) => (
                 <div key={turnIndex} className="space-y-2">
                   <ChatBubble
@@ -230,36 +224,30 @@ function InterviewItem({ item, index }) {
                 </div>
               ))}
             </div>
-          </details>
+          </div>
         )}
       </div>
 
       <CoverageList coverage={item.coverage} planned={coveragePoints} />
 
       {(asArray(item.signals).length > 0 || asArray(item.gaps).length > 0) && (
-        <details className="border-t border-[#E9DFD1] px-3 py-2 text-[10.5px] text-[#776B60]">
-          <summary className="cursor-pointer font-semibold text-[#4A4038]">
-            Signals and gaps
-          </summary>
-          <div className="mt-2 space-y-3">
-            {asArray(item.signals).length > 0 && (
-              <div>
-                <div className="mb-1.5 text-[10px] font-semibold text-[#776B60]">
-                  Signals
-                </div>
-                <CompactList items={item.signals} emptyLabel="No signals found." />
-              </div>
-            )}
-            {asArray(item.gaps).length > 0 && (
-              <div>
-                <div className="mb-1.5 text-[10px] font-semibold text-[#776B60]">
-                  Gaps
-                </div>
-                <CompactList items={item.gaps} emptyLabel="No gaps found." />
-              </div>
-            )}
+        <div className="border-t border-[#E8E8E8] px-3 py-2.5 space-y-2.5">
+          <div className="text-[10px] font-semibold text-[#6B6B6B] uppercase tracking-wide">
+            Signals & Gaps
           </div>
-        </details>
+          {asArray(item.signals).length > 0 && (
+            <div>
+              <div className="mb-1.5 text-[10px] font-semibold text-[#A0A0A0]">Signals</div>
+              <CompactList items={item.signals} emptyLabel="No signals found." />
+            </div>
+          )}
+          {asArray(item.gaps).length > 0 && (
+            <div>
+              <div className="mb-1.5 text-[10px] font-semibold text-[#A0A0A0]">Gaps</div>
+              <CompactList items={item.gaps} emptyLabel="No gaps found." />
+            </div>
+          )}
+        </div>
       )}
 
     </article>
@@ -284,8 +272,8 @@ function RequirementCard({ requirement, index }) {
   ].filter(([, value]) => value);
 
   return (
-    <article className="rounded-lg border border-[#E2D6C5] bg-[#FFFDF8]">
-      <div className="border-b border-[#E9DFD1] bg-[#FCF8F1] px-3 py-2.5">
+    <article className="rounded-lg border border-[#E5E5E5] bg-[#FFFFFF]">
+      <div className="border-b border-[#E8E8E8] bg-[#F8F8F8] px-3 py-2.5">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="font-mono text-[10px] text-[#B86F50]">{reqId}</span>
           {reqType && <Tag tone={typeTone(reqType)}>{String(reqType).replace(/_/g, " ")}</Tag>}
@@ -293,7 +281,7 @@ function RequirementCard({ requirement, index }) {
           {showStatus && <Tag tone={statusTone(status)}>{status}</Tag>}
           {showConfidence && <Tag tone={confidenceTone(confidence)}>{confidence}</Tag>}
         </div>
-        <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#211914]">
+        <p className="mt-2 text-[12px] font-semibold leading-relaxed text-[#1A1A1A]">
           {requirement.statement || requirement.description || requirement.question}
         </p>
       </div>
@@ -309,19 +297,19 @@ function RequirementCard({ requirement, index }) {
       </div>
 
       {acceptanceCriteria.length > 0 && (
-        <details className="border-t border-[#E9DFD1] px-3 py-2 text-[10.5px] text-[#776B60]">
-          <summary className="cursor-pointer font-semibold text-[#4A4038]">
+        <div className="border-t border-[#E8E8E8] px-3 py-2.5">
+          <div className="mb-1.5 text-[10px] font-semibold text-[#6B6B6B] uppercase tracking-wide">
             Acceptance criteria ({acceptanceCriteria.length})
-          </summary>
-          <ul className="mt-2 space-y-1">
+          </div>
+          <ul className="space-y-1">
             {acceptanceCriteria.map((criterion, criterionIndex) => (
-              <li key={criterionIndex} className="flex gap-2">
-                <span>-</span>
+              <li key={criterionIndex} className="flex gap-2 text-[10.5px] leading-relaxed text-[#3A3A3A]">
+                <span className="text-[#B86F50] font-mono">–</span>
                 <span>{text(criterion)}</span>
               </li>
             ))}
           </ul>
-        </details>
+        </div>
       )}
     </article>
   );
@@ -381,14 +369,14 @@ export function TranscriptView({ data }) {
 
   if (!turns.length) {
     return (
-      <div className="h-full overflow-auto bg-[#FFFDF8] p-4">
+      <div className="h-full overflow-auto bg-[#FFFFFF] p-4">
         <EmptyState label="No conversation recorded." />
       </div>
     );
   }
 
   return (
-    <div className="h-full overflow-auto bg-[#FFFDF8]">
+    <div className="h-full overflow-auto bg-[#FFFFFF]">
       <Section title="Transcript" icon={MessageSquareText}>
         <div className="space-y-3">
           {turns.map((turn, index) => (
@@ -412,21 +400,15 @@ export function RequirementsView({ data }) {
   const byType = data?.by_type || requirementTypeCounts(requirements);
 
   return (
-    <div className="h-full overflow-auto bg-[#FFFDF8]">
-      <div className="p-4 space-y-3">
-        <div className="rounded-lg border border-[#E2D6C5] bg-[#FBF7F0] p-3">
-          <div className="flex items-center gap-2 text-[12px] font-semibold text-[#211914]">
-            <FileCheck2 size={14} className="text-[#B86F50]" />
-            Requirement List
-          </div>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            <MetaPill label="Requirements" value={data?.total_requirements ?? requirements.length} />
-            {Object.entries(byType).map(([key, value]) => (
-              <MetaPill key={key} label={key.replace(/_/g, " ")} value={value} />
-            ))}
-            <MetaPill label="Conflicts" value={conflicts.length} tone={conflicts.length ? "amber" : "green"} />
-            <MetaPill label="Gaps" value={gaps.length} tone={gaps.length ? "amber" : "default"} />
-          </div>
+    <div className="h-full overflow-auto bg-[#FFFFFF]">
+      <div className="px-4 pt-4 pb-2">
+        <div className="flex flex-wrap gap-1.5">
+          <MetaPill label="Requirements" value={data?.total_requirements ?? requirements.length} />
+          {Object.entries(byType).map(([key, value]) => (
+            <MetaPill key={key} label={key.replace(/_/g, " ")} value={value} />
+          ))}
+          <MetaPill label="Conflicts" value={conflicts.length} tone={conflicts.length ? "amber" : "green"} />
+          <MetaPill label="Gaps" value={gaps.length} tone={gaps.length ? "amber" : "default"} />
         </div>
       </div>
 
@@ -474,19 +456,13 @@ export function InterviewRecordRequirementsView({ data }) {
   const gapCount = items.reduce((count, item) => count + asArray(item.gaps).length, 0);
 
   return (
-    <div className="h-full overflow-auto bg-[#FFFDF8]">
-      <div className="p-4 space-y-3">
-        <div className="rounded-lg border border-[#E2D6C5] bg-[#FBF7F0] p-3">
-          <div className="flex items-center gap-2 text-[12px] font-semibold text-[#211914]">
-            <MessageSquareText size={14} className="text-[#B86F50]" />
-            Interview Record
-          </div>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            <MetaPill label="Items" value={data?.total_items ?? items.length} />
-            <MetaPill label="Answered" value={answeredCount} tone="green" />
-            <MetaPill label="Signals" value={signalCount} />
-            <MetaPill label="Gaps" value={gapCount} tone={gapCount ? "amber" : "green"} />
-          </div>
+    <div className="h-full overflow-auto bg-[#FFFFFF]">
+      <div className="px-4 pt-4 pb-2">
+        <div className="flex flex-wrap gap-1.5">
+          <MetaPill label="Items" value={data?.total_items ?? items.length} />
+          <MetaPill label="Answered" value={answeredCount} tone="green" />
+          <MetaPill label="Signals" value={signalCount} />
+          <MetaPill label="Gaps" value={gapCount} tone={gapCount ? "amber" : "green"} />
         </div>
       </div>
 

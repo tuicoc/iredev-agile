@@ -71,7 +71,7 @@ export function DownloadDropdown({ data, rawContent, artifactType, title, iconBt
       {open && (
         <div
           className="absolute right-0 top-full mt-1 z-50 min-w-[200px]
-                     rounded-lg border border-[#E2D6C5] bg-[#FFFDF8]
+                     rounded-lg border border-[#E5E5E5] bg-[#FFFFFF]
                      shadow-lg shadow-black/8 overflow-hidden
                      animate-in fade-in slide-in-from-top-1"
           role="listbox"
@@ -84,8 +84,8 @@ export function DownloadDropdown({ data, rawContent, artifactType, title, iconBt
                 role="option"
                 onClick={() => handleSelect(opt.id)}
                 className="flex w-full items-center gap-2.5 px-3 py-2.5
-                           text-[12px] font-medium text-[#4A4038]
-                           hover:bg-[#F6F1E8] transition-colors
+                           text-[12px] font-medium text-[#3A3A3A]
+                           hover:bg-[#F7F7F7] transition-colors
                            first:rounded-t-lg last:rounded-b-lg"
               >
                 <Icon size={14} className="text-[#B86F50] flex-shrink-0" />

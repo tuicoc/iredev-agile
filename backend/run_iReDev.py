@@ -105,7 +105,10 @@ def _manifest_for_requirement_list_approved():
         ("requirement_list", "requirement_list", False),
     ]
 
-def _manifest_for_product_backlog():
+def _manifest_for_user_story_draft():
+    # Same as _manifest_for_product_backlog (current end-of-chain is
+    # requirement_list_approved); when seeded, the supervisor runs step 9a
+    # to produce user_story_draft.
     return [
         ("product_vision", "product_vision", False),
         ("reviewed_product_vision", "reviewed_product_vision", True),
@@ -115,6 +118,38 @@ def _manifest_for_product_backlog():
         ("reviewed_interview_record", "reviewed_interview_record", True),
         ("requirement_list", "requirement_list", False),
         ("requirement_list_approved", "requirement_list_approved", True),
+    ]
+
+def _manifest_for_user_story_draft_approved():
+    # Loads through the unsentinelled user_story_draft so the supervisor
+    # routes straight into the 9a' HITL gate.
+    return [
+        ("product_vision", "product_vision", False),
+        ("reviewed_product_vision", "reviewed_product_vision", True),
+        ("elicitation_agenda_artifact", "elicitation_agenda_artifact", False),
+        ("reviewed_elicitation_agenda", "reviewed_elicitation_agenda", True),
+        ("interview_record", "interview_record", False),
+        ("reviewed_interview_record", "reviewed_interview_record", True),
+        ("requirement_list", "requirement_list", False),
+        ("requirement_list_approved", "requirement_list_approved", True),
+        ("user_story_draft", "user_story_draft", False),
+    ]
+
+def _manifest_for_product_backlog():
+    # 9b needs user_story_draft_approved + analyst_estimation. Pre-seed
+    # both so debug-start at product_backlog skips the 9a' HITL gate.
+    return [
+        ("product_vision", "product_vision", False),
+        ("reviewed_product_vision", "reviewed_product_vision", True),
+        ("elicitation_agenda_artifact", "elicitation_agenda_artifact", False),
+        ("reviewed_elicitation_agenda", "reviewed_elicitation_agenda", True),
+        ("interview_record", "interview_record", False),
+        ("reviewed_interview_record", "reviewed_interview_record", True),
+        ("requirement_list", "requirement_list", False),
+        ("requirement_list_approved", "requirement_list_approved", True),
+        ("user_story_draft", "user_story_draft", False),
+        ("user_story_draft_approved", "user_story_draft_approved", True),
+        ("analyst_estimation", "analyst_estimation", False),
     ]
 
 def _manifest_for_product_backlog_approved():
@@ -127,6 +162,9 @@ def _manifest_for_product_backlog_approved():
         ("reviewed_interview_record", "reviewed_interview_record", True),
         ("requirement_list", "requirement_list", False),
         ("requirement_list_approved", "requirement_list_approved", True),
+        ("user_story_draft", "user_story_draft", False),
+        ("user_story_draft_approved", "user_story_draft_approved", True),
+        ("analyst_estimation", "analyst_estimation", False),
         ("product_backlog", "product_backlog", False),
     ]
 
@@ -140,6 +178,9 @@ def _manifest_for_validated_product_backlog():
         ("reviewed_interview_record", "reviewed_interview_record", True),
         ("requirement_list", "requirement_list", False),
         ("requirement_list_approved", "requirement_list_approved", True),
+        ("user_story_draft", "user_story_draft", False),
+        ("user_story_draft_approved", "user_story_draft_approved", True),
+        ("analyst_estimation", "analyst_estimation", False),
         ("product_backlog", "product_backlog", False),
         ("product_backlog_approved", "product_backlog_approved", True),
     ]
@@ -154,6 +195,9 @@ def _manifest_for_validated_product_backlog_approved():
         ("reviewed_interview_record", "reviewed_interview_record", True),
         ("requirement_list", "requirement_list", False),
         ("requirement_list_approved", "requirement_list_approved", True),
+        ("user_story_draft", "user_story_draft", False),
+        ("user_story_draft_approved", "user_story_draft_approved", True),
+        ("analyst_estimation", "analyst_estimation", False),
         ("product_backlog", "product_backlog", False),
         ("product_backlog_approved", "product_backlog_approved", True),
         ("validated_product_backlog", "validated_product_backlog", False),
@@ -168,6 +212,8 @@ DEBUG_MANIFESTS: Dict[str, callable] = {
     "reviewed_interview_record":         _manifest_for_reviewed_interview_record,
     "requirement_list":                  _manifest_for_requirement_list,
     "requirement_list_approved":         _manifest_for_requirement_list_approved,
+    "user_story_draft":                  _manifest_for_user_story_draft,
+    "user_story_draft_approved":         _manifest_for_user_story_draft_approved,
     "product_backlog":                   _manifest_for_product_backlog,
     "product_backlog_approved":          _manifest_for_product_backlog_approved,
     "validated_product_backlog":         _manifest_for_validated_product_backlog,

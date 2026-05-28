@@ -26,6 +26,7 @@ import { ProjectHomeScreen }   from "./components/chat/ProjectHomeScreen";
 import { MessageBubble }       from "./components/chat/MessageBubble";
 import { ChatInput }           from "./components/chat/ChatInput";
 import { ArtifactPanel }       from "./components/artifact/ArtifactPanel";
+import { BASE_PROJECT_NAME }  from "./services/chatService";
 import { LoadingSpinner }      from "./components/ui/LoadingSpinner";
 import { ErrorBanner }         from "./components/ui/ErrorBanner";
 import { GripVertical }        from "lucide-react";
@@ -38,13 +39,13 @@ function ResizableDivider({ onMouseDown }) {
       className="relative flex-shrink-0 w-[6px] h-full cursor-col-resize group z-10 select-none"
     >
       <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px
-                      bg-[#D8CBBB] group-hover:bg-[#B86F50] transition-colors duration-150" />
+                      bg-[#DEDEDE] group-hover:bg-[#B86F50] transition-colors duration-150" />
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
                       flex items-center justify-center w-5 h-9 rounded-full
-                      bg-[#EFE8DC] border border-[#D8CBBB]
+                      bg-[#F0F0F0] border border-[#DEDEDE]
                       group-hover:bg-[#F5E3D7] group-hover:border-[#B86F50]
                       shadow-sm transition-all duration-150 opacity-0 group-hover:opacity-100">
-        <GripVertical size={11} className="text-[#B0A49A] group-hover:text-[#B86F50]" />
+        <GripVertical size={11} className="text-[#A8A8A8] group-hover:text-[#B86F50]" />
       </div>
     </div>
   );
@@ -136,8 +137,14 @@ function ChatLayout() {
   }, [activeProject, selectChat]);
 
   const handleCreateProjectChat = useCallback(async (projectId, projectName) => {
+    setActiveProject({ id: projectId, name: projectName });
     return createRequirementChat(projectId, projectName);
   }, [createRequirementChat]);
+
+  const handleNewChat = useCallback(() => {
+    setActiveProject(null);
+    clearActiveChat();
+  }, [clearActiveChat]);
 
   // ── Decide what to show in the center area ──────────────────────────────
   const showProjectHome = activeProject && !activeChatId;
@@ -151,8 +158,10 @@ function ChatLayout() {
       <Sidebar
         activeChatId={activeChatId}
         activeProjectId={activeProject?.id ?? null}
+        onNewChat={handleNewChat}
         onOpenProject={handleOpenProject}
         onSelectChat={handleSelectChat}
+        onCreateChat={handleCreateProjectChat}
       />
 
       {/* Content area */}
@@ -160,49 +169,43 @@ function ChatLayout() {
 
         {/* Center column */}
         <div
-          className="flex flex-col h-full min-w-0 bg-[#F7F3EA]"
+          className="flex flex-col h-full min-w-0 bg-white"
           style={openArtifact ? { width: `${100 - rightPct}%` } : { flex: 1 }}
         >
           {/* Header — only when a chat is open */}
           {showMessages && (
-            <header className="flex items-center justify-between h-[52px] px-4
-                               border-b border-[#E2D6C5] bg-[#F7F3EA] flex-shrink-0">
+            <header className="flex items-center h-[52px] px-5
+                               border-b border-[#E5E5E5] bg-white flex-shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                {activeProject && (
-                  <span className="text-[12px] text-[#776B60] flex-shrink-0">
-                    {activeProject.name} /
+                {activeProject && activeProject.name !== BASE_PROJECT_NAME && (
+                  <span className="text-[12px] text-[#7A7A7A] flex-shrink-0">
+                    {activeProject.name}
                   </span>
                 )}
-                <span className="text-[14px] font-semibold text-[#211914] truncate">
+                {activeProject && activeProject.name !== BASE_PROJECT_NAME && (
+                  <span className="text-[12px] text-[#C8C3BC] flex-shrink-0">/</span>
+                )}
+                <span className="text-[13.5px] font-semibold text-[#1A1A1A] truncate">
                   Requirement Process
                 </span>
               </div>
-              <select
-                value={subChat ?? 0}
-                onChange={(e) => setSubChat(Number(e.target.value))}
-                className="pl-2.5 pr-1.5 py-1 text-[12px] text-[#776B60] font-medium
-                           bg-[#ECE3D6] hover:bg-[#D8CBBB] rounded-full border border-[#D8CBBB]
-                           transition-colors flex-shrink-0"
-              >
-                <option value={0}>Requirement Process</option>
-                <option value={1}>Interviewer Conversation</option>
-                <option value={2}>EndUser Conversation</option>
-              </select>
             </header>
           )}
 
           <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
           {/* Main content */}
-          <div className="flex-1 overflow-hidden">
-            {showProjectHome ? (
+          {showProjectHome ? (
+            <div className="flex-1 overflow-hidden">
               <ProjectHomeScreen
                 project={activeProject}
                 onOpenChat={(chatId, projId) => handleSelectChat(chatId, projId)}
                 onCreateChat={handleCreateProjectChat}
               />
-            ) : showMessages ? (
-              <div className="h-full overflow-y-auto">
+            </div>
+          ) : showMessages ? (
+            <>
+              <div className="flex-1 overflow-y-auto min-h-0">
                 {loadingMessages ? (
                   <div className="flex items-center justify-center h-full">
                     <LoadingSpinner size={22} className="text-[#B86F50]" />
@@ -220,7 +223,7 @@ function ChatLayout() {
                     {placeHolderMessage && (
                       <div className="flex items-center">
                         <LoadingSpinner size={22} className="text-[#B86F50]" />
-                        <div className="text-[#B0A49A] text-[13px] ml-2">
+                        <div className="text-[#A8A8A8] text-[13px] ml-2">
                           {placeHolderMessage}
                         </div>
                       </div>
@@ -229,23 +232,34 @@ function ChatLayout() {
                   </div>
                 )}
               </div>
-            ) : (
-              <HomeScreen onSend={sendMessage} />
-            )}
-          </div>
-
-          {/* Input — only shown when a chat is open */}
-          {showMessages && (
-            <ChatInput
-              onSend={sendMessage}
-              disabled={streaming || (subChat === 0 && requirementProcessStarted)}
-              isStreaming={showStopButton}
-              onCancel={cancelStream}
-              processConfig={activeProcessConfig}
-              onProcessConfigChange={setActiveProcessConfig}
-              configLocked={requirementProcessStarted}
-              showProcessControls={subChat === 0}
-            />
+              <ChatInput
+                onSend={sendMessage}
+                disabled={streaming || (subChat === 0 && requirementProcessStarted)}
+                isStreaming={showStopButton}
+                onCancel={cancelStream}
+                processConfig={activeProcessConfig}
+                onProcessConfigChange={setActiveProcessConfig}
+                configLocked={requirementProcessStarted}
+                showProcessControls={subChat === 0}
+              />
+            </>
+          ) : (
+            /* Home: greeting + input centered vertically */
+            <div className="flex flex-col flex-1 min-h-0 items-center justify-center">
+              <HomeScreen />
+              <div className="w-full mt-6">
+                <ChatInput
+                  onSend={sendMessage}
+                  disabled={false}
+                  isStreaming={false}
+                  onCancel={cancelStream}
+                  processConfig={activeProcessConfig}
+                  onProcessConfigChange={setActiveProcessConfig}
+                  configLocked={false}
+                  showProcessControls={true}
+                />
+              </div>
+            </div>
           )}
         </div>
 
@@ -255,7 +269,7 @@ function ChatLayout() {
         {/* Artifact panel */}
         {openArtifact && (
           <div
-            className="h-full flex-shrink-0 border-l border-[#E2D6C5] overflow-hidden"
+            className="h-full flex-shrink-0 border-l border-[#E5E5E5] overflow-hidden"
             style={{ width: `${rightPct}%` }}
           >
             <ArtifactPanel

@@ -18,37 +18,40 @@ export function formatDate(value) {
 
 export function Section({ title, icon: Icon, children }) {
   return (
-    <section className="border-t border-[#E2D6C5]">
+    <section className="border-t border-[#E5E5E5]">
       <div
-        className="sticky top-0 z-10 bg-[#FBF7F0]/95 backdrop-blur px-4 py-2.5
-                   border-b border-[#E2D6C5] flex items-center gap-2"
+        className="sticky top-0 z-10 bg-[#F8F8F8]/95 backdrop-blur px-4 py-2.5
+                   border-b border-[#E5E5E5] flex items-center gap-2"
       >
         {Icon && <Icon size={14} className="text-[#B86F50]" />}
-        <h3 className="text-[12px] font-semibold text-[#211914]">{title}</h3>
+        <h3 className="text-[12px] font-semibold text-[#1A1A1A]">{title}</h3>
       </div>
       <div className="p-4">{children}</div>
     </section>
   );
 }
 
+// Unified warm-palette semantic tones — all derived from the same warm base
+// so every artifact view speaks the same visual language.
+const TONES = {
+  default: "border-[#DEDEDE] bg-[#F7F7F7] text-[#6B6B6B]",
+  warm:    "border-[#FFD0B0] bg-[#FEF0E8] text-[#B86F50]",
+  green:   "border-[#B8D4BB] bg-[#EEF5EF] text-[#3A6642]",
+  amber:   "border-[#D4C09E] bg-[#F5EDD6] text-[#7A5422]",
+  red:     "border-[#D4AAAA] bg-[#F5EAEA] text-[#7A3333]",
+  blue:    "border-[#B0BED4] bg-[#EEF1F8] text-[#364F78]",
+  purple:  "border-[#C4B0D4] bg-[#F0EEF5] text-[#5B4278]",
+};
+
 export function MetaPill({ label, value, tone = "default" }) {
   if (value === null || value === undefined || value === "") return null;
-
-  const tones = {
-    default: "border-[#D8CBBB] bg-[#F6F1E8] text-[#776B60]",
-    warm: "border-[#E6CABB] bg-[#F4E4D9] text-[#B86F50]",
-    green: "border-green-200 bg-green-50 text-green-700",
-    amber: "border-amber-200 bg-amber-50 text-amber-700",
-    red: "border-red-200 bg-red-50 text-red-600",
-    blue: "border-blue-200 bg-blue-50 text-blue-700",
-  };
 
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1
-                  text-[10.5px] ${tones[tone] || tones.default}`}
+                  text-[10.5px] ${TONES[tone] || TONES.default}`}
     >
-      <span className="font-semibold text-[#4A4038]">{label}</span>
+      <span className="font-semibold text-[#3A3A3A]">{label}</span>
       {text(value)}
     </span>
   );
@@ -57,15 +60,7 @@ export function MetaPill({ label, value, tone = "default" }) {
 export function Tag({ children, tone = "default", title }) {
   if (children === null || children === undefined || children === "") return null;
 
-  const tones = {
-    default: "border-[#D8CBBB] bg-[#F6F1E8] text-[#776B60]",
-    warm: "border-[#E6CABB] bg-[#F4E4D9] text-[#B86F50]",
-    green: "border-green-200 bg-green-50 text-green-700",
-    amber: "border-amber-200 bg-amber-50 text-amber-700",
-    red: "border-red-200 bg-red-50 text-red-600",
-    blue: "border-blue-200 bg-blue-50 text-blue-700",
-    purple: "border-purple-200 bg-purple-50 text-purple-700",
-  };
+  const tones = TONES;
 
   return (
     <span
@@ -81,8 +76,8 @@ export function Tag({ children, tone = "default", title }) {
 export function EmptyState({ label }) {
   return (
     <div
-      className="rounded-lg border border-dashed border-[#D8CBBB] bg-[#FBF7F0]
-                 px-3 py-6 text-center text-[12px] text-[#A89C91]"
+      className="rounded-lg border border-dashed border-[#DEDEDE] bg-[#F8F8F8]
+                 px-3 py-6 text-center text-[12px] text-[#A0A0A0]"
     >
       {label}
     </div>
@@ -97,11 +92,11 @@ export function Field({ label, value }) {
   if (value === null || value === undefined || value === "") return null;
 
   return (
-    <div className="rounded-lg border border-[#E9DFD1] bg-[#FBF7F0] px-3 py-2">
-      <div className="text-[9.5px] font-semibold uppercase text-[#A89C91]">
+    <div className="rounded-lg border border-[#E8E8E8] bg-[#F8F8F8] px-3 py-2">
+      <div className="text-[9.5px] font-semibold uppercase text-[#A0A0A0]">
         {label}
       </div>
-      <div className="mt-0.5 text-[10.5px] leading-relaxed text-[#4A4038]">
+      <div className="mt-0.5 text-[10.5px] leading-relaxed text-[#3A3A3A]">
         {text(value)}
       </div>
     </div>

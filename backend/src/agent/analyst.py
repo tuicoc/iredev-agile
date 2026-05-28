@@ -155,6 +155,47 @@ obligations under one heading.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Feedback re-run block (only attached when reviewer feedback is present)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FEEDBACK_PREAMBLE = """\
+FEEDBACK RE-RUN — REVIEWER REJECTED THE PREVIOUS OUTPUT.
+
+Treat each feedback point below as a non-negotiable instruction
+that overrides your default reasoning when the two conflict — if
+a point tells you to keep / drop / rewrite / split / merge / re-
+tag a specific element, comply exactly even when your own
+judgment would have chosen differently. The "MUST address every
+point" contract is absolute: a point left untouched is a failed
+run, not a judgment call.
+
+For any aspect the feedback is silent on, produce output the same
+way you normally would — feedback narrows your choices on the
+points it names; it does not loosen the Fibonacci-direct sizing,
+the six INVEST honesty, or the in-pass reshape contract.
+"""
+
+
+_FEEDBACK_BODY = """\
+REVIEWER FEEDBACK — YOU MUST ADDRESS EVERY POINT BELOW:
+{feedback}
+
+Apply each point at the assessment slot it names:
+  story_points (Fibonacci) · invest.* booleans · feasibility ·
+  blocked_by / blocks · risks · reshape (rewrite or split
+  children) · acceptance_criteria · needs_human_input · notes.
+
+When a point challenges a size: re-reason the size from the
+feedback's framing and state it directly — do not snap the
+previous number with a small bump. When a point asks for a
+split: emit sized child stories and let the parent fall away;
+do not keep the parent with a smaller size. When a point asks
+to mark a story needs_human_input: do not "save" it with a
+reshape just to keep INVEST clean.
+"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Schemas — WHAT each field holds. `reasoning` is declared first so the
 # model reasons before it decides.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -317,11 +358,18 @@ class AnalystAgent(BaseAgent):
 
     def _run_estimation(self, state: Dict[str, Any]) -> Dict[str, Any]:
         artifacts = state.get("artifacts") or {}
-        draft = artifacts.get("user_story_draft") or {}
+        # 9c reads the PO-approved draft (9a' sentinel); fall back to the
+        # raw draft only when running outside the gated flow (e.g.
+        # --start-at debug paths that seed the unsentinelled artifact).
+        draft = (
+            artifacts.get("user_story_draft_approved")
+            or artifacts.get("user_story_draft")
+            or {}
+        )
         stories = draft.get("stories") or []
         feedback = (state.get("product_backlog_feedback") or "").strip()
         if not stories:
-            return {"errors": ["AnalystAgent: user_story_draft has no stories."]}
+            return {"errors": ["AnalystAgent: user_story_draft_approved has no stories."]}
 
         product_vision = self._compact_product_vision(state)
         feedback_block = self._feedback_block(feedback, "assessment, sizing, and reshaping")
@@ -483,7 +531,7 @@ class AnalystAgent(BaseAgent):
         analyst_estimation = {
             "id": str(uuid.uuid4()),
             "session_id": state.get("session_id", ""),
-            "source_artifacts": ["user_story_draft", "reviewed_product_vision"],
+            "source_artifacts": ["user_story_draft_approved", "reviewed_product_vision"],
             "estimated_at": datetime.now().isoformat(),
             "stories": assembled,
             "total_story_points": total_points,
@@ -693,6 +741,7 @@ class AnalystAgent(BaseAgent):
         if not feedback:
             return ""
         return (
-            "\n\nREVIEWER FEEDBACK — previous output was rejected:\n"
-            f"{feedback}\nAddress this during {context}.\n"
+            "\n\n" + _FEEDBACK_PREAMBLE
+            + "\n\n" + _FEEDBACK_BODY.format(feedback=feedback)
+            + f"\nThis applies during {context}.\n"
         )

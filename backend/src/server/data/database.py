@@ -321,7 +321,7 @@ def add_message(
                 VALUES (%s, %s, %s, %s, %s, %s::jsonb)
                 RETURNING *
                 """,
-                (mid, chat_id, int(subChatID), role, content, artifact_json),
+                (mid, chat_id, int(subChatID) if subChatID not in (None, "null", "") else 0, role, content, artifact_json),
             )
             row = _fmt(_row(cur.fetchone()))
 

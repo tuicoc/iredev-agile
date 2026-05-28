@@ -137,6 +137,67 @@ the set rather than a flat or default spread.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Feedback re-run blocks (only attached when reviewer feedback is present)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FEEDBACK_PREAMBLE = """\
+FEEDBACK RE-RUN — REVIEWER REJECTED THE PREVIOUS OUTPUT.
+
+Treat each feedback point below as a non-negotiable instruction
+that overrides your default reasoning when the two conflict — if
+a point tells you to keep / drop / rewrite / split / merge / re-
+tag a specific element, comply exactly even when your own
+judgment would have chosen differently. The "MUST address every
+point" contract is absolute: a point left untouched is a failed
+run, not a judgment call.
+
+For any aspect the feedback is silent on, produce output the same
+way you normally would — feedback narrows your choices on the
+points it names; it does not loosen any INVEST guarantee, source-
+id discipline, or WSJF honesty the pass already owes.
+"""
+
+
+_FEEDBACK_BODY_SHAPE = """\
+REVIEWER FEEDBACK — YOU MUST ADDRESS EVERY POINT BELOW:
+{feedback}
+
+Apply each point at the shape slot it names:
+  reshape_op (carry / merge / split / rewrite / add) · title ·
+  description · source_requirement_ids · dropped reasons · notes.
+
+When a point asks to merge two stories: union their source_
+requirement_ids and report the fold. When a point asks to split a
+bundle: emit the children with disjoint source_requirement_ids.
+When a point asks to drop a story: record the drop with the
+reviewer's stated reason; do not silently re-route the requirement
+into another story to keep the count up.
+"""
+
+
+_FEEDBACK_BODY_WSJF = """\
+REVIEWER FEEDBACK — YOU MUST ADDRESS EVERY POINT BELOW:
+{feedback}
+
+Apply each point at the prioritisation slot it names:
+  business_value · time_criticality · risk_reduction · per-story
+  rationale.
+
+The dependency-aware reorder and the WSJF formula are Python's
+job — do not anticipate the final rank in your scoring. If
+feedback asks for a particular story to rise: justify the rise
+through honest BV / TC / RR reasoning; do not inflate one
+dimension purely to game the rank.
+"""
+
+
+_FEEDBACK_BODY_BY_CONTEXT: Dict[str, str] = {
+    "story shaping": _FEEDBACK_BODY_SHAPE,
+    "WSJF scoring":  _FEEDBACK_BODY_WSJF,
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Schemas — WHAT each field holds. `reasoning` is declared first.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -229,11 +290,25 @@ class SprintAgent(BaseAgent):
 
     def process_stories(self, state: Dict[str, Any]) -> Dict[str, Any]:
         artifacts = state.get("artifacts") or {}
-        feedback = (state.get("product_backlog_feedback") or "").strip()
+        feedback = self._shape_feedback(state)
         if "user_story_draft" in artifacts and not feedback:
             logger.warning("[SprintAgent] user_story_draft already exists.")
             return {}
         return self._create_user_stories(state)
+
+    @staticmethod
+    def _shape_feedback(state: Dict[str, Any]) -> str:
+        """Feedback that drives a 9a re-run.
+
+        9a' (user_story_draft HITL) is the immediate gate, so its feedback
+        wins. The step-10 backlog rejection cascade also re-runs 9a; in that
+        path the gate cleared the 9a' channel and only product_backlog_feedback
+        is present — fall back to it.
+        """
+        return (
+            (state.get("user_story_draft_feedback") or "").strip()
+            or (state.get("product_backlog_feedback") or "").strip()
+        )
 
     def process_backlog(self, state: Dict[str, Any]) -> Dict[str, Any]:
         artifacts = state.get("artifacts") or {}
@@ -247,7 +322,7 @@ class SprintAgent(BaseAgent):
 
     def _create_user_stories(self, state: Dict[str, Any]) -> Dict[str, Any]:
         artifacts = dict(state.get("artifacts") or {})
-        feedback = (state.get("product_backlog_feedback") or "").strip()
+        feedback = self._shape_feedback(state)
         req_list = artifacts.get("requirement_list_approved") or artifacts.get("requirement_list") or {}
 
         all_requirements = self._extract_all_requirements(req_list)
@@ -551,7 +626,7 @@ class SprintAgent(BaseAgent):
             "session_id": state.get("session_id", ""),
             "source_artifacts": [
                 "requirement_list_approved", "reviewed_product_vision",
-                "user_story_draft", "analyst_estimation",
+                "user_story_draft_approved", "analyst_estimation",
             ],
             "status": "draft",
             "total_items": len(items),
@@ -565,7 +640,14 @@ class SprintAgent(BaseAgent):
                 "prioritization": "WSJF = (BV+TC+RR)/points with dependency-aware ordering.",
                 "quality_gate": "INVEST assessed by AnalystAgent.",
             },
-            "notes": (state.get("artifacts") or {}).get("user_story_draft", {}).get("notes", ""),
+            "notes": (
+                (state.get("artifacts") or {})
+                .get("user_story_draft_approved", {})
+                .get("notes", "")
+                or (state.get("artifacts") or {})
+                .get("user_story_draft", {})
+                .get("notes", "")
+            ),
             "pass_notes": f"WSJF SCORING\n  {(wsjf.notes or '').strip() or '(none)'}",
             "quality_warnings": {"invest": invest_warnings, "fibonacci": fib_warnings},
             "created_at": datetime.now().isoformat(),
@@ -732,7 +814,8 @@ class SprintAgent(BaseAgent):
     def _feedback_block(feedback: str, context: str) -> str:
         if not feedback:
             return ""
+        body_template = _FEEDBACK_BODY_BY_CONTEXT.get(context) or _FEEDBACK_BODY_SHAPE
         return (
-            "\n\nREVIEWER FEEDBACK — previous output was rejected:\n"
-            f"{feedback}\nAddress this during {context}.\n"
+            "\n\n" + _FEEDBACK_PREAMBLE
+            + "\n\n" + body_template.format(feedback=feedback)
         )

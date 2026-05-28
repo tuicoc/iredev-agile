@@ -569,6 +569,85 @@ preserved separately.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Feedback re-run blocks (only attached when reviewer feedback is present)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FEEDBACK_PREAMBLE = """\
+FEEDBACK RE-RUN — REVIEWER REJECTED THE PREVIOUS OUTPUT.
+
+Treat each feedback point below as a non-negotiable instruction
+that overrides your default reasoning when the two conflict — if
+a point tells you to keep / drop / rewrite / split / merge / re-
+tag a specific element, comply exactly even when your own
+judgment would have chosen differently. The "MUST address every
+point" contract is absolute: a point left untouched is a failed
+run, not a judgment call.
+
+For any aspect the feedback is silent on, produce output the same
+way you normally would — feedback narrows your choices on the
+points it names; it does not loosen any other guarantee the pass
+already owes (anti-drop on trace_refs, lens/confidence honesty,
+one-build-one-check grain, no out_of_scope emission).
+"""
+
+
+_FEEDBACK_BODY = """\
+REVIEWER FEEDBACK — YOU MUST ADDRESS EVERY POINT BELOW:
+{feedback}
+
+Apply each point at the requirement-level field it names:
+  type · subject · obligation · confidence · trace_refs ·
+  Implementation Parity axes · notes.
+
+When a point names a specific requirement (by id, by phrasing, or
+by the obligation it carries): make the change on that requirement
+and only that requirement. When a point names a category (FR / NFR
+/ SYS / a vision_ref / a perspective), apply the change to every
+item in scope, then say so in notes.
+
+Do NOT widen an inferred item to confirmed just to satisfy a
+phrasing request, and do NOT drop trace_refs to make a rewrite
+"cleaner" — the anti-drop invariant still holds.
+"""
+
+
+_FEEDBACK_CONFLICT_CLAUSE = """\
+CONFLICT RESOLUTION UNDER FEEDBACK — HARD RULE.
+
+In this pass you decide which conflicts surface as final_conflicts,
+which dissolve under merge, and which vision_constraint_items earn
+a slot. Whenever the reviewer feedback above addresses a conflict
+you are about to adjudicate — directly (naming the conflicting
+items / vision_ref) or by direction (telling you which side the
+product should take, what to drop, what must remain) — you MUST
+resolve in the direction the feedback prescribes. The reviewer's
+instruction is the authoritative tiebreaker; do not "average" it
+against the on-paper evidence balance and do not re-flag it as a
+fresh final_conflict for the reviewer to re-decide.
+
+Your own adjudication only governs conflicts the feedback is
+silent on. For every conflict the feedback DID resolve, record the
+resolved direction in notes so the audit makes the deference
+visible.
+"""
+
+
+def _build_feedback_block(feedback: str, include_conflict_clause: bool = False) -> str:
+    """Assemble the feedback insertion appended to the system prompt.
+
+    Returns an empty string when no feedback is present, so passes that
+    are not re-runs see no extra body. When ``include_conflict_clause``
+    is True, appends the Pass 2B-only adjudication directive.
+    """
+    if not feedback:
+        return ""
+    parts = [_FEEDBACK_PREAMBLE, _FEEDBACK_BODY.format(feedback=feedback)]
+    if include_conflict_clause:
+        parts.append(_FEEDBACK_CONFLICT_CLAUSE)
+    return "\n\n" + "\n\n".join(parts)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Agent
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1286,7 +1365,11 @@ class DistillerAgent(BaseAgent):
         interview = artifacts.get("reviewed_interview_record") or artifacts.get("interview_record") or {}
         items = interview.get("items") or []
         feedback = (state.get("requirement_list_feedback") or "").strip()
-        feedback_block = f"\n\nReviewer feedback to address:\n{feedback}" if feedback else ""
+        # Pass 1 + Pass 2A get the standard re-run block. Pass 2B adjudicates
+        # conflicts, so it gets an extra clause forcing feedback-prescribed
+        # resolution direction over its own balance.
+        feedback_block = _build_feedback_block(feedback)
+        feedback_block_2b = _build_feedback_block(feedback, include_conflict_clause=True)
 
         compact_vision = self._compact_vision(raw_vision)
 
@@ -1438,7 +1521,7 @@ class DistillerAgent(BaseAgent):
                 all_gaps,
                 all_conflicts,
                 cluster_summary,
-                feedback_block,
+                feedback_block_2b,
             )
         except Exception as exc:
             logger.error(

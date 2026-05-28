@@ -21,7 +21,7 @@ export function ProtectedRoute({ children }) {
   // Still reading the token from localStorage — show a brief full-screen spinner
   if (initialising) {
     return (
-      <div className="min-h-screen bg-[#F7F3EA] flex items-center justify-center">
+      <div className="min-h-screen bg-white flex items-center justify-center">
         <LoadingSpinner size={28} className="text-[#B86F50]" />
       </div>
     )

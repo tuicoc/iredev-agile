@@ -50,13 +50,13 @@ export function ArtifactFeedbackBar({
   // The artifact is currently being revised by the backend
   if (artifact?.revising) {
     return (
-      <div className="border-t border-[#E2D6C5] bg-[#FBF7F0] flex-shrink-0">
+      <div className="border-t border-[#E5E5E5] bg-[#F8F8F8] flex-shrink-0">
         <div className="flex items-center gap-2.5 px-4 py-4">
           <Loader
             size={14}
             className="text-[#B86F50] animate-spin flex-shrink-0"
           />
-          <span className="text-[12px] text-[#4A4038] font-medium">
+          <span className="text-[12px] text-[#3A3A3A] font-medium">
             Revising — generating new version…
           </span>
         </div>
@@ -80,7 +80,7 @@ export function ArtifactFeedbackBar({
   }
 
   return (
-    <div className="border-t border-[#E2D6C5] bg-[#FBF7F0] flex-shrink-0">
+    <div className="border-t border-[#E5E5E5] bg-[#F8F8F8] flex-shrink-0">
       {/* Iteration indicator */}
       <div className="flex items-center justify-between px-4 pt-3 pb-1">
         <div className="flex items-center gap-1.5">
@@ -91,11 +91,11 @@ export function ArtifactFeedbackBar({
             />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-[#B86F50]" />
           </span>
-          <span className="text-[12px] font-medium text-[#211914]">
+          <span className="text-[12px] font-medium text-[#1A1A1A]">
             Awaiting your review
           </span>
         </div>
-        <span className="text-[11px] text-[#A89C91]">
+        <span className="text-[11px] text-[#A0A0A0]">
           v{iteration}
         </span>
       </div>
@@ -119,8 +119,8 @@ export function ArtifactFeedbackBar({
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="w-full px-3 py-2 bg-[#FFFDF8] border border-[#E2D6C5] rounded-lg
-                       text-[13px] text-[#211914] placeholder:text-[#A89C91]
+            className="w-full px-3 py-2 bg-[#FFFFFF] border border-[#E5E5E5] rounded-lg
+                       text-[13px] text-[#1A1A1A] placeholder:text-[#A0A0A0]
                        focus:outline-none focus:ring-1 focus:ring-[#B86F50]/30
                        focus:border-[#B86F50]/50 resize-none transition-all"
           />
@@ -146,8 +146,8 @@ export function ArtifactFeedbackBar({
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="w-full px-3 py-2 bg-[#FFFDF8] border border-[#E2D6C5] rounded-lg
-                       text-[13px] text-[#211914] placeholder:text-[#A89C91]
+            className="w-full px-3 py-2 bg-[#FFFFFF] border border-[#E5E5E5] rounded-lg
+                       text-[13px] text-[#1A1A1A] placeholder:text-[#A0A0A0]
                        focus:outline-none focus:ring-1 focus:ring-[#B86F50]/30
                        focus:border-[#B86F50]/50 resize-none transition-all"
           />
@@ -158,7 +158,7 @@ export function ArtifactFeedbackBar({
                 setComment("");
               }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg
-                         text-[12px] text-[#776B60] hover:bg-[#ECE3D6] transition-colors"
+                         text-[12px] text-[#6B6B6B] hover:bg-[#EFEFEF] transition-colors"
             >
               <X size={13} /> Cancel
             </button>
@@ -190,8 +190,8 @@ export function ArtifactFeedbackBar({
               onClick={() => setRevising(true)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg
                          text-[13px] font-medium
-                         border border-[#E2D6C5] text-[#4A4038]
-                         hover:bg-[#ECE3D6] hover:border-[#CEC0AE] transition-colors"
+                         border border-[#E5E5E5] text-[#3A3A3A]
+                         hover:bg-[#EFEFEF] hover:border-[#C5C5C5] transition-colors"
             >
               <Pencil size={13} /> Request changes
             </button>

@@ -31,12 +31,12 @@ export function Button({
 
     // No background, subtle hover fill — icon buttons, nav items
     ghost:
-      'text-[#4A4038] hover:bg-[#ECE3D6] hover:text-[#211914]',
+      'text-[#3A3A3A] hover:bg-[#EFEFEF] hover:text-[#1A1A1A]',
 
     // Light border — secondary actions
     outline:
-      'border border-[#E2D6C5] text-[#4A4038] ' +
-      'hover:bg-[#ECE3D6] hover:border-[#CEC0AE]',
+      'border border-[#E5E5E5] text-[#3A3A3A] ' +
+      'hover:bg-[#EFEFEF] hover:border-[#C5C5C5]',
   }
 
   const sizes = {

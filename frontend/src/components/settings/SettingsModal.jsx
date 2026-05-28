@@ -16,7 +16,7 @@ export function SettingsModal({ open, onClose }) {
   return (
     <Modal open={open} onClose={onClose} title="Settings" width="max-w-[520px]">
       {/* Tab bar */}
-      <div className="flex gap-1 mb-5 -mx-5 px-5 border-b border-[#E9DFD1] pb-0">
+      <div className="flex gap-1 mb-5 -mx-5 px-5 border-b border-[#E8E8E8] pb-0">
         {TABS.map((tab) => (
           <button
             key={tab}
@@ -24,7 +24,7 @@ export function SettingsModal({ open, onClose }) {
             className={`px-3 py-2 text-[13px] font-medium border-b-2 -mb-px transition-colors ${
               tab === activeTab
                 ? 'border-[#B86F50] text-[#B86F50]'
-                : 'border-transparent text-[#776B60] hover:text-[#211914]'
+                : 'border-transparent text-[#6B6B6B] hover:text-[#1A1A1A]'
             }`}
           >
             {tab}
@@ -55,16 +55,16 @@ function ProfileTab() {
     <div className="space-y-5">
       {/* Avatar */}
       <div className="flex items-center gap-4">
-        <div className="w-14 h-14 rounded-full bg-[#776B60] flex items-center justify-center">
+        <div className="w-14 h-14 rounded-full bg-[#6B6B6B] flex items-center justify-center">
           <span className="text-white text-lg font-semibold">
             {(user?.name || user?.email || 'U')[0].toUpperCase()}
           </span>
         </div>
         <div>
-          <div className="text-[13px] font-medium text-[#211914]">
+          <div className="text-[13px] font-medium text-[#1A1A1A]">
             {user?.name || 'User'}
           </div>
-          <div className="text-[12px] text-[#776B60]">{user?.email}</div>
+          <div className="text-[12px] text-[#6B6B6B]">{user?.email}</div>
         </div>
       </div>
 
@@ -99,7 +99,7 @@ function ProfileTab() {
 function SettingsField({ label, type = 'text', value, onChange }) {
   return (
     <div>
-      <label className="block text-[12px] font-medium text-[#4A4038] mb-1.5">{label}</label>
+      <label className="block text-[12px] font-medium text-[#3A3A3A] mb-1.5">{label}</label>
       <input
         type={type}
         value={value}
@@ -111,7 +111,7 @@ function SettingsField({ label, type = 'text', value, onChange }) {
 }
 
 const settingsInputClass =
-  'w-full h-9 px-3 bg-[#FCF8F1] border border-[#E2D6C5] rounded-lg ' +
-  'text-[13px] text-[#211914] placeholder:text-[#B0A49A] ' +
+  'w-full h-9 px-3 bg-[#F8F8F8] border border-[#E5E5E5] rounded-lg ' +
+  'text-[13px] text-[#1A1A1A] placeholder:text-[#A8A8A8] ' +
   'focus:outline-none focus:ring-2 focus:ring-[#B86F50]/20 ' +
   'focus:border-[#B86F50]/60 transition-all'

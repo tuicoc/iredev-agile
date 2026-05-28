@@ -14,14 +14,16 @@ Graph topology
     ├─► review_interview_record_turn → supervisor    (Sprint Zero step 6 — HITL, approve-only)
     ├─► review_requirement_list_turn → supervisor    (Sprint Zero step 8 — HITL)
     ├─► sprint_agent_turn → supervisor               (Sprint Zero steps 9a and 9b)
+    ├─► review_user_story_draft_turn → supervisor    (Sprint Zero step 9a' — HITL)
     ├─► analyst_estimation_turn → supervisor         (Sprint Zero step 9c)
     ├─► review_product_backlog_turn → supervisor     (Sprint Zero step 10 — HITL)
     ├─► analyst_turn → supervisor                    (Backlog Refinement step 1)
     ├─► review_validated_product_backlog_turn → supervisor  (Backlog Refinement step 2 — HITL)
     └─► END
 
-Sprint Zero backlog creation flow (linear, steps 9a → 9c → 9b):
+Sprint Zero backlog creation flow (linear, steps 9a → 9a' → 9c → 9b):
   sprint_agent_turn (9a: shape approved requirements → user_story_draft)
+    → review_user_story_draft_turn (9a': HITL gate → user_story_draft_approved)
     → analyst_estimation_turn (9c: size + INVEST-assess + reshape → analyst_estimation)
     → sprint_agent_turn (9b: prioritise + assemble → product_backlog)
 
@@ -30,8 +32,8 @@ inside the single 9a and 9c passes, so there is no refinement loop and no
 split_round.
 
 sprint_agent_turn routing:
-  • user_story_draft absent                       → process_stories()  (Step 9a)
-  • user_story_draft + analyst_estimation present → process_backlog()  (Step 9b)
+  • user_story_draft absent                                 → process_stories()  (Step 9a)
+  • user_story_draft_approved + analyst_estimation present  → process_backlog()  (Step 9b)
 
 HITL review order:
   1. review_product_vision_turn      — human reviews/edits the ProductVision
@@ -39,9 +41,13 @@ HITL review order:
   3. review_interview_record_turn    — human reads raw Q&A (approve-only, no reject)
   4. review_requirement_list_turn    — human reviews the synthesised Requirement List
      • Reject here re-runs synthesis only; interview_record is NOT touched.
-  5. review_product_backlog_turn     — PO reviews the assembled product_backlog
-     • Reject removes product_backlog, user_story_draft, AND analyst_estimation
-       so all three steps (9a → 9c → 9b) re-run with PO feedback.
+  5. review_user_story_draft_turn    — PO reviews the shaped user_story_draft
+     • Reject removes ONLY user_story_draft, injects user_story_draft_feedback;
+       SprintAgent re-runs step 9a (shaping) with the feedback.
+  6. review_product_backlog_turn     — PO reviews the assembled product_backlog
+     • Reject removes product_backlog, analyst_estimation, user_story_draft,
+       AND user_story_draft_approved so all four steps (9a → 9a' → 9c → 9b)
+       re-run with PO feedback.
   On vision rejection: only product_vision is removed from artifacts;
     product_vision_feedback is injected; VisionaryAgent re-runs (visionary_turn).
   On agenda rejection: elicitation_agenda_artifact
@@ -131,6 +137,15 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
         "Review the buildable obligations, conflicts, gaps, and acceptance checks. "
         "Accept if the list is complete enough for backlog shaping; request changes for missing, duplicate, "
         "misclassified, or low-quality requirements."
+    ),
+
+    # Sent inside review_user_story_draft_turn interrupt — alongside the artifact.
+    "user_story_draft": (
+        "## User Story Draft Ready for Review\n\n"
+        "Review the shaped stories before the Analyst sizes them — titles, descriptions, "
+        "source requirements, reshape ops (carry / merge / split / rewrite / add), and "
+        "dropped requirements with reasons. Accept if the shape is right for sizing; request "
+        "changes for missing, duplicate, mis-shaped, or wrongly-dropped stories."
     ),
 
     # Sent inside review_product_backlog_turn interrupt — alongside the artifact.
@@ -457,31 +472,38 @@ def sprint_agent_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     Route to the correct SprintAgent method based on current state (linear,
     no refinement loop):
       1. user_story_draft absent → process_stories()  (Step 9a: shaping)
-      2. user_story_draft + analyst_estimation present → process_backlog()
-         (Step 9b: prioritise + assemble)
+      2. user_story_draft_approved + analyst_estimation present →
+         process_backlog()  (Step 9b: prioritise + assemble)
 
     Reshaping (split / rewrite / merge / add / drop) and INVEST fixing now
     happen inside the single 9a and 9c passes, so there is no sprint↔analyst
-    cycle and no split_round.
+    cycle and no split_round. The user_story_draft_approved sentinel is
+    written by the 9a' HITL gate (review_user_story_draft_turn).
     """
     agent      = _get_sprint_agent(_llm_cache_key(state))
     artifacts  = state.get("artifacts") or {}
 
-    has_draft      = "user_story_draft"   in artifacts
-    has_estimation = "analyst_estimation" in artifacts
+    has_draft      = "user_story_draft"          in artifacts
+    has_approved   = "user_story_draft_approved" in artifacts
+    has_estimation = "analyst_estimation"        in artifacts
 
     if not has_draft:
         logger.info("sprint_agent_turn: no user_story_draft → process_stories() (Step 9a).")
         updates = agent.process_stories(state)
-    elif has_estimation:
-        logger.info("sprint_agent_turn: estimation present → process_backlog() (Step 9b).")
+    elif has_approved and has_estimation:
+        logger.info(
+            "sprint_agent_turn: approved draft + estimation present → "
+            "process_backlog() (Step 9b)."
+        )
         updates = agent.process_backlog(state)
     else:
-        # user_story_draft present but analyst_estimation not yet available.
-        # Supervisor should have routed to analyst_estimation_turn instead.
+        # Supervisor should have routed to review_user_story_draft_turn
+        # (9a') or analyst_estimation_turn (9c) instead of here.
         logger.warning(
-            "sprint_agent_turn: user_story_draft present but analyst_estimation absent. "
-            "Supervisor routing may be inconsistent. Returning empty update."
+            "sprint_agent_turn: user_story_draft present but the 9b prereqs "
+            "(user_story_draft_approved + analyst_estimation) are not both set "
+            "(has_approved=%s, has_estimation=%s). Returning empty update.",
+            has_approved, has_estimation,
         )
         updates = {}
 
@@ -787,6 +809,64 @@ def review_interview_record_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     }
 
 
+def review_user_story_draft_turn_fn(state: WorkflowState) -> Dict[str, Any]:
+    """HITL gate — Product Owner reviews the user_story_draft BEFORE sizing.
+
+    Interrupt payload (consumed by ws_handler):
+    {
+        "review_type":   "user_story_draft",
+        "artifact_data": <full user_story_draft dict>,
+        "review_payload": <structured review data>,
+        "ui_summary":    ARTIFACT_SUMMARIES["user_story_draft"],
+    }
+
+    After resume:
+      approved=True  → write user_story_draft_approved sentinel;
+                       flow → analyst_estimation_turn (Step 9c).
+      approved=False → remove ONLY user_story_draft, inject
+                       user_story_draft_feedback; SprintAgent re-runs
+                       step 9a with feedback. analyst_estimation is not
+                       yet present at this point, so nothing else to clear.
+    """
+    artifacts = dict(state.get("artifacts") or {})
+    draft     = artifacts.get("user_story_draft", {})
+
+    interrupt_value = {
+        "review_type":   "user_story_draft",
+        "artifact_data": draft,
+        "review_payload": _build_user_story_draft_review_payload(draft),
+        "ui_summary":    ARTIFACT_SUMMARIES["user_story_draft"],
+    }
+    reviewer_response: Dict[str, Any] = interrupt(interrupt_value)
+
+    approved = bool(reviewer_response.get("approved", False))
+    feedback = (reviewer_response.get("feedback") or "").strip()
+
+    stories = draft.get("stories") or []
+
+    if approved:
+        artifacts["user_story_draft_approved"] = {
+            **draft,
+            "status":       "approved",
+            "reviewed_at":  datetime.now().isoformat(),
+            "review_notes": feedback or None,
+        }
+        logger.info(
+            "[ReviewUserStoryDraft] APPROVED — %d shaped story(ies).", len(stories)
+        )
+        return {
+            "artifacts":                 artifacts,
+            "user_story_draft_feedback": None,
+        }
+
+    artifacts.pop("user_story_draft", None)
+    logger.info("[ReviewUserStoryDraft] REJECTED. Feedback: %s", feedback or "(none)")
+    return {
+        "artifacts":                 artifacts,
+        "user_story_draft_feedback": feedback or "The reviewer did not provide specific feedback.",
+    }
+
+
 def review_product_backlog_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     """HITL gate — Product Owner reviews the raw product_backlog.
 
@@ -801,9 +881,10 @@ def review_product_backlog_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     After resume:
       approved=True  → write product_backlog_approved sentinel;
                        flow → analyst_turn (Phase 2: AC generation).
-      approved=False → remove product_backlog, user_story_draft, AND
-                       analyst_estimation so all three steps (9a → 9c → 9b)
-                       re-run with PO feedback injected.
+      approved=False → remove product_backlog, analyst_estimation,
+                       user_story_draft, AND user_story_draft_approved so
+                       all four steps (9a → 9a' → 9c → 9b) re-run with PO
+                       feedback injected.
     """
     artifacts = dict(state.get("artifacts") or {})
     backlog   = artifacts.get("product_backlog", {})
@@ -831,15 +912,19 @@ def review_product_backlog_turn_fn(state: WorkflowState) -> Dict[str, Any]:
             "product_backlog_feedback": None,
         }
 
-    # On rejection: remove product_backlog AND the two intermediate artifacts
-    # so all three steps (9a → 9c → 9b) re-run from scratch with feedback.
-    artifacts.pop("product_backlog",     None)
-    artifacts.pop("user_story_draft",    None)
-    artifacts.pop("analyst_estimation",  None)
+    # On rejection: clear product_backlog AND every upstream intermediate so
+    # the full 9a → 9a' → 9c → 9b chain re-runs from scratch. The 9a' sentinel
+    # must also be cleared so SprintAgent's shape pass actually re-runs
+    # instead of falling through to 9b on stale approval.
+    artifacts.pop("product_backlog",          None)
+    artifacts.pop("analyst_estimation",       None)
+    artifacts.pop("user_story_draft",         None)
+    artifacts.pop("user_story_draft_approved", None)
     logger.info("[ReviewProductBacklog] REJECTED. Feedback: %s", feedback or "(none)")
     return {
-        "artifacts":               artifacts,
-        "product_backlog_feedback": feedback or "The reviewer did not provide specific feedback.",
+        "artifacts":                 artifacts,
+        "product_backlog_feedback":  feedback or "The reviewer did not provide specific feedback.",
+        "user_story_draft_feedback": None,
     }
 
 
@@ -1136,6 +1221,48 @@ def _build_interview_review_payload(
     }
 
 
+def _build_user_story_draft_review_payload(draft: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the structured payload shown to the PO when reviewing the user_story_draft.
+
+    The draft is the SprintAgent's shape pass output — stories the PO signs off on
+    BEFORE the Analyst sizes them. Shows per-story shaping decisions (reshape_op,
+    source ids, title/description, thought) plus dropped requirements with reasons.
+    """
+    stories = draft.get("stories") or []
+
+    story_summaries = []
+    for story in stories:
+        trace = story.get("requirement_trace") or {}
+        story_summaries.append({
+            "id":                     story.get("source_story_id") or story.get("id"),
+            "source_requirement_ids": list(story.get("source_requirement_ids") or []),
+            "reshape_op":             story.get("reshape_op", "carry"),
+            "type":                   story.get("type"),
+            "domain":                 story.get("domain"),
+            "title":                  story.get("title"),
+            "description":            story.get("description"),
+            "thought":                story.get("thought", ""),
+            "requirement_trace": {
+                "requirement_id":         trace.get("requirement_id"),
+                "requirement_type":       trace.get("requirement_type"),
+                "stakeholder":            trace.get("stakeholder"),
+                "statement":              trace.get("statement"),
+                "rationale":              trace.get("rationale"),
+                "trace_refs":             list(trace.get("trace_refs") or []),
+                "merged_requirement_ids": list(trace.get("merged_requirement_ids") or []),
+            },
+        })
+
+    return {
+        "total_stories": len(stories),
+        "stories":       story_summaries,
+        "dropped":       list(draft.get("dropped") or []),
+        # notes carries the shape report (merges / splits / rewrites / adds /
+        # drops) the PO signs off on at this gate.
+        "notes":         draft.get("notes", ""),
+    }
+
+
 def _build_product_backlog_review_payload(backlog: Dict[str, Any]) -> Dict[str, Any]:
     """Build the structured payload shown to the PO when reviewing the product_backlog.
 
@@ -1429,6 +1556,7 @@ def build_graph(store=None, checkpointer=None):
     g.add_node("review_interview_record_turn",           review_interview_record_turn_fn)
     g.add_node("review_requirement_list_turn",           review_requirement_list_turn_fn)
     g.add_node("sprint_agent_turn",                      sprint_agent_turn_fn)
+    g.add_node("review_user_story_draft_turn",           review_user_story_draft_turn_fn)
     g.add_node("analyst_estimation_turn",                analyst_estimation_turn_fn)
     g.add_node("review_product_backlog_turn",            review_product_backlog_turn_fn)
     g.add_node("analyst_turn",                           analyst_turn_fn)
@@ -1449,6 +1577,7 @@ def build_graph(store=None, checkpointer=None):
             "review_interview_record_turn":          "review_interview_record_turn",
             "review_requirement_list_turn":          "review_requirement_list_turn",
             "sprint_agent_turn":                     "sprint_agent_turn",
+            "review_user_story_draft_turn":          "review_user_story_draft_turn",
             "analyst_estimation_turn":               "analyst_estimation_turn",
             "review_product_backlog_turn":           "review_product_backlog_turn",
             "analyst_turn":                          "analyst_turn",
@@ -1475,6 +1604,7 @@ def build_graph(store=None, checkpointer=None):
     g.add_edge("review_interview_record_turn",           "supervisor")
     g.add_edge("review_requirement_list_turn",           "supervisor")
     g.add_edge("sprint_agent_turn",                      "supervisor")
+    g.add_edge("review_user_story_draft_turn",           "supervisor")
     g.add_edge("analyst_estimation_turn",                "supervisor")
     g.add_edge("review_product_backlog_turn",            "supervisor")
     g.add_edge("analyst_turn",                           "supervisor")
