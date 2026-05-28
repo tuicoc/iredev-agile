@@ -18,8 +18,9 @@ Python only normalizes inputs, advances runtime, and writes the artifact.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -29,8 +30,32 @@ from .base import BaseAgent, Tool, ToolResult
 logger = logging.getLogger(__name__)
 
 
-CoverageStatus = Literal["covered", "gap", "skipped"]
+CoverageStatus = Literal["covered", "covered_by_prior", "gap", "skipped"]
 AssumptionStance = Literal["supports", "weakens", "qualifies", "unclear"]
+
+
+# Words too generic to count toward prior-coverage detection. Keep short,
+# domain-neutral; the goal is to filter glue words, not domain vocabulary.
+_PRIOR_MATCH_STOPWORDS = {
+    "the", "and", "for", "with", "that", "this", "your", "what", "when", "where",
+    "from", "about", "have", "they", "their", "them", "into", "would", "could",
+    "should", "been", "being", "than", "then", "some", "such", "much", "many",
+    "only", "very", "also", "just", "more", "most", "make", "made", "make",
+    "take", "took", "give", "gave", "want", "wanted", "tell", "told", "feel",
+    "feels", "felt", "find", "found", "needs", "need", "needed", "still",
+    "even", "every", "each", "while", "after", "before", "between", "above",
+    "below", "during", "until", "without", "within", "across", "though",
+    "because", "however", "though", "rather",
+}
+
+
+def _significant_words(text: str) -> List[str]:
+    """Lowercase tokens >3 chars that are not glue words. Used by prior-match heuristic."""
+    return [
+        token
+        for token in re.findall(r"[a-z][a-z0-9\-]+", (text or "").lower())
+        if len(token) > 3 and token not in _PRIOR_MATCH_STOPWORDS
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -39,8 +64,8 @@ AssumptionStance = Literal["supports", "weakens", "qualifies", "unclear"]
 
 class CoverageEntry(BaseModel):
     point: str = Field(description="Agenda coverage point being judged.")
-    status: CoverageStatus = Field(description="covered when stakeholder evidence settled the point. gap when probed but not settled. skipped when prior evidence or item scope makes more probing unnecessary.")
-    evidence: str = Field(description="Brief evidence text: stakeholder fact for covered; failed probe reason for gap; prior-evidence or scope reason for skipped. Required for every entry.")
+    status: CoverageStatus = Field(description="covered when the stakeholder's CURRENT answer settled the point. covered_by_prior when an episode from the SAME perspective in a prior agenda item already settled the same lived ground (no new question needed). gap when probed but not settled. skipped when prior evidence or item scope makes more probing unnecessary.")
+    evidence: str = Field(description="Brief evidence text: stakeholder fact for covered; cited prior-episode trigger+decision for covered_by_prior; failed probe reason for gap; prior-evidence or scope reason for skipped. Required for every entry.")
 
 
 class AssumptionEvidenceEntry(BaseModel):
@@ -53,19 +78,16 @@ class AssumptionEvidenceEntry(BaseModel):
 class ELRecord(BaseModel):
     id: str = Field(description="Stable interview record id in EL-NNN format.")
     item: str = Field(description="Agenda item id (IT-NNN) that produced this record.")
-    vision_refs: List[str] = Field(default_factory=list, description="Vision ids (assumption / concern / scope) this exchange was meant to clarify.")
-    perspective: str = Field(description="Product role perspective interviewed.")
-    context: str = Field(description="Operating context shown to the stakeholder for this item.")
-    decision_target: Optional[str] = Field(default=None, description="What this exchange was meant to clarify downstream.")
-    close_when: str = Field(description="Stop condition used by the interviewer for this item.")
-    coverage_points: List[str] = Field(default_factory=list, description="Agenda evidence points owned by this item.")
-    coverage: List[CoverageEntry] = Field(default_factory=list, description="Per-point coverage judgment.")
-    signals: List[str] = Field(default_factory=list, description="Atomic stakeholder-stated facts as they were said. One independent fact per entry. Not paraphrases of each other, not synthesis across speakers.")
-    assumption_evidence: List[AssumptionEvidenceEntry] = Field(default_factory=list, description="Evidence about each assumption the answer touched.")
-    gaps: List[str] = Field(default_factory=list, description="Coverage points probed but unresolved. One entry = one concrete missing element.")
-    rule: Optional[str] = Field(default=None, description="Closure summary captured when the item settled. Empty when closing on gaps only.")
-    talk: List[Dict[str, Any]] = Field(default_factory=list, description="Question/answer turns captured for this item.")
-    status: Literal["answered", "partial", "skipped"] = Field(description="Final interview status for this agenda item.")
+    perspective: str = Field(description="Role perspective interviewed.")
+    scene: str = Field(description="Lived scene the agenda item described.")
+    close_when: str = Field(description="Stop condition used by the interviewer.")
+    frictions_to_probe: List[str] = Field(default_factory=list, description="Frictions the agenda item asked the interviewer to drill.")
+    coverage: List[CoverageEntry] = Field(default_factory=list, description="Per-friction verdict.")
+    assumption_evidence: List[AssumptionEvidenceEntry] = Field(default_factory=list, description="Evidence about each vision assumption the answer touched.")
+    gaps: List[str] = Field(default_factory=list, description="Frictions drilled but unresolved.")
+    rule: Optional[str] = Field(default=None, description="Closure summary when the item settled.")
+    talk: List[Dict[str, Any]] = Field(default_factory=list, description="Question/answer turns captured.")
+    status: Literal["answered", "partial", "skipped"] = Field(description="Final interview status.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -76,150 +98,121 @@ _REACT_ADDENDUM = """\
 TURN CONTROL
 - Inspect TURN STATUS first.
 - If Pending answer: yes → call record_answer.
-- If Pending answer: no and AGENDA STATUS: OPEN → call ask_question.
+- If Pending answer: no and AGENDA STATUS: OPEN → call ask_question
+  (or call record_answer with done=true for a saturation close once
+  the minimum-evidence budget has been met).
 - If AGENDA STATUS: COMPLETE → call conclude.
-- One tool call per turn. Closing one item does not complete the interview;
-  the supervisor advances you to the next item automatically.
+- One tool call per turn. Closing one item does not complete the
+  interview; the orchestrator advances you to the next item.
 
-QUESTION CRAFT (apply before ask_question)
-You are talking to a simulated person who lives the situation. They are not a
-designer, an analyst, or a reviewer. They cannot decide product scope; they
-can tell you what they experience.
 
-How to pick what to ask:
-- Look at the current item's coverage_points and vision_refs. Pick the one
-  open point whose settling would most change a downstream requirement, gap,
-  conflict, boundary, or first-release note.
-- If the prior answer was thin or moved off the point, ask the next question
-  that pulls back to the point you still need.
-- If a point was probed and the role could not answer, that is a gap — do not
-  keep probing the same way; either pivot to an adjacent point or close on
-  gap with a reason.
-- If the seed question assumes the stakeholder has already used a product that
-  the project description only proposes, translate it into the current problem
-  moment, comparable workaround, decision boundary, or minimum useful behavior.
-  Do not pretend usage history exists.
+YOUR JOB
 
-How to phrase the question:
-- One open question. Not yes/no, not either/or, not multi-part. No design or
-  feature-confirmation framing ("would you like…", "what features should…").
-- Open with the question itself. No thanks, recap, or praise.
-- The simulated person owns lived experience, not strategy. Ask about
-  situation, current workaround, consequence, boundary, exception, quality
-  expectation, or minimum useful behavior.
+You are running a CRITICAL-INCIDENT INTERVIEW. The agenda gives
+you a scene + a list of frictions worth landing in evidence.
+Your job: invite the role to recount a specific past incident,
+drill that incident until each friction has a concrete moment
+on record, then close. The stakeholder is reactive — they only
+answer. YOU decide what to ask, when to drill, when to pivot,
+when to close.
 
-Probing angles available to you (choose what the moment needs; you do not
-have to label or record which one you picked):
-- specify — drill into a vague detail (when, who, how often, with what,
-  inside which moment).
-- negate — when does the rule NOT apply, or should it be blocked?
-- stretch — boundary pressure: peak, simultaneity, absence, load, failure of
-  the normal path, unusual timing.
-- conflict — contrast a tension with prior dialogue, the Product Vision, or
-  another role's evidence. Name both sides neutrally.
-- why-deeper — causality, underlying reason, policy, or risk behind a stated
-  behavior.
-- critical-incident — ask for one concrete moment when the current situation
-  went badly, urgently, ambiguously, or with meaningful consequence.
-- ladder — ask why the named friction matters, then what the stakeholder does
-  next when it is not resolved.
-- boundary — ask what the product or resource should not decide, replace,
-  own, expose, or guarantee from this stakeholder's view.
 
-SIGNAL-DRIVEN PROBING (apply before choosing the next question)
-A surfaced signal is a concrete fact the stakeholder just named for the first
-time — a specific misconception, a specific workaround, a specific moment of
-failure, a specific role attribute, a specific consequence. Surface is not
-depth: the stakeholder named it, but the lived detail behind it (when, with
-whom, what happens next, what they tried, what they wish were different) is
-still implicit.
+HOW TO PICK THE NEXT QUESTION — READ THE CONTEXT YOU HAVE
 
-The temptation is to mark the coverage_point as covered and pivot to the next
-point. Don't, unless the lived detail behind the surfaced signal would not
-change any downstream requirement, gap, conflict, boundary, or release choice.
+You have two memory channels right now:
 
-Self-test before the next question: "Did the last answer name a concrete
-signal whose lived detail is still implicit, and would that detail change a
-downstream decision?" If yes, the next question drills into THAT signal —
-`specify` for the situation behind it, `critical-incident` for a real moment,
-`ladder` for why it matters and what happens next, `why-deeper` for the cause,
-`negate` for when it does not apply, `stretch` for boundary conditions, or
-`boundary` for ownership limits — before pivoting to a different
-coverage_point. Pivoting too early turns surface signals into shallow evidence
-the Distiller cannot lift into a requirement.
+- CURRENT DIALOGUE THIS SCENE — every question you have asked
+  and every answer the role has given inside this item.
+- PRIOR EPISODES — what THIS perspective already settled in
+  earlier items (recorded by the orchestrator when each item
+  closed).
 
-CLOSURE JUDGMENT (apply before record_answer.done = true)
-Your goal is lived evidence that supports, weakens, qualifies, or leaves each
-relevant assumption unclear — not assumption confirmation, and not the
-minimum number of turns.
+Before drafting your next question, read both. The question
+that earns a turn is the one that would surface evidence NOT
+YET ON RECORD — a new lived detail, a workaround the role
+mentioned but left vague, a friction the agenda named that the
+dialogue has not yet drilled, a consequence the role has not
+yet described. A question that re-asks an angle the prior
+turns already covered, in slightly different words, produces
+paraphrase — wasted budget.
 
-VERDICT REQUIRED FOR EACH COVERAGE_POINT
+If the role has named a workaround / manual fix / informal
+fallback and you have not yet drilled it, the workaround IS
+the next question. Workarounds are the fingerprint of an unmet
+capability and carry the richest evidence — do not pivot to a
+different friction while the workaround is still vague.
 
-Every coverage_point in the current item must receive ONE of three verdicts
-in the coverage array before done=true:
+The first turn of each item opens with the agenda's
+critical_incident_prompt (verbatim or lightly adapted to read
+naturally). It is meant to bring one specific past incident
+into the conversation. Subsequent turns stay inside that
+incident — the role's continuity rule keeps them there — and
+probe new angles on it.
 
-- covered  — the stakeholder's answer directly addressed the point. Quote or
-  summarize in CoverageEntry.evidence.
-- gap      — you ASKED a question targeting this point AND the stakeholder
-  could not settle it. Name the failed probe in CoverageEntry.evidence.
-- skipped  — the point is genuinely duplicated by another covered point,
-  represented by prior settled evidence, or out of scope for this item.
-  Name the reason in CoverageEntry.evidence.
 
-A coverage_point with NO verdict is an OMISSION — you did not address it.
-"Skipped by default" because you did not ask is not allowed; that is silent
-loss. Pursue the omitted point with one targeted follow-up, then assign the
-correct verdict (covered if the answer addresses it, gap if it cannot be
-settled).
+HOW TO PHRASE THE QUESTION
 
-Read the answer before judging coverage. Do not mark a point as skipped if
-the answer actually covers it. Do not mark a point as gap if the question
-did not target it — ask the targeted follow-up first.
+One question per turn. Open. Concrete. Past tense. No multi-
+part. No thanks / recap / praise at the start. Refuse to ask
+anything that asks the role to evaluate a proposed product,
+imagine future use, or describe a general pattern without a
+concrete incident anchor — those framings produce hypothetical
+or aggregated answers that downstream synthesis cannot lift.
 
-EXPANSION OVER CHECKLIST — dialogue value comes from what is surfaced
+Do not lift question phrasings from a template. Let the
+question emerge from what the role's most recent answer puts
+on the table; a question that does not fit the answer in front
+of you fails even if it is well-phrased in the abstract.
 
-The agenda's coverage_points are a FLOOR, not a ceiling. The value of
-dialogue over reading a document is what the stakeholder surfaces beyond
-the planned floor — a specific moment, a workaround, a quiet concern, a
-boundary they noticed, a tension that did not appear in the agenda.
 
-When the stakeholder names an unexpected lived detail outside the coverage
-list, ask ONE follow-up exploring it before pivoting back to the next
-planned coverage_point. A surfaced detail that becomes a signal is what
-dialogue is for. Do not pivot away from new lived evidence just to tick the
-next coverage_point.
+FRICTION COVERAGE
 
-done=true ONLY when ALL of these hold:
-- Every coverage_point has a verdict (covered/gap/skipped) with evidence
-  text — no omissions.
-- Recent answers have stopped surfacing new unexpected signals worth
-  exploring, OR the hard turn limit is reached.
-- The current task's minimum evidence turns have been met.
-- The recorded evidence is specific enough for Distiller to write at least
-  one product-owned obligation, boundary, conflict, or explicit gap without
-  inventing the missing object or acceptance condition.
+The agenda's `frictions_to_probe` is a checklist of what should
+land in evidence before you close — not a serial walk. Move
+through frictions in the order the dialogue invites; when an
+answer surfaces a friction further down the list, follow it;
+when the role surfaces a friction the agenda did not list,
+drill it too.
 
-done=false when:
-- A coverage_point remains without a verdict (omission). Ask the targeted
-  follow-up.
-- A useful point is still unsettled and one non-redundant question would
-  likely settle it. Ask that question.
-- The last answer surfaced a new lived detail worth one follow-up. Pursue
-  it.
+A friction is COMPLETE in the coverage list when:
+  - covered — the dialogue put a specific past incident on
+    record (what the role did, what happened, one consequence);
+  - covered_by_prior — a prior episode (PRIOR EPISODES section)
+    already settled this friction; cite the prior episode in
+    `evidence`;
+  - gap — you drilled the friction and the role could not give
+    a concrete incident (declined / no recall / no longer
+    encounters); name the failed drill;
+  - skipped — the friction is genuinely subsumed by another
+    covered friction in this same item; name the subsuming
+    friction.
 
-If you reach the hard turn limit with uncovered points still without
-verdict, mark them as explicit gaps with a clear "did not pursue due to
-turn limit" reason — explicit gaps are reviewable; silent omissions are
-not.
+No friction without a verdict before close. Skipping silently
+because you did not drill is a defect — explicit gap is the
+honest record.
 
-For each assumption touched by the answer, write one AssumptionEvidenceEntry
-with stance + evidence + implication.
 
-SIGNALS DISCIPLINE
-- signals are atomic stakeholder-stated facts. One independent fact per entry.
-- Do not paraphrase across speakers. Do not synthesize a fact combining two
-  answers. Do not write "the user said X" wrappers. If a fact appears twice
-  in dialogue, keep one entry.
+CLOSURE — EVIDENCE SATURATION
+
+Close when evidence has saturated, not when a turn count has
+been hit. Saturation = the last two answers stopped surfacing
+lived detail you would write down; the next question you can
+think to ask is a rephrase of an earlier one. When you reach
+that state, close via record_answer with done=true:
+
+- If a pending answer is in hand, that is the standard close.
+- If no fresh answer is pending and the minimum-evidence
+  budget is met, the orchestrator allows a SATURATION CLOSE:
+  call record_answer with done=true bringing the coverage and
+  assumption_evidence already grounded in the turns recorded.
+
+Do not close prematurely (a friction is still vague, a
+workaround is still un-drilled, a new lived detail surfaced in
+the last answer). Do not pad with hollow questions either —
+hollow re-asks are the saturation signal; act on it.
+
+For each vision assumption the dialogue touched, record one
+AssumptionEvidenceEntry (stance + evidence + implication).
 """
 
 
@@ -244,21 +237,40 @@ class InterviewerAgent(BaseAgent):
         self.register_tool(Tool(
             name="record_answer",
             description=(
-                "Persist the stakeholder's reply for the current agenda item, "
-                "judge coverage, and either keep the item open or close it.\n\n"
-                "Use when TURN STATUS says Pending answer: yes.\n\n"
+                "Persist the closure decision for the current agenda item: "
+                "judge friction coverage, record vision-assumption evidence, "
+                "and either keep the item open (done=false) or close it "
+                "(done=true). The raw Q/A talk is already appended to the "
+                "runtime item by the orchestrator; downstream synthesis "
+                "(distiller) reads the talk turns directly, so this tool "
+                "does not take a separate signals payload.\n\n"
+                "Use in three situations:\n"
+                "  - Pending answer: yes — judge whether the answer "
+                "saturates the frictions; set done=true to close or "
+                "done=false to keep drilling.\n"
+                "  - Prior-coverage short-circuit — every friction is "
+                "already settled by an earlier item with the same "
+                "perspective; close with done=true and every friction "
+                "marked covered_by_prior citing the prior episode.\n"
+                "  - Saturation close — the minimum-evidence budget is "
+                "met and recent turns have stopped surfacing new lived "
+                "detail; close with done=true even without a fresh "
+                "pending answer.\n\n"
                 "Arguments:\n"
-                "  done (bool, required): close the item when meaningfully covered.\n"
-                "  rule (str): closure summary; empty when closing on gaps only.\n"
-                "  signals (list[str]): atomic stakeholder-stated facts.\n"
-                "  assumption_evidence (list[dict]): each item is "
-                "{vision_ref, stance, evidence, implication}; "
-                "stance is supports | weakens | qualifies | unclear.\n"
-                "  coverage (list[dict]): each item is {point, status, evidence}; "
-                "status is covered | gap | skipped.\n"
-                "  gaps (list[str]): probed-but-unresolved coverage_points.\n"
-                'Input: {"done": bool, "rule": str, "signals": list, '
-                '"assumption_evidence": list, "coverage": list, "gaps": list}'
+                "  done (bool, required): close the item when meaningfully "
+                "covered.\n"
+                "  rule (str): closure summary capturing what the item "
+                "settled; empty when closing on gaps only.\n"
+                "  assumption_evidence (list[dict]): each entry is "
+                "{vision_ref, stance, evidence, implication}; stance is "
+                "supports | weakens | qualifies | unclear.\n"
+                "  coverage (list[dict]): each entry is "
+                "{point, status, evidence}; status is covered | "
+                "covered_by_prior | gap | skipped.\n"
+                "  gaps (list[str]): drilled-but-unresolved frictions.\n"
+                'Input: {"done": bool, "rule": str, '
+                '"assumption_evidence": list, "coverage": list, '
+                '"gaps": list}'
             ),
             func=self._tool_record_answer,
         ))
@@ -292,7 +304,7 @@ class InterviewerAgent(BaseAgent):
         raw_coverage: Optional[List[Any]],
     ) -> List[Dict[str, str]]:
         normalized: List[Dict[str, str]] = []
-        allowed = {"covered", "gap", "skipped"}
+        allowed = {"covered", "covered_by_prior", "gap", "skipped"}
         for raw in raw_coverage or []:
             if not isinstance(raw, dict):
                 continue
@@ -408,7 +420,8 @@ class InterviewerAgent(BaseAgent):
             str(entry.get("point") or "").strip().lower()
             for entry in coverage or []
             if (
-                str(entry.get("status") or "").strip().lower() in {"covered", "gap", "skipped"}
+                str(entry.get("status") or "").strip().lower()
+                in {"covered", "covered_by_prior", "gap", "skipped"}
                 and str(entry.get("evidence") or "").strip()
             )
         }
@@ -419,17 +432,179 @@ class InterviewerAgent(BaseAgent):
         coverage: Optional[List[Dict[str, Any]]],
     ) -> bool:
         return any(
-            str(entry.get("status") or "").strip().lower() == "covered"
+            str(entry.get("status") or "").strip().lower()
+            in {"covered", "covered_by_prior"}
             and str(entry.get("evidence") or "").strip()
             for entry in coverage or []
         )
 
+    @staticmethod
+    def _all_covered_by_prior(
+        coverage_points: Optional[List[str]],
+        coverage: Optional[List[Dict[str, Any]]],
+    ) -> bool:
+        points = [point.strip().lower() for point in coverage_points or [] if point.strip()]
+        if not points:
+            return False
+        prior_settled = {
+            str(entry.get("point") or "").strip().lower()
+            for entry in coverage or []
+            if str(entry.get("status") or "").strip().lower() == "covered_by_prior"
+            and str(entry.get("evidence") or "").strip()
+        }
+        return all(point in prior_settled for point in points)
+
     def _min_turns_for_item(self, item: Any) -> int:
-        return (
-            self._min_turns_per_assumption_item
-            if list(getattr(item, "vision_refs", []) or [])
-            else 1
+        # Single config-controlled minimum. The earlier vision_refs special
+        # case is obsolete now that agenda items do not carry typed refs.
+        return self._min_turns_per_assumption_item
+
+    # ── Episodic memory helpers ─────────────────────────────────────────────
+    #
+    # Each closed item produces one Episode keyed by the role perspective.
+    # When a later item opens with the same perspective, we recall those
+    # episodes so the interviewer can mark coverage_points already settled by
+    # a prior episode as covered_by_prior — saving a turn while preserving
+    # the audit trail.
+
+    def _prior_episodes(self, perspective: str) -> List[Dict[str, Any]]:
+        if not perspective or self.memory is None:
+            return []
+        try:
+            return self.memory.recall_episodes(entity_id=perspective, limit=30)
+        except Exception as exc:
+            logger.warning(
+                "[InterviewerAgent] recall_episodes failed for %r: %s",
+                perspective, exc,
+            )
+            return []
+
+    def _record_item_episode(self, item: Any, closed_via_prior: bool = False) -> None:
+        if self.memory is None:
+            return
+        perspective = (getattr(item, "perspective", "") or "").strip()
+        if not perspective:
+            return
+        # Episode trigger is the lived scene; decision is the closure rule
+        # the interviewer summarised. Talk turns themselves live on the
+        # runtime item; episodic memory carries the headline only.
+        decision = (getattr(item, "rule", "") or "").strip()
+        outcome_label = "closed_from_prior" if closed_via_prior else (
+            getattr(item, "status", "") or "answered"
         )
+        try:
+            self.memory.record_episode(
+                entity_id=perspective,
+                trigger=(
+                    f"item {getattr(item, 'id', '')}: "
+                    f"{getattr(item, 'scene', '') or '(no scene)'}"
+                ),
+                decision=decision or "(no rule captured)",
+                outcome=f"{outcome_label}: {decision or '(no rule)'}",
+            )
+        except Exception as exc:
+            logger.warning(
+                "[InterviewerAgent] record_episode failed for %r: %s",
+                perspective, exc,
+            )
+
+    @staticmethod
+    def _suggest_covered_by_prior(
+        coverage_points: List[str],
+        prior_episodes: List[Dict[str, Any]],
+    ) -> List[Dict[str, str]]:
+        """Heuristic: suggest which coverage_points have a prior episode worth checking.
+
+        Bag-of-significant-words overlap between each coverage_point and the
+        union of every episode's trigger + decision. A point is suggested
+        when ≥2 distinct significant words overlap with the BEST matching
+        episode (different sentences naming the same product object or
+        same activity tend to share at least two anchor nouns even with
+        different framing).
+
+        Deliberately permissive — this is only a SUGGESTION layer. The
+        interviewer must still read the prior episode and current
+        coverage_point and judge whether the prior actually settles the
+        same lived ground before marking covered_by_prior. False positives
+        are recoverable (interviewer probes anyway); false negatives are
+        not (silent duplicate work).
+        """
+        if not coverage_points or not prior_episodes:
+            return []
+        episode_bags: List[Tuple[Dict[str, Any], set]] = []
+        for ep in prior_episodes:
+            blob = f"{ep.get('trigger', '')} {ep.get('decision', '')}"
+            episode_bags.append((ep, set(_significant_words(blob))))
+        suggestions: List[Dict[str, str]] = []
+        for cp in coverage_points:
+            cp_words = _significant_words(cp)
+            if not cp_words:
+                continue
+            best_ep = None
+            best_overlap: List[str] = []
+            for ep, bag in episode_bags:
+                overlap = [w for w in cp_words if w in bag]
+                if len(overlap) > len(best_overlap):
+                    best_overlap = overlap
+                    best_ep = ep
+            if best_ep is None or len(best_overlap) < 2:
+                continue
+            suggestions.append({
+                "point": cp,
+                "evidence_hint": (
+                    f"prior episode (trigger: {best_ep.get('trigger', '')[:120]}…) "
+                    f"already settled: {best_ep.get('decision', '')[:200]}"
+                ),
+                "matched_words": ", ".join(best_overlap),
+            })
+        return suggestions
+
+    @staticmethod
+    def _strong_match(cp: str, episode_blob: str) -> bool:
+        """A coverage_point is strongly matched by an episode blob when the
+        overlap covers at least half of the coverage_point's significant words
+        (with a floor of 3 words). Used for the auto-skip ROUTING decision —
+        deliberately stricter than the suggestion heuristic so false positives
+        do not trap process() in a record_answer loop the LLM cannot exit.
+        """
+        cp_words = _significant_words(cp)
+        if len(cp_words) < 3:
+            return False
+        bag = set(_significant_words(episode_blob))
+        overlap = sum(1 for w in cp_words if w in bag)
+        return overlap >= max(3, (len(cp_words) + 1) // 2)
+
+    def _prior_coverage_analysis(
+        self,
+        item: Any,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]], bool]:
+        """Return (episodes, suggestions, fully_covered_by_prior).
+
+        - suggestions: lenient (≥2 word overlap) — surfaced in the task as
+          hints; the LLM judges per point whether to mark covered_by_prior.
+        - fully_covered_by_prior: STRICT — every coverage_point has at least
+          one prior episode that strongly matches it (≥50% overlap, floor 3
+          words). Triggers the auto-skip route in process(); rarely fires but
+          when it does the EndUser would almost certainly retell the same
+          scene, so the skip is safe.
+        """
+        perspective = (getattr(item, "perspective", "") or "").strip()
+        coverage_points = list(getattr(item, "frictions_to_probe", []) or [])
+        episodes = self._prior_episodes(perspective)
+        if not coverage_points or not episodes:
+            return episodes, [], False
+        suggestions = self._suggest_covered_by_prior(coverage_points, episodes)
+        # Strong-match check for routing: every point must have at least one
+        # episode whose trigger+decision strongly matches it.
+        fully = True
+        for cp in coverage_points:
+            if not any(
+                self._strong_match(cp, f"{ep.get('trigger', '')} {ep.get('decision', '')}")
+                for ep in episodes
+            ):
+                fully = False
+                break
+        return episodes, suggestions, fully
 
     # ── Tools ────────────────────────────────────────────────────────────────
 
@@ -437,7 +612,6 @@ class InterviewerAgent(BaseAgent):
         self,
         done: bool = False,
         rule: str = "",
-        signals: Optional[List[str]] = None,
         assumption_evidence: Optional[List[Any]] = None,
         coverage: Optional[List[Any]] = None,
         gaps: Optional[List[str]] = None,
@@ -446,10 +620,57 @@ class InterviewerAgent(BaseAgent):
     ) -> ToolResult:
         state = state or {}
         answer = (state.get("enduser_answer") or "").strip()
-        if not answer:
+        normalized_coverage_preview = self._normalize_coverage(coverage)
+        coverage_points_preview: List[str] = []
+        turns_recorded_preview = 0
+        min_turns_preview = self._min_turns_per_assumption_item
+        runtime_preview = self._load_runtime(state)
+        if runtime_preview is not None:
+            current_preview = runtime_preview.current_item()
+            if current_preview is not None:
+                coverage_points_preview = list(
+                    getattr(current_preview, "frictions_to_probe", []) or []
+                )
+                turns_recorded_preview = len(
+                    getattr(current_preview, "talk", []) or []
+                )
+                min_turns_preview = self._min_turns_for_item(current_preview)
+        skip_via_prior = bool(
+            not answer
+            and done
+            and coverage_points_preview
+            and self._all_covered_by_prior(coverage_points_preview, normalized_coverage_preview)
+        )
+        # Saturation close: model has heard enough on this scene and
+        # closes by calling record_answer with done=true even though no
+        # fresh answer is pending. Allowed once min_turns for the item
+        # is met and the model brings meaningful evidence (coverage or
+        # assumption_evidence) so closure is grounded.
+        saturation_close = bool(
+            not answer
+            and done
+            and not skip_via_prior
+            and turns_recorded_preview >= min_turns_preview
+            and (
+                normalized_coverage_preview
+                or (assumption_evidence or [])
+            )
+        )
+        if not answer and not (skip_via_prior or saturation_close):
+            # No fresh answer is pending and the call did not satisfy a
+            # closure path. End this turn cleanly; the next turn falls
+            # through to ask_question because _disabled_prior_skip
+            # blocks process() from re-routing.
             return ToolResult(
-                observation="[record_answer] Pending answer is empty. Call ask_question instead.",
-                should_return=False,
+                observation=(
+                    "[record_answer] Pending answer is empty and the call "
+                    "did not satisfy a closure path (no covered_by_prior "
+                    "marks, and either min_turns not yet met or no "
+                    "meaningful coverage / evidence supplied). Reverting "
+                    "to ask_question on the next turn."
+                ),
+                state_updates={"_disabled_prior_skip": True},
+                should_return=True,
             )
 
         runtime = self._load_runtime(state)
@@ -467,15 +688,32 @@ class InterviewerAgent(BaseAgent):
                 should_return=True,
             )
 
-        item.answer = answer
-        item.talk.append({
-            "question": item.question or "",
-            "answer": answer,
-            "recorded_at": datetime.now().isoformat(),
-        })
-        item.signals = list(item.signals) + [
-            signal for signal in (signals or []) if signal and signal not in item.signals
-        ]
+        if answer:
+            item.answer = answer
+            item.talk.append({
+                "question": item.question or "",
+                "answer": answer,
+                "recorded_at": datetime.now().isoformat(),
+            })
+        elif skip_via_prior:
+            # No question was asked because prior episodes already cover every
+            # point. Record a synthetic talk entry so the audit trail shows the
+            # item closed via prior-episode short-circuit rather than silent
+            # omission.
+            item.talk.append({
+                "question": "(no question asked — closed from prior episodes)",
+                "answer": "(no answer; coverage cited from prior items with same perspective)",
+                "recorded_at": datetime.now().isoformat(),
+            })
+        elif saturation_close:
+            # No new question was asked because the model judged the scene
+            # had reached evidence saturation. Record a synthetic talk entry
+            # so the audit trail shows the closure path explicitly.
+            item.talk.append({
+                "question": "(no question asked — closed on evidence saturation)",
+                "answer": "(no answer; evidence captured from prior turns of this scene)",
+                "recorded_at": datetime.now().isoformat(),
+            })
         normalized_assumption_evidence = self._normalize_assumption_evidence(
             assumption_evidence,
             getattr(item, "vision_refs", []),
@@ -515,7 +753,16 @@ class InterviewerAgent(BaseAgent):
         min_turns = self._min_turns_for_item(item)
         min_turns_met = turns_recorded >= min_turns
         reached_limit = turns_recorded >= self._max_turns_per_item
-        done = bool(requested_done and (min_turns_met or reached_limit))
+        # Prior-coverage short-circuit and saturation-close bypass the
+        # min-turn gate. The saturation path is already gated upstream
+        # (saturation_close was only computed True when min_turns_met +
+        # meaningful coverage / evidence were present), so accepting it
+        # here without re-checking min_turns is consistent.
+        done = bool(
+            (requested_done and (min_turns_met or reached_limit))
+            or skip_via_prior
+            or saturation_close
+        )
 
         if not done and not reached_limit:
             depth_note = ""
@@ -540,10 +787,18 @@ class InterviewerAgent(BaseAgent):
 
         item.rule = settled_rule or None
         item.status = "answered" if done else "partial"
+        self._record_item_episode(item, closed_via_prior=skip_via_prior)
         runtime.advance()
         next_item = runtime.current_item()
 
-        status_text = "closed" if done else "marked partial at the item turn limit"
+        if skip_via_prior:
+            status_text = "closed without a new question (covered_by_prior)"
+        elif saturation_close:
+            status_text = "closed on evidence saturation (no new lived detail surfacing)"
+        elif done:
+            status_text = "closed"
+        else:
+            status_text = "marked partial at the item turn limit"
         return ToolResult(
             observation=f"Answer recorded and item {item.id} {status_text}.",
             state_updates={
@@ -554,6 +809,7 @@ class InterviewerAgent(BaseAgent):
                 "item_turn_count": 0,
                 "conversation": [],
                 "_agenda_needs_question": True,
+                "_disabled_prior_skip": False,
             },
             should_return=True,
         )
@@ -572,8 +828,8 @@ class InterviewerAgent(BaseAgent):
             return ToolResult(
                 observation=(
                     "[ask_question] There is a pending stakeholder answer that has "
-                    "not been recorded. Call record_answer first to persist signals, "
-                    "assumption_evidence, and coverage; then ask the next question."
+                    "not been recorded. Call record_answer first to persist "
+                    "assumption_evidence and coverage; then ask the next question."
                 ),
                 should_return=False,
             )
@@ -649,18 +905,15 @@ class InterviewerAgent(BaseAgent):
                 record = ELRecord(
                     id=f"EL-{index:03d}",
                     item=item.id,
-                    vision_refs=list(getattr(item, "vision_refs", []) or []),
                     perspective=item.perspective,
-                    context=item.context,
-                    decision_target=getattr(item, "decision_target", "") or None,
+                    scene=getattr(item, "scene", "") or "",
                     close_when=item.close_when,
-                    coverage_points=list(getattr(item, "coverage_points", []) or []),
+                    frictions_to_probe=list(getattr(item, "frictions_to_probe", []) or []),
                     coverage=[
                         CoverageEntry(**entry)
                         for entry in (getattr(item, "coverage", []) or [])
                         if isinstance(entry, dict)
                     ],
-                    signals=list(item.signals or []),
                     assumption_evidence=[
                         AssumptionEvidenceEntry(**entry)
                         for entry in (getattr(item, "assumption_evidence", []) or [])
@@ -761,26 +1014,18 @@ class InterviewerAgent(BaseAgent):
 
     @staticmethod
     def _vision_refs_detail(vision: Dict[str, Any], vision_refs: List[str]) -> str:
-        if not vision_refs:
-            return ""
-        wanted = {ref.strip() for ref in vision_refs if ref and ref.strip()}
-        if not wanted:
-            return ""
+        """Render every vision element (assumptions / concerns / scope) so
+        the interviewer can recognise when a stakeholder utterance touches
+        one and record an AssumptionEvidenceEntry against its id.
 
-        assumption_hits = [
-            item for item in (vision.get("assumptions") or [])
-            if item.get("id") in wanted
-        ]
-        concern_hits = [
-            item for item in (vision.get("concerns") or [])
-            if item.get("id") in wanted
-        ]
-        scope_hits = [
-            item for item in (vision.get("scope") or [])
-            if item.get("id") in wanted
-        ]
-
-        if not (assumption_hits or concern_hits or scope_hits):
+        Agenda items no longer carry typed refs (the lived-scene design
+        decoupled them), so we expose the full vision menu rather than a
+        pre-selected subset.
+        """
+        assumptions = list(vision.get("assumptions") or [])
+        concerns = list(vision.get("concerns") or [])
+        scope = list(vision.get("scope") or [])
+        if not (assumptions or concerns or scope):
             return ""
 
         def _source_line(item: Dict[str, Any]) -> str:
@@ -790,22 +1035,25 @@ class InterviewerAgent(BaseAgent):
                 return ""
             return f"    source: [{lens}] {anchor}".rstrip()
 
-        lines = ["VISION ELEMENTS TO CLARIFY:"]
-        for item in assumption_hits:
+        lines = [
+            "VISION ELEMENTS (touch one by id when the dialogue gives "
+            "stance evidence on it — record an AssumptionEvidenceEntry):"
+        ]
+        for item in assumptions:
             lines.append(f"  - {item.get('id')} [assumption]: {item.get('statement', '')}")
             if item.get("why_it_matters"):
                 lines.append(f"    why_it_matters: {item.get('why_it_matters')}")
             source_line = _source_line(item)
             if source_line:
                 lines.append(source_line)
-        for item in concern_hits:
+        for item in concerns:
             lines.append(f"  - {item.get('id')} [concern]: {item.get('theme', '')}")
             if item.get("rationale"):
                 lines.append(f"    rationale: {item.get('rationale')}")
             source_line = _source_line(item)
             if source_line:
                 lines.append(source_line)
-        for item in scope_hits:
+        for item in scope:
             lines.append(f"  - {item.get('id')} [scope]: {item.get('item', '')}")
             if item.get("reason"):
                 lines.append(f"    reason: {item.get('reason')}")
@@ -840,6 +1088,9 @@ class InterviewerAgent(BaseAgent):
             list(getattr(item, "vision_refs", []) or []),
         )
         pending = bool((state.get("enduser_answer") or "").strip())
+        prior_episodes, prior_suggestions, fully_covered_by_prior = (
+            self._prior_coverage_analysis(item)
+        )
 
         sections = [
             "AGENDA STATUS: OPEN",
@@ -860,22 +1111,66 @@ class InterviewerAgent(BaseAgent):
             sections.extend(["", assumption_detail])
         if role_memory:
             sections.extend(["", "SESSION MEMORY:", role_memory])
+        if prior_episodes:
+            sections.extend([
+                "",
+                f"PRIOR EPISODES FROM SAME PERSPECTIVE ({len(prior_episodes)}):",
+            ])
+            for ep in prior_episodes[-6:]:
+                trigger = (ep.get("trigger") or "").strip()
+                decision = (ep.get("decision") or "").strip()
+                outcome = (ep.get("outcome") or "").strip()
+                sections.append(f"  - scene: {trigger}")
+                if decision:
+                    sections.append(f"    settled: {decision}")
+                if outcome:
+                    sections.append(f"    outcome: {outcome}")
+        if prior_suggestions:
+            sections.extend([
+                "",
+                "COVERAGE POINTS LIKELY ALREADY SETTLED BY PRIOR (heuristic suggestion):",
+            ])
+            for s in prior_suggestions:
+                sections.append(f"  - point: {s['point']}")
+                sections.append(f"    evidence hint: {s['evidence_hint']}")
+                if s.get("matched_words"):
+                    sections.append(f"    matched words: {s['matched_words']}")
+            if fully_covered_by_prior:
+                sections.extend([
+                    "",
+                    "PRIOR-COVERAGE SHORT-CIRCUIT:",
+                    "  Every coverage_point on this item appears already settled by a",
+                    "  prior episode from the same perspective. Call record_answer NOW",
+                    "  with done=true and one coverage entry per point with",
+                    "  status=covered_by_prior + evidence citing the prior episode.",
+                    "  Do NOT ask a new question — the EndUser will not produce new",
+                    "  evidence for ground already covered, and re-asking burns a turn.",
+                ])
+            else:
+                sections.extend([
+                    "",
+                    "PARTIAL PRIOR COVERAGE:",
+                    "  Some points may be settled by prior; some still need a fresh",
+                    "  probe. Open the next question targeted at an uncovered point;",
+                    "  in record_answer assign status=covered_by_prior to the matched",
+                    "  points (citing the prior episode) and probe only the rest.",
+                ])
 
-        coverage_points = list(getattr(item, "coverage_points", []) or [])
+        frictions_to_probe = list(getattr(item, "frictions_to_probe", []) or [])
         min_turns = self._min_turns_for_item(item)
         turns_recorded = len(getattr(item, "talk", []) or [])
         sections.extend([
             "",
-            "FOCUS CONTEXT:",
-            f"  {item.context}",
+            "SCENE:",
+            f"  {getattr(item, 'scene', '') or '(not provided)'}",
             "",
             "PRIVATE INTERVIEWER CONTEXT:",
-            f"  seed_question: {item.seed_question}",
+            f"  critical_incident_prompt: {getattr(item, 'critical_incident_prompt', '') or '(not provided)'}",
             f"  close_when: {item.close_when}",
-            "  coverage_points:",
+            "  frictions_to_probe:",
             *(
-                [f"    - {point}" for point in coverage_points]
-                if coverage_points
+                [f"    - {friction}" for friction in frictions_to_probe]
+                if frictions_to_probe
                 else ["    - (not provided; use close_when as the fallback stop condition)"]
             ),
             f"  notes: {item.notes or '(not provided)'}",
@@ -924,16 +1219,31 @@ class InterviewerAgent(BaseAgent):
         return "\n".join(sections)
 
     def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        # Orchestration decides which tool the LLM must call this turn. The
-        # condition is deterministic; the reasoning (signals / coverage /
-        # assumption_evidence / question wording) is still done by the LLM.
-        #   pending answer + agenda open       → record_answer
-        #   pending answer + agenda complete   → record_answer (persist first)
-        #   no pending     + agenda complete   → conclude
-        #   no pending     + agenda open       → ask_question
+        # Orchestration sets a tool_choice when the next move is unambiguous;
+        # otherwise it leaves the choice to the model so the model can decide
+        # to drill further or close the item on evidence saturation.
+        #   pending answer                               → force record_answer
+        #   agenda complete                              → force conclude
+        #   no pending + open + fully prior-covered      → force record_answer
+        #   no pending + open + min_turns NOT yet met    → force ask_question
+        #   no pending + open + min_turns met            → auto (model picks
+        #                                                  ask vs saturation-
+        #                                                  close via record)
         runtime = self._load_runtime(state)
         pending = bool((state.get("enduser_answer") or "").strip())
         agenda_complete = bool(runtime is not None and runtime.elicitation_complete)
+        fully_prior_covered = False
+        prior_skip_blocked = bool(state.get("_disabled_prior_skip"))
+        current_item = None
+        if (
+            not pending
+            and runtime is not None
+            and not agenda_complete
+            and not prior_skip_blocked
+        ):
+            current_item = runtime.current_item()
+            if current_item is not None:
+                _, _, fully_prior_covered = self._prior_coverage_analysis(current_item)
 
         def _force(tool_name: str) -> Dict[str, Any]:
             return {"type": "function", "function": {"name": tool_name}}
@@ -942,8 +1252,28 @@ class InterviewerAgent(BaseAgent):
             tool_choice: Any = _force("record_answer")
         elif agenda_complete:
             tool_choice = _force("conclude")
+        elif fully_prior_covered:
+            tool_choice = _force("record_answer")
         else:
-            tool_choice = _force("ask_question")
+            # No pending answer, open agenda. If the minimum-evidence budget
+            # for this item is not yet met, force a question so the drill
+            # has room to surface evidence. Once the minimum is met, leave
+            # the choice to the model — it may ask another question or
+            # close on saturation by calling record_answer with done=true.
+            min_turns = (
+                self._min_turns_for_item(current_item)
+                if current_item is not None
+                else self._min_turns_per_assumption_item
+            )
+            turns_recorded = (
+                len(getattr(current_item, "talk", []) or [])
+                if current_item is not None
+                else 0
+            )
+            if turns_recorded < min_turns:
+                tool_choice = _force("ask_question")
+            else:
+                tool_choice = "auto"
 
         return self.react(
             state=state,
