@@ -236,6 +236,19 @@ def parse_args() -> argparse.Namespace:
         help="Automatically approve all HITL gates without prompting.",
     )
     p.add_argument(
+        "--mode",
+        type=str,
+        default="fidelity",
+        choices=["fidelity", "coverage"],
+        help=(
+            "Vision generation mode (default: fidelity). "
+            "'fidelity' runs only stated+implied passes (Pass 1 + Pass 2). "
+            "'coverage' also runs Pass 3 (INFERRED expansion from generic "
+            "product knowledge — adds roles, forks, concerns, scope edges "
+            "the project intent did not name)."
+        ),
+    )
+    p.add_argument(
         "--artifact-dir",
         type=str,
         default=None,
@@ -323,92 +336,86 @@ def build_artifacts(
 # ---------------------------------------------------------------------------
 # Display helpers
 # ---------------------------------------------------------------------------
+
+_LENS_ICON = {"stated": "✓", "implied": "~", "inferred": "?"}
+_STATUS_ICON = {
+    "ready": "✓", "needs_refinement": "~", "needs_split": "↔",
+    "needs_spike": "◉", "invest_failed": "✗", "oversized": "!",
+    "needs_human_input": "H",
+}
+_CONF_ICON = {"confirmed": "✓", "inferred": "~"}
+
+
 def display_product_vision(vision: dict) -> None:
     section("ARTIFACT: product_vision")
-    print(f"  Description     : {vision.get('description', '?')}")
-
-    frame = vision.get("discovery_frame") or {}
-    if frame:
-        print("\n  Discovery Frame:")
-        if frame.get("intent_summary"):
-            print(f"    Intent        : {frame.get('intent_summary')}")
-        if frame.get("first_release_hypothesis"):
-            print(f"    First release : {frame.get('first_release_hypothesis')}")
-
-    assumptions = vision.get("assumptions") or []
-    if assumptions:
-        print(f"\n  Assumptions ({len(assumptions)}):")
-        for assumption in assumptions:
-            roles = ", ".join(assumption.get("clarifier_roles") or [])
-            suffix = f" [{roles}]" if roles else ""
-            source = assumption.get("source_kind") or "?"
-            print(f"    {assumption.get('id','?')} ({source}){suffix}: {assumption.get('statement','')}")
-
     roles = vision.get("roles") or []
-    if roles:
-        print(f"\n  Roles ({len(roles)}):")
-        duties = vision.get("duties") or []
-        for role in roles:
-            role_duties = [
-                duty for duty in duties
-                if duty.get("role", "").strip().lower() == role.get("name", "").strip().lower()
-            ]
-            print(
-                f"    [{role.get('kind','?')}] {role.get('name','?')} "
-                f"- {len(role_duties)} duty(s)"
-            )
-            for duty in role_duties[:3]:
-                print(f"      • {duty.get('need') or duty.get('rule') or duty.get('risk')}")
-
+    assumptions = vision.get("assumptions") or []
     concerns = vision.get("concerns") or []
-    if concerns:
-        print(f"\n  Concerns ({len(concerns)}):")
-        for concern in concerns:
-            print(f"    • {concern.get('theme') or concern.get('quality') or concern.get('id','')}")
-
     scope = vision.get("scope") or []
-    if scope:
-        print(f"\n  Scope ({len(scope)}):")
-        for item in scope:
-            print(f"    • {item.get('item', '')}")
+    known_signals = vision.get("known_signals") or []
+    lens_counts: Dict[str, int] = {}
+    for asm in assumptions:
+        l = asm.get("lens", "?")
+        lens_counts[l] = lens_counts.get(l, 0) + 1
+    lens_str = ", ".join(f"{l}={n}" for l, n in sorted(lens_counts.items()))
+    print(f"  Description   : {vision.get('description', '?')}")
+    print(f"  Signals       : {len(known_signals)}")
+    print(f"  Roles         : {len(roles)}")
+    print(f"  Assumptions   : {len(assumptions)}  ({lens_str})")
+    print(f"  Concerns      : {len(concerns)}")
+    print(f"  Scope / OOS   : {len(scope)}")
 
-    capabilities = vision.get("capabilities") or []
-    entities = vision.get("entities") or []
-    links = vision.get("links") or []
-    print(
-        "\n  Supporting map  : "
-        f"{len(capabilities)} capability(s), {len(entities)} entity coordinate(s), {len(links)} link(s)"
-    )
+
+def _flatten_item_refs(it: dict) -> list:
+    flat: list = []
+    cref = (it.get("concern_ref") or "").strip()
+    if cref:
+        flat.append(cref)
+    flat.extend(it.get("assumption_refs") or [])
+    flat.extend(it.get("scope_refs") or [])
+    # Fall back to legacy flat field if present (covers older artifacts loaded
+    # via --start-at).
+    if not flat:
+        flat = list(it.get("vision_refs") or [])
+    return flat
+
+
+def display_elicitation_agenda(agenda: dict) -> None:
+    section("ARTIFACT: elicitation_agenda_artifact")
+    items = agenda.get("items") or []
+    all_refs: set = set()
+    for it in items:
+        all_refs.update(_flatten_item_refs(it))
+    print(f"  Items         : {len(items)}  |  vision refs covered: {len(all_refs)}")
+    for it in items:
+        cref = (it.get("concern_ref") or "").strip() or "?"
+        asms = ", ".join(it.get("assumption_refs") or []) or "(none)"
+        scope_list = it.get("scope_refs") or []
+        scope_part = f"  scope=[{', '.join(scope_list)}]" if scope_list else ""
+        cps = len(it.get("coverage_points") or [])
+        print(
+            f"    [{it.get('id','?')}] {it.get('perspective','?'):<30}"
+            f"  concern={cref}  asm=[{asms}]{scope_part}  coverage_points={cps}"
+        )
+
 
 def display_requirement_list(rl: dict) -> None:
     section("ARTIFACT: requirement_list")
     reqs = rl.get("items") or []
     conflicts = rl.get("conflicts") or []
-    by_type: Dict[str, int] = {}
-    for r in reqs:
-        rt = r.get("type", "unknown")
-        by_type[rt] = by_type.get(rt, 0) + 1
-    print(f"  Synthesised at  : {rl.get('synthesised_at', '?')}")
-    print(f"  Total           : {len(reqs)}")
-    for t, c in by_type.items():
-        print(f"    {t:15s}: {c}")
-    if reqs:
-        print("\n  All requirements:")
-        for r in reqs:
-            icon = {"confirmed": "*", "inferred": "~", "excluded": "x"}.get(r.get("status", ""), ".")
-            print(
-                f"    {icon} [{r.get('id','?')}] "
-                f"({r.get('type','?')}, prio={r.get('priority','?')}) "
-                f"[{r.get('focus_kind') or r.get('quality_theme') or '?'}] "
-                f"{r.get('statement','')}"
-            )
     gaps = rl.get("gaps") or []
-    if gaps:
-        print(f"\n  Gaps ({len(gaps)}):")
-        for gap in gaps:
-            print(f"    - {gap}")
+    by_type: Dict[str, int] = {}
+    by_conf: Dict[str, int] = {}
+    for r in reqs:
+        by_type[r.get("type", "?")] = by_type.get(r.get("type", "?"), 0) + 1
+        by_conf[r.get("confidence", "?")] = by_conf.get(r.get("confidence", "?"), 0) + 1
+    type_str = "  ".join(f"{t}={n}" for t, n in sorted(by_type.items()))
+    conf_str = "  ".join(f"{c}={n}" for c, n in sorted(by_conf.items()))
+    print(f"  Total         : {len(reqs)}  |  conflicts: {len(conflicts)}  |  gaps: {len(gaps)}")
+    print(f"  By type       : {type_str}")
+    print(f"  Confidence    : {conf_str}")
     if conflicts:
-        print(f"\n  Conflicts blocking approval ({len(conflicts)}):")
+        print(f"\n  Conflicts:")
         for conflict in conflicts:
             display_conflict(conflict, indent=4)
 
@@ -433,28 +440,27 @@ def display_conflict(conflict: dict, indent: int = 2) -> None:
     if refs:
         print(f"{pad}  Refs: {', '.join(refs)}")
 
+
 def display_product_backlog(artifact: dict) -> None:
     section("ARTIFACT: product_backlog")
     items = artifact.get("items") or []
-    methodology = artifact.get("methodology") or {}
-    print(f"  Total items    : {artifact.get('total_items', len(items))}")
-    print(f"  Estimation     : {methodology.get('estimation', 'N/A')}")
-    print(f"  Prioritization : {methodology.get('prioritization', 'N/A')}")
-    if items:
-        print("\n  Ranked backlog:")
-        for item in items[:15]:
-            rank = item.get('priority_rank', '?')
-            wsjf = item.get('wsjf_score')
-            pts = item.get('story_points', '?')
-            wsjf_str = f"WSJF={wsjf:.2f}" if wsjf else "WSJF=N/A"
-            print(
-                f"    #{rank} [{item.get('id','?')}] "
-                f"{wsjf_str} pts={pts} "
-                f"({item.get('type','?')}) "
-                f"{item.get('title','')[:60]}"
-            )
-        if len(items) > 15:
-            print(f"    ... (+{len(items) - 15} more)")
+    qw = artifact.get("quality_warnings") or {}
+    total_warn = sum(len(v) for v in qw.values() if isinstance(v, list))
+    print(f"  Total items   : {artifact.get('total_items', len(items))}  |  sp: {artifact.get('total_story_points', '?')}")
+    print(f"  Ready={artifact.get('ready_count',0)}  refine={artifact.get('needs_refinement_count',0)}  "
+          f"split={artifact.get('needs_split_count',0)}  spike={artifact.get('needs_spike_count',0)}  "
+          f"invest_fail={artifact.get('invest_failed_count',0)}  oversized={artifact.get('oversized_count',0)}")
+    if total_warn:
+        print(f"  Warnings      : {total_warn}")
+
+
+def display_validated_product_backlog(artifact: dict) -> None:
+    section("ARTIFACT: validated_product_backlog")
+    items = artifact.get("items") or []
+    stats = artifact.get("refinement_stats") or {}
+    print(f"  Total PBIs    : {stats.get('total_pbis', len(items))}")
+    print(f"  Ready PBIs    : {stats.get('ready_count', artifact.get('ready_count', '?'))}")
+    print(f"  Total AC      : {stats.get('total_ac', '?')}")
 
 # ---------------------------------------------------------------------------
 # HITL interactive / auto-approve handler
@@ -484,17 +490,25 @@ def collect_review_decision(updates: tuple, auto_approve: bool) -> Dict[str, Any
                 for conflict in conflicts:
                     display_conflict(conflict, indent=4)
         elif review_type == "elicitation_agenda":
-            summary = artifact_data.get("summary") or {}
-            missing = summary.get("assumption_missing") or []
+            items_list = artifact_data.get("items") or []
+            # Collect all vision refs covered across items (concern + assumptions + scope)
+            all_refs: set = set()
+            for it in items_list:
+                all_refs.update(_flatten_item_refs(it))
             print(
-                f"\n  {summary.get('total', 0)} agenda item(s) "
-                f"covering {summary.get('assumption_covered', 0)}/"
-                f"{summary.get('assumption_expected', 0)} assumption(s)"
+                f"\n  {len(items_list)} agenda item(s)  "
+                f"covering {len(all_refs)} vision ref(s): {', '.join(sorted(all_refs)) or '(none)'}"
             )
-            if summary.get("items_per_assumption"):
-                print(f"  Items per assumption: {summary.get('items_per_assumption')}")
-            if missing:
-                print(f"  Missing assumptions: {', '.join(missing)}")
+            for it in items_list:
+                cref = (it.get("concern_ref") or "").strip() or "?"
+                asms = ", ".join(it.get("assumption_refs") or []) or "(none)"
+                scope_list = it.get("scope_refs") or []
+                scope_part = f" scope=[{', '.join(scope_list)}]" if scope_list else ""
+                print(
+                    f"    [{it.get('id','?')}] concern={cref} asm=[{asms}]{scope_part}"
+                    f"  →  {it.get('perspective','?')}"
+                    f"  |  {it.get('decision_target','')}"
+                )
         elif review_type == "product_backlog":
             items = artifact_data.get("items") or []
             print(f"\n  {len(items)} user stories")
@@ -617,6 +631,7 @@ def build_initial_state(args, preloaded_artifacts=None):
         "project_description": project_desc,
         "input_guidance":      input_guidance,
         "visionary_contract":  visionary_contract,
+        "vision_mode":         args.mode,
         "system_phase":        "sprint_zero_planning",
         "artifacts":           artifacts,
         "conversation":        [],
@@ -635,9 +650,22 @@ def build_initial_state(args, preloaded_artifacts=None):
 # ---------------------------------------------------------------------------
 def run_workflow(initial_state, config, args):
     from src.orchestrator import build_graph
-    preloaded_keys = set(initial_state.get("artifacts", {}).keys())
+    # printed_artifacts tracks every artifact that has been displayed so far.
+    # Nodes often return the full artifacts dict (not just new entries), so
+    # without this guard the same artifact would be printed on every subsequent
+    # node update.
+    printed_artifacts: set = set(initial_state.get("artifacts", {}).keys())
     final_artifacts = dict(initial_state.get("artifacts", {}))
     end_artifact = args.end_at
+
+    # Display functions keyed by artifact name.
+    _DISPLAY: Dict[str, Any] = {
+        "product_vision":              display_product_vision,
+        "elicitation_agenda_artifact": display_elicitation_agenda,
+        "requirement_list":            display_requirement_list,
+        "product_backlog":             display_product_backlog,
+        "validated_product_backlog":   display_validated_product_backlog,
+    }
 
     # If the end artifact is already present, stop immediately
     if end_artifact and end_artifact in final_artifacts:
@@ -685,15 +713,15 @@ def run_workflow(initial_state, config, args):
 
                             new_arts = updates.get("artifacts") or {}
                             for name, content in new_arts.items():
-                                if name not in preloaded_keys:
-                                    if name == "product_vision":
-                                        display_product_vision(content)
-                                    elif name == "requirement_list":
-                                        display_requirement_list(content)
-                                    elif name == "product_backlog":
-                                        display_product_backlog(content)
-                                    else:
-                                        print(f"\n  Artifact produced: {name}")
+                                if name in printed_artifacts:
+                                    # Already displayed — skip to avoid duplicates.
+                                    continue
+                                printed_artifacts.add(name)
+                                display_fn = _DISPLAY.get(name)
+                                if display_fn:
+                                    display_fn(content)
+                                else:
+                                    print(f"\n  Artifact produced: {name}")
 
                             errors = updates.get("errors")
                             if errors:
@@ -754,6 +782,7 @@ def main():
 
     print(f"  Session      : {args.session}")
     print(f"  DB           : {args.db}")
+    print(f"  Vision mode  : {args.mode}")
     print(f"  Auto-approve : {args.auto_approve}")
 
     config = {

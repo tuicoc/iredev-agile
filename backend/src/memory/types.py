@@ -9,7 +9,8 @@ class MemoryType(str, Enum):
     EPISODIC            = "episodic"             # event-log per PR / sprint across sessions
     SEMANTIC            = "semantic"             # fact / profile store with semantic search
     EPISODIC_SEMANTIC   = "episodic_semantic"    # Sprint Agent: both combined
-    SHORT_TERM_SEMANTIC = "short_term_semantic"  # InterviewerAgent: buffer + belief-state facts
+    SHORT_TERM_SEMANTIC = "short_term_semantic"  # buffer + belief-state facts
+    SHORT_TERM_EPISODIC = "short_term_episodic"  # InterviewerAgent / EndUserAgent: buffer + per-perspective episode log
 
 
 class Episode(BaseModel):

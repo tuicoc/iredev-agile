@@ -27,25 +27,41 @@ iredev:
       max_react_iterations: 10
 
     interviewer:
-      memory_type: "short_term"
+      # Buffer for the current ReAct turn + episodic store keyed by perspective.
+      # Episodes (trigger / decision / outcome) recorded when an item closes are
+      # read by both interviewer and enduser on later items with the same role
+      # so the same lived ground is not probed twice.
+      memory_type: "short_term_episodic"
       max_react_iterations: 10
       custom_params:
-        min_turns_per_assumption_item: 3
-        max_turns_per_item: 5
+        # Operational budget for per-scene drilling. min sets the floor
+        # before saturation-close is allowed; max is the hard ceiling.
+        # min=2 lets the interviewer close early once evidence has
+        # saturated (avoids the rephrase loop seen when min was higher
+        # than the dialogue could legitimately fill); max=10 keeps room
+        # for deep drills when the role keeps surfacing new lived
+        # detail. Both are budgets, not targets — the interviewer's
+        # evidence-saturation principle decides when to actually close.
+        min_turns_per_assumption_item: 2
+        max_turns_per_item: 10
 
     enduser:
-      memory_type: "short_term"
+      memory_type: "short_term_episodic"
       max_react_iterations: 10
 
     distiller:
       memory_type: "short_term"
       max_react_iterations: 10
       custom_params:
-        # Max concurrent map-phase LLM calls (one per interview record).
-        # I/O bound; threads release the GIL during HTTP wait so this works
-        # without changing the sync ThinkModule. 3 keeps peak concurrent
-        # demand under typical provider TPM windows while still parallelising.
-        max_parallel: 3
+        # Max concurrent Pass 1 LLM calls. Pass 1 is now batched by
+        # perspective (typically 5 batches × ~14K input tokens each), so
+        # running them in parallel produces a large concurrent token burst
+        # that low-tier OpenAI accounts reject with 429 (per-second TPM
+        # window or concurrent-request cap, depending on tier).
+        # Sequential = 5 calls × ~5-10s ≈ 30-50s total, no burst, safe
+        # across every tier. Raise to 2 only when the provider tier is
+        # known to absorb the burst (Tier 2+ for gpt-5.4-mini family).
+        max_parallel: 1
         # Retry budget for transient rate-limit (429) responses across all
         # synthesis-phase calls. Exponential backoff: 5s, 15s, 45s.
         rate_limit_retries: 3

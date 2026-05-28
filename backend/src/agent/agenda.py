@@ -1,23 +1,36 @@
 """
 agenda.py - AgendaAgent
 
-AgendaAgent reads the reviewed Product Vision and produces an elicitation
-agenda. Every item owns one evidence job — one perspective answering from
-inside one scene to settle one downstream decision.
+AgendaAgent reads the reviewed Product Vision and produces a
+**lived-scenes** elicitation agenda. Each item names one concrete
+moment in one role's life today where multiple frictions converge.
+The interview opens with a critical-incident invitation and drills
+each friction to a specific past incident, workaround, or explicit
+gap.
+
+Each item carries:
+- perspective (role name from vision.roles);
+- scene (triggering moment + working activity);
+- frictions_to_probe (the points the interviewer will drill);
+- critical_incident_prompt (the opening invitation);
+- close_when (stop condition).
+
+Vision IDs do NOT travel with items. The vision is read as the
+strategic-decision menu the reviewer answers in HITL; the agenda
+is the lived-experience menu the stakeholder answers in interview.
+Python audit matches vision-entry text against scene+frictions
+text informationally so reviewers can see likely coverage —
+matches are never required.
 
 Execution: two sequential extract_structured passes.
-- Pass 1 (DRAFT): vision → items skeleton (vision_refs, perspective,
-  context, decision_target, seed_question, merge_anchor, notes). The LLM
-  focuses on which vision IDs to attach, which role lives the scene most
-  directly, what fork the dialogue should move.
-- Pass 2 (COVERAGE): given Pass 1 items (with Python-assigned IT-NNN
-  IDs), produce coverage_points and close_when per item. The LLM focuses
-  exclusively on writing today's lived facts that pass the TODAY GATE.
+- Pass 1 (DRAFT): vision → scene items.
+- Pass 2 (CLOSE-WHEN): produce one close_when sentence per item.
 
 Python responsibilities:
 - assigns IT-NNN ids deterministically;
-- generates the per-id audit table from items + vision (no LLM drift);
-- merges Pass 2 coverage entries back into the items by id;
+- merges Pass 2 close_when entries back by id;
+- writes the informational coverage audit (role exact match,
+  assumption / concern / scope text overlap);
 - assembles the final Agenda + AgendaRuntime.
 """
 
@@ -36,42 +49,47 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Final Agenda schema
+# Final Agenda schema (assumption-backed, concern-led)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class AgendaItem(BaseModel):
     id: str = Field(default="", description="Stable id IT-NNN; Python assigns.")
-    vision_refs: List[str] = Field(default_factory=list, description="IDs from the reviewed Product Vision (assumptions, concerns, or scope) this item clarifies.")
-    perspective: str = Field(description="Canonical role name from vision.roles who can answer from lived use or direct impact.")
-    context: str = Field(description="A concrete operating moment in the role's life today.")
-    decision_target: str = Field(description="One short phrase naming the downstream design fork the evidence should move.")
-    seed_question: str = Field(description="One open invitation into the scene the role already inhabits.")
-    coverage_points: List[str] = Field(default_factory=list, description="2-5 stakeholder-livable facts from today's life.")
-    close_when: str = Field(description="Short stop condition summarizing when coverage_points are met.")
-    merge_anchor: str = Field(default="", description="One concrete sentence — filled only when vision_refs has more than one entry; empty when exactly one.")
+    perspective: str = Field(description="Canonical role name from vision.roles.")
+    scene: str = Field(description="One concrete moment in the role's life today: triggering event + the activity they are doing when it happens.")
+    frictions_to_probe: List[str] = Field(default_factory=list, description="Concrete past moments the interviewer will drill inside this scene — points where the role's behavior was shaped by what was present or absent, drillable to a specific past incident.")
+    critical_incident_prompt: str = Field(description="One opening invitation asking the role to recount a specific past incident in this scene.")
+    close_when: str = Field(description="Stop condition: when each friction has been drilled to a specific past incident or explicit gap.")
     notes: str = Field(default="", description="Optional reviewer-facing note for this item.")
 
 
 class Agenda(BaseModel):
-    notes: str = Field(description="Reviewer-facing audit notes. Python generates the per-id audit table; LLM commentary appends below.")
+    notes: str = Field(description="Reviewer-facing audit notes. Python generates the vision-coverage audit; LLM commentary appends below.")
     items: List[AgendaItem] = Field(default_factory=list)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Runtime shapes (consumed by InterviewerAgent / EndUserAgent)
+# Runtime shapes (consumed by InterviewerAgent / EndUserAgent / DistillerAgent)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class AgendaRuntimeItem(BaseModel):
+    """Runtime view of an agenda item.
+
+    Wraps the LLM-authored fields with the runtime state the
+    interviewer + enduser loop produces (signals, talk turns,
+    assumption_evidence, gaps, coverage). Downstream agents read
+    ``perspective`` / ``scene`` / ``frictions_to_probe`` /
+    ``critical_incident_prompt`` for context. ``vision_refs`` is a
+    legacy slot kept empty; assumption_evidence is recorded by id
+    against the vision artifact directly.
+    """
     id: str
-    vision_refs: List[str] = Field(default_factory=list)
     perspective: str
-    context: str
-    decision_target: str = ""
-    seed_question: str
+    scene: str
+    frictions_to_probe: List[str] = Field(default_factory=list)
+    critical_incident_prompt: str
     close_when: str
-    coverage_points: List[str] = Field(default_factory=list)
-    merge_anchor: str = ""
     notes: str = ""
+    vision_refs: List[str] = Field(default_factory=list)
 
     status: Literal["pending", "answered", "partial", "skipped"] = "pending"
     question: Optional[str] = None
@@ -102,25 +120,43 @@ class AgendaRuntime(BaseModel):
         items_raw = artifact.get("items") or []
         if not items_raw:
             return cls(items=[])
-        first = items_raw[0]
-        if "talk" in first:
-            return cls(**artifact)
+        is_runtime = "talk" in items_raw[0]
+        items: List[AgendaRuntimeItem] = []
+        for raw in items_raw:
+            # Tolerate both new (scene / critical_incident_prompt /
+            # frictions_to_probe) and legacy (context / seed_question /
+            # coverage_points) artifact shapes; the new shape is the
+            # canonical one going forward.
+            kwargs: Dict[str, Any] = {
+                "id": raw.get("id", ""),
+                "perspective": raw.get("perspective", ""),
+                "scene": raw.get("scene") or raw.get("context") or "",
+                "frictions_to_probe": list(
+                    raw.get("frictions_to_probe") or raw.get("coverage_points") or []
+                ),
+                "critical_incident_prompt": (
+                    raw.get("critical_incident_prompt")
+                    or raw.get("seed_question")
+                    or ""
+                ),
+                "close_when": raw.get("close_when", ""),
+                "notes": raw.get("notes", ""),
+                "vision_refs": list(raw.get("vision_refs") or []),
+            }
+            if is_runtime:
+                for key in (
+                    "status", "question", "answer", "talk", "rule",
+                    "signals", "gaps", "assumption_evidence", "coverage",
+                ):
+                    if key in raw and raw[key] is not None:
+                        kwargs[key] = raw[key]
+            items.append(AgendaRuntimeItem(**kwargs))
         return cls(
-            items=[
-                AgendaRuntimeItem(
-                    id=raw.get("id", ""),
-                    vision_refs=list(raw.get("vision_refs") or []),
-                    perspective=raw.get("perspective", ""),
-                    context=raw.get("context", ""),
-                    decision_target=raw.get("decision_target", ""),
-                    seed_question=raw.get("seed_question", ""),
-                    close_when=raw.get("close_when", ""),
-                    coverage_points=list(raw.get("coverage_points") or []),
-                    merge_anchor=raw.get("merge_anchor", ""),
-                    notes=raw.get("notes", ""),
-                )
-                for raw in items_raw
-            ]
+            items=items,
+            current_index=artifact.get("current_index", 0) if is_runtime else 0,
+            elicitation_complete=(
+                artifact.get("elicitation_complete", False) if is_runtime else False
+            ),
         )
 
     def current_item(self) -> Optional[AgendaRuntimeItem]:
@@ -143,24 +179,21 @@ class AgendaRuntime(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class DraftItem(BaseModel):
-    vision_refs: List[str] = Field(default_factory=list, description="IDs from the vision this item clarifies.")
     perspective: str = Field(description="Canonical role name from vision.roles.")
-    context: str = Field(description="A concrete operating moment in the role's life today.")
-    decision_target: str = Field(description="One short phrase naming the first-release design fork the evidence should move.")
-    seed_question: str = Field(description="One open invitation into today's scene.")
-    merge_anchor: str = Field(default="", description="Filled only when vision_refs has more than one entry.")
+    scene: str = Field(description="One concrete moment in the role's life today: triggering event + the activity they are doing when it happens.")
+    frictions_to_probe: List[str] = Field(default_factory=list, description="Friction points the interviewer should drill inside this scene.")
+    critical_incident_prompt: str = Field(description="One opening invitation asking the role to recount a specific past incident in this scene.")
     notes: str = Field(default="", description="Optional reviewer-facing note.")
 
 
 class DraftPass(BaseModel):
-    notes: str = Field(default="", description="Reviewer-facing commentary about coverage and merge decisions made during the draft.")
+    notes: str = Field(default="", description="Reviewer-facing commentary about scene selection, lived moments considered, and any stakes left out.")
     items: List[DraftItem] = Field(default_factory=list)
 
 
 class ItemCoverage(BaseModel):
-    item_id: str = Field(description="The IT-NNN id assigned to the draft item this coverage entry corresponds to.")
-    coverage_points: List[str] = Field(default_factory=list, description="2-5 stakeholder-livable facts from today's life that pass the TODAY GATE.")
-    close_when: str = Field(description="Short stop condition summarizing when the coverage_points are met.")
+    item_id: str = Field(description="The IT-NNN id of the drafted item this entry corresponds to.")
+    close_when: str = Field(description="Stop condition: when each friction has been drilled to a specific past incident or explicit gap.")
 
 
 class CoveragePass(BaseModel):
@@ -168,230 +201,174 @@ class CoveragePass(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Pass 1 prompt — DRAFT (skeleton items)
+# Pass 1 prompt — DRAFT (assumption-backed, concern-led skeleton)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _DRAFT_BODY = """\
-PASS 1 OF 2 — DRAFT THE AGENDA ITEMS (SKELETON)
+PASS 1 OF 2 — DRAFT THE AGENDA AS LIVED SCENES
 
-This pass produces the structural skeleton of each item: which
-vision IDs it clarifies, which canonical role answers, what scene
-in their life today, what fork the dialogue moves, what seed
-question opens the moment, and (when refs > 1) what shared
-first-release decision warrants the merge.
+The agenda directs an interview whose downstream output is a
+catalog of product capabilities. Your job: pick the SCENES in
+roles' lives today that are rich enough to surface that catalog
+when a stakeholder is invited to recount a specific past incident
+in the scene.
 
-This pass does NOT produce `coverage_points` or `close_when`.
-Pass 2 will fill those once IDs are assigned.
-
-CORE PRINCIPLES
-
-P1. THE PRODUCT DOES NOT EXIST YET. Scenes must be moments the
-role has already lived TODAY. Forks must be first-release
-decisions the dialogue could move.
-
-P2. VISION IS GROUND TRUTH. Use only IDs and role names that
-appear in the vision below.
-
-P3. ONE EVIDENCE JOB PER ITEM. One role in one concrete scene
-answering once would settle one downstream decision.
+Each item names ONE scene — a concrete moment in ONE role's life
+where multiple frictions converge. The interviewer will open with
+a critical-incident invitation and drill each friction until a
+specific past incident, workaround, or explicit gap is on record.
 
 
-REVIEWED PRODUCT VISION (ground truth — IDs and role names are
-the cross-reference vocabulary)
+REVIEWED PRODUCT VISION (ground truth — read for context; do not
+echo vision IDs into items)
 {vision}
 
 
-vision_refs — POINTERS INTO THE VISION
-
-The ID(s) this item clarifies. Any mix of assumption / concern /
-scope IDs is valid.
-- One id may map to one OR several items — depends on how many
-  roles have distinct stake (see ITEM MULTIPLICITY).
-- Several ids may share one item — fill `merge_anchor` when so.
-- Assumptions, concerns, AND scope items earn items:
-  * an assumption with an uncertain fork → item;
-  * a concern with an unclear acceptable boundary → item;
-  * a scope id whose boundary edge could surprise the role at
-    runtime → item.
-Do not default to assumption-only.
+THE PRODUCT DOES NOT EXIST YET. Every scene must be a moment the
+role has already lived. Anything that references the proposed
+product is not a scene — it is design conversation, which the
+interview does not run. Frictions are concrete past moments where
+the role's behavior was shaped by what was present or absent in
+their life as it is today.
 
 
-ITEM MULTIPLICITY — ONE VISION ELEMENT, MULTIPLE ITEMS
-
-Default is NOT 1:1 (one vision_ref → one item). Default is:
-
-  Emit one item per ROLE WITH DISTINCT STAKE in the vision element.
-
-A role has distinct stake when answering the element from THAT
-role's lived position would produce different evidence (different
-moment, different concern, different boundary) than from another
-role. Cross-domain patterns:
-
-- A concern with `affected_roles=[<role A>, <role B>, <role C>]`
-  spawns up to 3 items (one per role), unless their lived evidence
-  fully overlaps in moment / object / outcome. Default: emit per
-  role.
-
-- An assumption about an experienced phenomenon usually splits into
-  a user-side item AND an observer/intermediary-side item (the
-  TWO-ITEM rule applies here).
-
-- A scope boundary (OOS) affects roles working at the boundary
-  edge differently — a user perceives the boundary, a doer
-  enforces or aligns with it. Emit per side.
-
-When in doubt whether two roles share the same evidence: emit two
-items. A reviewer can fold a duplicate later; a reviewer cannot
-recover a role whose perspective was never probed.
+VISION IS GROUND TRUTH, NOT A 1:1 DRIVER. Use only role names
+that appear in vision.roles. Vision.assumptions, vision.concerns,
+and vision.scope are the strategic forks, quality dimensions, and
+boundaries the team is debating — read them so your scenes pick
+moments that LIKELY surface evidence on them. Do NOT iterate
+assumptions × roles to manufacture items, and do NOT attach
+vision IDs to items; scenes touch the vision through lived
+content, not through declared references. A scene drafted only
+to "cover" a vision id becomes a hypothetical conversation the
+interviewer cannot drill — skip it.
 
 
-ROLE COVERAGE GUARANTEE — every stated/implied role MUST appear
-
-vision.roles is the inventory of who matters. EACH role with
-lens=stated or lens=implied must appear as `perspective` in ≥1
-item. Silent omission is a defect.
-
-If you cannot place a role, explain why in `notes` using this
-shape:
-
-  "ROLE-NN <name> not used as perspective because <specific reason
-  — e.g. fully represented by ROLE-MM's evidence in IT-NNN sharing
-  the same product object, trigger, and outcome>."
-
-Generic acceptable reasons: full evidence overlap with another
-emitted item, or the role's stake is captured through a different
-role's lived view (rare — usually distinct roles have distinct
-stake).
-
-Roles with lens=inferred (from generic product knowledge, not
-named in the input) may be skipped without a note.
+WHAT A SCENE HOLDS. A useful scene reads as: when <triggering
+moment> happens, <role> is in the middle of <working activity>
+and runs into <a few frictions>. The triggering moment is what
+makes the role start the activity; the activity is what they
+are doing when frictions hit; the frictions are the concrete
+points the interviewer will drill. A scene without frictions is
+observation — drop. A scene whose frictions all collapse to one
+root friction is too narrow — re-frame to include the
+surrounding moment so the drill yields more than one capability.
 
 
-perspective — MOST CONTEXT-FITTING ROLE
+DISTINCTNESS — SCENES EARN THEIR PLACE BY DIFFERING. Two scenes
+are paraphrases of one moment when, if drilled, they would
+surface the same lived evidence: the role tries the same thing,
+falls back to the same workaround, notices the same absence,
+faces the same consequence. Two scenes are genuinely distinct
+when the drill on each would surface evidence the other would
+not. The dimensions on which two scenes can differ are not fixed
+in advance — read each pair you draft and ask: drilled, what
+would each one show that the other would not? The dimension
+that emerges from that comparison is the dimension that
+justifies keeping both. If your answer is "essentially the same
+evidence in different words", collapse. When you keep a near-
+pair distinct, you may name the dimension in `notes` if it would
+help the reviewer see the reasoning — but the dimension itself
+is yours to identify; there is no fixed axis list to walk.
 
-Use only role names that appear in `vision.roles`. Never invent.
+A role inhabits multiple distinct moments around the product —
+different points in time, different counterparts they engage
+with, different things they are trying to reach or avoid,
+different positions the same activity puts them in. Multi-scene
+per role is the natural outcome; a role with only one scene
+needs a reason (the role genuinely lives one recurring moment
+relevant to this product, or every other moment they would live
+is already covered by another role's scene). State the reason
+in `notes` so the reviewer can verify.
 
-When the item's context describes a moment one specific role in
-the vision lives more directly than any other, perspective MUST
-be that role — even if a broader role nominally fits. Choosing
-the broader role when the vision separated out a narrower one
-erases the distinction.
-
-Self-test: "Among the roles in vision.roles, which one lives
-this exact moment most directly?" Use that role.
-
-USER OVER OBSERVER (a stronger form of the same rule)
-
-When the vision_ref names a USER-PERCEPTIBLE phenomenon — what a
-user perceives, understands, finds clear or confusing, trusts or
-mistrusts, expects, is surprised by, recovers from — perspective
-MUST be the user who experiences the phenomenon, NOT an observer
-who watches the user (an intermediary, a coach, an advisor, a
-support contact, a teacher watching a learner, a manager hearing
-complaints, anyone who reports on the user's experience).
-
-The observer can witness the phenomenon but their evidence is
-third-person about the user. Downstream synthesis cannot lift
-"the observer reports that the user is confused" into product-
-side acceptance criteria without inventing what the product
-should display, expose, or preserve. The user can say "today
-when I see X, here is what I think" — the observer can only say
-"users often think X". First-person evidence translates; third-
-person observation does not.
-
-TWO-ITEM RULE (when both user and observer have stakes)
-
-When a vision_ref names BOTH a user-perceptible phenomenon AND
-an observer-owned decision related to it, emit TWO items:
-
-  Item U: perspective = the user who experiences the phenomenon;
-          decision_target = how the product changes what the user
-          sees, understands, or can act on.
-
-  Item O: perspective = the observer / intermediary;
-          decision_target = what the observer themselves must do,
-          check, escalate, or align with.
-
-The two items have different audiences, different product
-objects, and different scenes. Do not collapse them — collapsing
-erases the user side, which is the harder side to evidence later.
-
-Default test: read the vision_ref aloud and ask "does a user end
-up seeing, doing, deciding, or feeling something different when
-this is true?" If yes, the user-side item is required, regardless
-of whether an observer-side item is also required. Emitting only
-the observer-side item is the failure mode this rule prevents.
-
-If NO canonical role can speak to a vision id from lived use or
-direct impact, leave the id unassigned in your items list. Python
-will mark it gap-named in the audit.
+Walk every role in vision.roles (including the inferred ones)
+and consider their plausible moments before settling. A role
+with zero scenes leaves a vision-named stake unprobed; zero
+scenes is acceptable only when the reason is specific in `notes`
+(state which structural responsibility the role holds that does
+not surface as a lived moment around the product, or which
+existing scene already covers the role's runtime experience).
+Let the count of scenes emerge from how many genuinely distinct
+moments the roles actually inhabit; do not target a number, do
+not artificially constrain to one-per-role either.
 
 
-context — TODAY'S SCENE
-
-A concrete operating moment in the role's life TODAY: current
-problem, existing workaround, comparable tool, decision point that
-triggers the need. Read your draft aloud and ask "has the role
-already lived this moment?" If you assume product usage that does
-not exist, rewrite.
-
-
-decision_target — A FIRST-RELEASE DESIGN FORK
-
-One short phrase naming a concrete first-release decision the
-evidence is meant to move. A real decision_target names a fork a
-developer could implement two different ways depending on what
-the dialogue surfaces.
-
-Self-test: "Could a reader of decision_target name two different
-first-release builds that the dialogue's answer would steer
-between?" If no, rewrite.
-
-Hallmarks of a weak decision_target: a single quality keyword
-alone ("<X> clarity"); a noun + "potential"; phrasings like
-"support for <role>" / "understanding of <topic>"; meta-phrasings
-like "informs requirements". Rewrite as "<A> vs <B>" over a
-concrete first-release artifact (format, placement, handoff,
-error boundary, cadence, scope edge).
+BREADTH ACROSS THE VISION. After drafting the set, scan it as a
+whole: do the scenes collectively touch a wide set of vision
+elements (roles, assumptions, concerns, scope), or do they
+cluster on one or two leaving others silent? If they cluster,
+the agenda has gone vertical — many scenes drilling one corner
+of the design space — and re-balance by replacing or splitting
+toward elements the current draft does not yet touch. Coverage
+stays anchored to the vision — do not invent axes the vision
+does not raise. The vision (after its own coverage walks) is the
+breadth menu; the agenda serves that breadth.
 
 
-seed_question — OPEN INVITATION INTO TODAY'S SCENE
-
-Asks what the role does / notices / decides / wishes TODAY — not
-what they would want from a hypothetical product.
-Self-test: "Could the role answer this without ever having seen
-the product we are proposing?" If no, rewrite.
-Avoid yes/no, either/or, design framing, confirmation framing.
-
-
-merge_anchor — ONLY WHEN vision_refs HAS MORE THAN ONE ENTRY
-
-One concrete sentence with named perspective, scene, and shared
-first-release decision:
-  "One answer from <perspective> in <scene> would settle
-   <evidence A> and <evidence B> because <shared first-release
-   decision>."
-The shared decision must be a concrete first-release choice, not
-vague glue.
-Both splits and merges need named anchors; do not split for
-symmetry, do not merge for compression. 1:1 is the common case.
+FRICTION DIVERSITY ACROSS SCENES. A role's life around the
+product surfaces friction in genuinely different kinds of moment
+— what they try and what breaks, what they cannot see or know,
+what costs them effort or risk, what depends on other people,
+what shifts when constraints change, what they fall back on
+when the path they would prefer is unavailable. Read your full
+set of frictions across all scenes and ask: are they sampling
+that breadth, or are they many costumes of one pain-pattern? If
+one pain-pattern dominates, the dialogue will keep returning the
+same kind of evidence and the requirement list will get one
+capability stated many ways. Re-balance by reshaping some scenes
+so their frictions honestly produce a different kind of pain
+the role's life can produce.
 
 
-notes (this pass) — reviewer commentary only
+USER OVER OBSERVER — perspective rule. When the lived frictions
+are user-perceptible (confusion, mistrust, surprise, recovery,
+effort, delay, error), the user is the perspective for that
+scene. An observer or authority can witness the phenomenon, but
+their evidence about it is third-person — downstream synthesis
+cannot turn "the observer reports the user is confused" into
+product-side acceptance criteria. When both the user and an
+observer/authority have stake in the same theme, draft two
+distinct scenes (one per perspective); the observer's scene is
+about their own activity (their decision, their workflow), not
+their report on the user.
 
-Use the notes field for substantive commentary: which merges /
-splits you made and why, any vision id you intentionally did not
-attach and why, any role you considered as a perspective and
-ruled out. Python will generate the per-id audit table separately
-— do NOT duplicate it here.
 
+WRITING FIELDS
 
-WHAT YOU MUST NOT WRITE IN PASS 1
+`perspective`: the role name from vision.roles whose life
+contains this scene. One name, no invention.
 
-- coverage_points (Pass 2)
-- close_when (Pass 2)
-- IT-NNN ids (Python)
-- audit format "<ID> → IT-XXX" (Python)
+`scene`: one short paragraph — triggering moment + working
+activity + enough texture that a reader can picture the role
+in it. Read aloud and ask: has the role lived this moment
+today, before any product was built? If not, rewrite.
+
+`frictions_to_probe`: the friction points the interviewer will
+drill inside this scene. Each one names a concrete past moment
+where the role's behavior was shaped by what was present or
+absent — what got in their way, what they fell back on, what
+they could not settle. Read each and ask: could the role
+recount this as a specific past incident? If the wording reads
+as a design wish ("they need X", "they would like Y") rather
+than a lived moment, rewrite or drop.
+
+`critical_incident_prompt`: one opening invitation asking the
+role to recount a SPECIFIC PAST INCIDENT in this scene. Past
+tense, concrete, open. Self-test: could the role answer this
+without ever having seen the product we are proposing? If no,
+rewrite. Avoid yes/no framing, design framing ("would you
+use…"), hypothetical framing ("imagine if…"), aggregate framing
+("how often do users…").
+
+`notes`: reviewer-facing commentary. Use it to record any roles
+you considered and ruled out (no scene rich enough), any vision
+forks you read as strategic-HITL-only (the dialogue cannot
+settle them by reporting today), any tension between two scenes
+you considered merging or splitting, and any dimension name you
+would give a near-pair you kept distinct.
+
+`close_when` and `id` are not written here — Pass 2 produces
+close_when; Python assigns IT-NNN.
 """
 
 
@@ -400,86 +377,43 @@ WHAT YOU MUST NOT WRITE IN PASS 1
 # ─────────────────────────────────────────────────────────────────────────────
 
 _COVERAGE_BODY = """\
-PASS 2 OF 2 — WRITE COVERAGE FOR EACH DRAFTED ITEM
+PASS 2 OF 2 — WRITE THE STOP CONDITION FOR EACH DRAFTED ITEM
 
-The agenda items below have been drafted with IDs assigned. Your
-single task: for EACH item, produce coverage_points (2-5
-entries) and a close_when summary. You do not touch the other
-fields.
+The agenda items below have been drafted with IDs assigned. For
+each item, produce one `close_when` sentence — the interviewer's
+stop condition. Touch no other field.
 
-CORE PRINCIPLES
+A close_when names when the interviewer has heard enough on this
+scene. Under critical-incident drilling, "enough" means every
+friction in `frictions_to_probe` has either been drilled to a
+specific past incident (with the role's workaround or response
+on record) OR has been explicitly logged as a gap (the role
+declined, could not recall, or no longer encounters that
+friction).
 
-P1. THE PRODUCT DOES NOT EXIST YET. Every coverage_point is a
-fact the role can say TODAY — current problem, existing
-workaround, comparable tool, decision they already face. If the
-sentence references the proposed product (its name, its feature,
-its tool), the role cannot truthfully say it today — rewrite.
-
-P2. EACH COVERAGE_POINT IS ONE COMPLETE LIVED FACT. Open from the
-role's verb mentally ("I tried …", "I noticed …", "I gave up
-when …", "I wished …", "I decided …", "I got blocked by …", "I
-worked around …"), then trim to a self-contained sentence with
-concrete detail. Stub fragments that trail off ("I tried X
-because…", "I noticed Y when…", "I usually do Z like…") are
-incomplete — finish them.
+A strong close_when reads in one short sentence, uses past-tense
+framing, and ties stop to the frictions list — the reader can
+see, from the sentence alone, which evidence ends the drill. A
+weak close_when names a count, a checklist tick, or a vague
+sufficiency criterion ("when enough has been heard", "when N
+points are collected") — the reader cannot tell from the
+sentence when to stop. Rewrite weak ones. Do not lift a phrasing
+from another item; let each close_when fit the frictions of its
+own scene.
 
 
-REVIEWED PRODUCT VISION (for reference, do not modify)
+REVIEWED PRODUCT VISION (read for context; do not echo)
 {vision}
 
 
-DRAFTED ITEMS — fill coverage for each by item_id
+DRAFTED ITEMS
 {items}
-
-
-coverage_points — TODAY'S LIVED FACTS (per item, 2-5 entries)
-
-The TODAY GATE applies to EVERY item — assumption-referenced,
-concern-referenced, AND scope-referenced. For a scope item, the
-coverage_points are still TODAY's friction with the current
-state, NOT how the role imagines the proposed product will sit
-beside the existing thing.
-
-Verb-head self-test, applied per entry: "Could the role say this
-sentence today, BEFORE the product is built?" If no, rewrite.
-
-Completeness self-test: "Does the sentence end with concrete
-detail, or does it trail off ('...because...', '...when...',
-'...like...', '...such as...')?" If it trails off, finish it.
-
-Common red flags — rewrite immediately:
-- The sentence names the proposed product or one of its features.
-- The sentence describes a reaction to using the proposed product.
-- The sentence ends with a connective and no detail.
-- The noun head is researcher jargon (criteria, instances,
-  experiences of, preferences for, strategies for, understanding
-  of, common X, comfort level, perceptions of, engagement levels,
-  accounts of, use cases for).
-
-For an item whose vision_refs include a scope/boundary id (OOS-),
-remember the scene is the role bumping into TODAY's existing
-state at the boundary — not comparing it to a future product. For
-example, "I read the existing reference and got stuck at <X>" /
-"I expected the existing material to cover <Y> but it didn't" /
-"I asked <today's authority> about <boundary> and they said <Z>".
-
-The smallest set whose settling moves the item's decision_target
-— typically 3-5 entries. Do not pad.
-
-
-close_when — STOP CONDITION
-
-A short readable sentence summarizing when the coverage_points
-above are met (what pattern across stakeholders signals enough
-has been heard).
 
 
 OUTPUT FORMAT
 
-Produce `coverages` — a list with one entry per drafted item.
-Each entry has `item_id` (the IT-NNN id of the drafted item) and
-the `coverage_points` + `close_when` you wrote for it. Cover
-EVERY drafted item; do not skip any.
+Produce `coverages` — one entry per drafted item, identified by
+`item_id`. Cover every item; do not skip any.
 """
 
 
@@ -537,12 +471,10 @@ class AgendaAgent(BaseAgent):
         items_summary = [
             {
                 "item_id": item.id,
-                "vision_refs": item.vision_refs,
                 "perspective": item.perspective,
-                "context": item.context,
-                "decision_target": item.decision_target,
-                "seed_question": item.seed_question,
-                "merge_anchor": item.merge_anchor,
+                "scene": item.scene,
+                "frictions_to_probe": item.frictions_to_probe,
+                "critical_incident_prompt": item.critical_incident_prompt,
             }
             for item in drafted_items
         ]
@@ -573,18 +505,7 @@ class AgendaAgent(BaseAgent):
                     item.id,
                 )
                 continue
-            item.coverage_points = list(entry.coverage_points or [])
             item.close_when = (entry.close_when or "").strip()
-
-    @staticmethod
-    def _vision_role_names(vision: Dict[str, Any]) -> List[Dict[str, str]]:
-        out: List[Dict[str, str]] = []
-        for role in (vision.get("roles") or []):
-            rid = role.get("id") or ""
-            name = role.get("name") or ""
-            if rid or name:
-                out.append({"id": rid, "name": name})
-        return out
 
     @staticmethod
     def _generate_audit_notes(
@@ -592,78 +513,128 @@ class AgendaAgent(BaseAgent):
         vision: Dict[str, Any],
         llm_commentary: str,
     ) -> str:
-        """Walk vision IDs and items[]; emit deterministic per-id audit lines."""
+        """Walk vision entries and emit informational coverage notes.
 
-        def collect_ids(key: str) -> List[str]:
+        Under the lived-scenes design no item carries typed refs.
+        Coverage is derived by matching vision-entry text against the
+        scene + frictions text of each item — informational only,
+        never a gate. Roles are matched by canonical name (already
+        deterministic).
+        """
+
+        def collect(key: str) -> List[Dict[str, Any]]:
             return [
-                str(entry.get("id") or "").strip()
+                entry
                 for entry in (vision.get(key) or [])
                 if str(entry.get("id") or "").strip()
             ]
 
-        assumption_ids = collect_ids("assumptions")
-        concern_ids = collect_ids("concerns")
-        scope_ids = collect_ids("scope")
-        roles = AgendaAgent._vision_role_names(vision)
+        roles = collect("roles")
+        assumptions = collect("assumptions")
+        concerns = collect("concerns")
+        scope = collect("scope")
 
-        # Build reverse maps
-        items_by_ref: Dict[str, List[str]] = {}
+        def _tokenize(text: str) -> set:
+            return {
+                token
+                for token in (text or "").lower().split()
+                if len(token) > 3
+            }
+
+        def _scan(entry_text: str, item: AgendaItem) -> bool:
+            """True if entry text shares any meaningful token with item text."""
+            item_blob = " ".join(
+                filter(None, [item.scene, " ".join(item.frictions_to_probe or [])])
+            )
+            entry_tokens = _tokenize(entry_text)
+            item_tokens = _tokenize(item_blob)
+            return bool(entry_tokens & item_tokens)
+
+        def _matches_for(entry: Dict[str, Any]) -> List[str]:
+            entry_text = " ".join(
+                str(entry.get(key) or "")
+                for key in ("statement", "theme", "item", "rationale", "why_it_matters")
+            )
+            return [item.id for item in items if _scan(entry_text, item)]
+
+        # Roles match by canonical name (exact, not substring).
         items_by_perspective: Dict[str, List[str]] = {}
         for item in items:
-            for ref in item.vision_refs or []:
-                items_by_ref.setdefault(ref, []).append(item.id)
-            persp = (item.perspective or "").strip()
+            persp = (item.perspective or "").strip().lower()
             if persp:
-                items_by_perspective.setdefault(persp.lower(), []).append(item.id)
-
-        def status_for_id(vid: str) -> str:
-            covering = items_by_ref.get(vid) or []
-            if not covering:
-                return "gap-named: no item targets it"
-            if len(covering) == 1:
-                # Is this item multi-ref (i.e., this id is merged with others)?
-                target_item = next((it for it in items if it.id == covering[0]), None)
-                if target_item and len(target_item.vision_refs) > 1:
-                    others = [r for r in target_item.vision_refs if r != vid]
-                    other_str = ", ".join(others)
-                    return f"{covering[0]} (merged with {other_str})"
-                return covering[0]
-            return ", ".join(covering)
-
-        def status_for_role(role: Dict[str, str]) -> str:
-            name = (role.get("name") or "").strip()
-            using = items_by_perspective.get(name.lower(), [])
-            if not using:
-                return "gap-named: no item uses it as perspective"
-            return f"used as perspective in {', '.join(using)}"
+                items_by_perspective.setdefault(persp, []).append(item.id)
 
         lines: List[str] = []
 
-        if assumption_ids:
-            for aid in assumption_ids:
-                lines.append(f"{aid} → {status_for_id(aid)}")
-        else:
-            lines.append("no assumptions in vision")
-
-        if concern_ids:
-            for cid in concern_ids:
-                lines.append(f"{cid} → {status_for_id(cid)}")
-        else:
-            lines.append("no concerns in vision")
-
-        if scope_ids:
-            for sid in scope_ids:
-                lines.append(f"{sid} → {status_for_id(sid)}")
-        else:
-            lines.append("no scope in vision")
-
+        lines.append("ROLE COVERAGE (exact perspective match)")
         if roles:
             for role in roles:
-                rid = role.get("id") or "ROLE"
-                name = role.get("name") or "(unnamed)"
-                lines.append(f"{rid} {name} → {status_for_role(role)}")
+                rid = str(role.get("id") or "").strip() or "ROLE"
+                name = (role.get("name") or "(unnamed)").strip()
+                lens = (role.get("lens") or "").strip()
+                using = items_by_perspective.get(name.lower(), [])
+                lens_tag = f" [{lens}]" if lens else ""
+                if using:
+                    lines.append(
+                        f"  {rid} {name}{lens_tag} → perspective in {', '.join(using)}"
+                    )
+                else:
+                    lines.append(
+                        f"  {rid} {name}{lens_tag} → not selected by any scene "
+                        "(structural role or vision missing a fork this role lives)"
+                    )
         else:
-            lines.append("no roles in vision")
+            lines.append("  (no roles in vision)")
+
+        lines.append("")
+        lines.append("ASSUMPTION LIKELY-TOUCH (informational; HITL when empty)")
+        if assumptions:
+            for a in assumptions:
+                aid = str(a.get("id") or "").strip()
+                lens = (a.get("lens") or "").strip()
+                lens_tag = f" [{lens}]" if lens else ""
+                touching = _matches_for(a)
+                if touching:
+                    lines.append(f"  {aid}{lens_tag} → likely surfaced in {', '.join(touching)}")
+                else:
+                    lines.append(
+                        f"  {aid}{lens_tag} → no scene text overlap "
+                        "(reviewer decides: strategic-HITL fork, or vision needs a scene)"
+                    )
+        else:
+            lines.append("  (no assumptions in vision)")
+
+        lines.append("")
+        lines.append("CONCERN LIKELY-TOUCH (informational)")
+        if concerns:
+            for c in concerns:
+                cid = str(c.get("id") or "").strip()
+                lens = (c.get("lens") or "").strip()
+                lens_tag = f" [{lens}]" if lens else ""
+                touching = _matches_for(c)
+                if touching:
+                    lines.append(f"  {cid}{lens_tag} → likely surfaced in {', '.join(touching)}")
+                else:
+                    lines.append(
+                        f"  {cid}{lens_tag} → no scene text overlap"
+                    )
+        else:
+            lines.append("  (no concerns in vision)")
+
+        lines.append("")
+        lines.append("SCOPE LIKELY-TOUCH (informational)")
+        if scope:
+            for s in scope:
+                sid = str(s.get("id") or "").strip()
+                touching = _matches_for(s)
+                if touching:
+                    lines.append(f"  {sid} → likely surfaced in {', '.join(touching)}")
+                else:
+                    lines.append(
+                        f"  {sid} → no scene text overlap (HITL decides if a boundary scene is missing)"
+                    )
+        else:
+            lines.append("  (no scope in vision)")
 
         audit_block = "\n".join(lines)
         commentary = (llm_commentary or "").strip()
@@ -686,17 +657,15 @@ class AgendaAgent(BaseAgent):
             logger.error("[AgendaAgent] Pass 1 (draft) failed: %s", exc, exc_info=True)
             return {}
 
-        # Convert draft items to final AgendaItem shape (coverage_points + close_when blank)
+        # Convert draft items to final AgendaItem shape (close_when blank,
+        # filled in Pass 2).
         items: List[AgendaItem] = [
             AgendaItem(
-                vision_refs=list(d.vision_refs or []),
                 perspective=d.perspective,
-                context=d.context,
-                decision_target=d.decision_target,
-                seed_question=d.seed_question,
-                merge_anchor=d.merge_anchor or "",
+                scene=d.scene,
+                frictions_to_probe=list(d.frictions_to_probe or []),
+                critical_incident_prompt=d.critical_incident_prompt,
                 notes=d.notes or "",
-                coverage_points=[],
                 close_when="",
             )
             for d in (draft.items or [])
@@ -731,5 +700,8 @@ class AgendaAgent(BaseAgent):
         if feedback:
             updates["elicitation_agenda_feedback"] = None
 
-        logger.info("[AgendaAgent] Agenda ready — %d items.", len(items))
+        logger.info(
+            "[AgendaAgent] Agenda ready — %d scene(s); coverage shown in audit block.",
+            len(items),
+        )
         return updates

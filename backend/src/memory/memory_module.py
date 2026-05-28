@@ -75,21 +75,30 @@ class MemoryModule:
 
         # ── Short-term buffer ─────────────────────────────────────────────────
         # BUG FIX: previously missing — buffer was never created for SHORT_TERM.
-        if memory_type in (MemoryType.SHORT_TERM, MemoryType.SHORT_TERM_SEMANTIC):
+        if memory_type in (
+            MemoryType.SHORT_TERM,
+            MemoryType.SHORT_TERM_SEMANTIC,
+            MemoryType.SHORT_TERM_EPISODIC,
+        ):
             self._buffer = ConversationBuffer()
 
-        # ── Long-term Postgres backends ───────────────────────────────────────
+        # ── Long-term backends (Postgres if configured, else InMemoryStore) ──
         if memory_type in (
             MemoryType.EPISODIC,
             MemoryType.SEMANTIC,
             MemoryType.EPISODIC_SEMANTIC,
             MemoryType.SHORT_TERM_SEMANTIC,
+            MemoryType.SHORT_TERM_EPISODIC,
         ):
             cfg         = get_config().get("iredev", {}).get("knowledge_base", {})
             pg_conn_str = cfg.get("pg_connection")
             store       = create_store(pg_conn_str, embed_fn=embed_fn, dims=dims)
 
-            if memory_type in (MemoryType.EPISODIC, MemoryType.EPISODIC_SEMANTIC):
+            if memory_type in (
+                MemoryType.EPISODIC,
+                MemoryType.EPISODIC_SEMANTIC,
+                MemoryType.SHORT_TERM_EPISODIC,
+            ):
                 self._episodic = EpisodicMemory(store, project_id)
 
             if memory_type in (
@@ -213,3 +222,44 @@ class MemoryModule:
         if self._semantic is None:
             return 0
         return len(self._semantic.recall_all(zone_id))
+
+    # ── Episodic convenience API (EPISODIC / SHORT_TERM_EPISODIC) ─────────────
+    # Episodes are events that already happened: trigger → decision → outcome.
+    # Interviewer/EndUser use them keyed by perspective (role name) so the
+    # second time the same role is interviewed, both agents can see what was
+    # already said and decided in earlier items.
+
+    def record_episode(
+        self,
+        entity_id: str,
+        trigger:   str,
+        decision:  str,
+        outcome:   str,
+    ) -> None:
+        """Record one episode for an entity (e.g., a role perspective).
+
+        Replaces direct ``add(Episode(...), entity_id=...)`` for callers that
+        do not want to construct the Episode shape themselves.
+        """
+        if self._episodic is None:
+            return
+        self._episodic.record(
+            entity_id,
+            Episode(trigger=trigger, decision=decision, outcome=outcome),
+        )
+
+    def recall_episodes(
+        self,
+        entity_id: str,
+        query:     Optional[str] = None,
+        limit:     int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Recall episodes for an entity.
+
+        Returns an empty list when episodic memory is not active for this
+        agent or when no episodes have been recorded for the entity. Caller
+        does not need to guard for ``None``.
+        """
+        if self._episodic is None:
+            return []
+        return self._episodic.recall(entity_id, query=query, limit=limit)

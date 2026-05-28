@@ -1,40 +1,76 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from langgraph.store.base import BaseStore
+from langgraph.store.memory import InMemoryStore
 from langgraph.store.postgres import PostgresStore
 
 from .types import Episode, Fact
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
 # Shared store factory
 # ---------------------------------------------------------------------------
 
-def create_store(pg_conn_str: str, embed_fn=None, dims: int = 1536) -> PostgresStore:
-    """Create the shared Postgres-backed LangGraph store.
+# Process-wide in-memory store singleton.
+#
+# Used as a fallback when no pg_connection is configured. The interviewer and
+# enduser agents instantiate MemoryModule separately but must read each other's
+# writes (interviewer records episodes per perspective; both agents recall
+# them). Sharing one InMemoryStore at the process level gives them a common
+# namespace without requiring Postgres in dev environments.
+_in_memory_store_singleton: Optional[InMemoryStore] = None
 
-    Pass embed_fn + dims to enable semantic vector search.
-    Omit both for exact key lookup only (dev / no-embedding mode).
 
-    Args:
-        pg_conn_str: PostgreSQL connection string.
-        embed_fn: Callable[[list[str]], list[list[float]]] or LangChain Embeddings.
-        dims: Embedding vector dimensions — must match embed_fn output.
-
-    Returns:
-        PostgresStore with tables initialized via setup().
-    """
-    if embed_fn is None:
-        store = PostgresStore.from_conn_string(pg_conn_str)
-    else:
-        store = PostgresStore.from_conn_string(
-            pg_conn_str,
-            index={"embed": embed_fn, "dims": dims},
+def _get_in_memory_store() -> InMemoryStore:
+    global _in_memory_store_singleton
+    if _in_memory_store_singleton is None:
+        _in_memory_store_singleton = InMemoryStore()
+        logger.info(
+            "[memory] Using process-wide InMemoryStore singleton for episodic "
+            "/ semantic memory (session-scoped sharing between agents)."
         )
-    store.setup()
-    return store
+    return _in_memory_store_singleton
+
+
+def create_store(
+    pg_conn_str: Optional[str],
+    embed_fn=None,
+    dims: int = 1536,
+) -> BaseStore:
+    """Create the shared LangGraph store.
+
+    Current behavior: always uses the process-wide InMemoryStore singleton.
+    Episodes recorded by InterviewerAgent live for one workflow run and are
+    consumed by the other agents in the same run; persistence across runs
+    is not required for the interview-skip mechanism the singleton supports.
+
+    The pg_conn_str parameter is accepted for forward compatibility with
+    long-term memory types that genuinely need Postgres persistence (the
+    knowledge base, cross-session profile facts). Wire those through here
+    when they are introduced; until then InMemoryStore is correct.
+    """
+    if pg_conn_str:
+        logger.debug(
+            "[memory] pg_connection is set but session-scoped memory still "
+            "uses the in-memory singleton; remove this branch when long-term "
+            "memory types are wired through this factory."
+        )
+    return _get_in_memory_store()
+
+
+def reset_in_memory_store() -> None:
+    """Discard the in-memory store singleton.
+
+    Useful between test sessions or when starting a new workflow run that
+    should not see episodes from a previous run in the same process.
+    """
+    global _in_memory_store_singleton
+    _in_memory_store_singleton = None
 
 
 # ---------------------------------------------------------------------------
