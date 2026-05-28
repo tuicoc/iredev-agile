@@ -5,38 +5,50 @@ Map-reduce synthesis turning interview evidence into a structured
 RequirementList. Pass 2 is split so the LLM never juggles preserve-
 vs-merge pressure in the same call:
 
-  Pass 1 (EXTRACT)        — SIGNAL-DRIVEN. One call per interview
-                            record, run in parallel. Each call sees ONE
-                            record plus the compact Product Vision and
-                            produces an Extraction: requirements (with
-                            the six Implementation Parity axes filled),
-                            within-record gaps and conflicts, and a
-                            signal_walk that assigns every signal one
-                            of three verdicts (requirement_seed /
-                            supporting_evidence / non_product). Items
-                            emerge from clustering signals by product
-                            object + trigger + audience + outcome.
+  Pass 1 (EXTRACT)        — TALK-DRIVEN, BATCHED BY PERSPECTIVE.
+                            Records sharing one role go in one LLM
+                            call. Pass 1 owns ONE concern: read the
+                            records like a structured observation of
+                            the role's life around the product and
+                            propose every product obligation the
+                            evidence supports — every friction,
+                            workaround, wish, or revealed need that
+                            points at a product-side mechanism is a
+                            candidate. Duplicates and near-siblings
+                            are EXPECTED here; Pass 2A folds them.
+                            Each item's trace_refs cite source units
+                            (turn ids, assumption-evidence ids, rule
+                            ids, vision ids) so every proposal is
+                            auditable. Perspective groups run in
+                            parallel.
 
-  Pass 2A (CLUSTER)       — DECISION ONLY. One call sees every per-
-                            record Extraction (each item assigned a
-                            temporary T-NNN id by Python) plus the
-                            compact Product Vision. It emits
-                            merge_groups: clusters of 2+ Pass 1 items
-                            that satisfy the same-build test, each
-                            cluster carrying a unified consolidated
-                            Requirement and a rationale. Items not
-                            referenced by any group pass through
-                            unchanged via Python.
+  Pass 2A (CLUSTER)       — DECISION ONLY. Owns ALL deduplication
+                            (within-perspective AND cross-perspective).
+                            Walks the items Pass 1 emitted across
+                            every perspective and identifies clusters
+                            satisfied by ONE shippable piece of
+                            product work. When a cluster mixes
+                            confirmed and inferred members, the
+                            confirmed item is the spine (EXTRACTION
+                            OVER INFERENCE). Items not in any group
+                            pass through unchanged via Python.
 
-  Pass 2B (ADJUDICATE)    — VISION + GAPS + CONFLICTS. One call sees
-                            the same per-record Extractions and vision.
-                            It walks vision.concerns / vision.assumptions
-                            for narrowing-verb constraints that no
-                            Pass 1 item already covers, then adjudicates
-                            gaps and conflicts across records. It does
-                            not decide merges or rewrite Pass 1 items.
+  Pass 2B (ADJUDICATE)    — VISION + GAPS + CONFLICTS. Runs AFTER
+                            Pass 2A so it sees the POST-MERGE item set
+                            (each item carrying a T-NNN for a pass-
+                            through or M-NNN for a consolidated form),
+                            plus all gaps and conflicts collected
+                            across perspectives, plus a cluster summary
+                            showing which member_temp_ids Pass 2A
+                            merged. This sequencing prevents two
+                            failure modes parallel execution allowed:
+                            conflicts emitted on items Pass 2A already
+                            consolidated (dangling refs after merge),
+                            and vision_constraint_items duplicating
+                            a consolidated capability.
 
-Pass 2A and Pass 2B are independent; Python fires them in parallel.
+Pass 2A and Pass 2B run sequentially; Pass 1 perspective batches run
+in parallel because each batch is independent of the others.
 
 Vision scope (OOS) items are preserved by Python as pure 1:1 data
 movement. Every vision.scope entry becomes one out_of_scope
@@ -45,9 +57,10 @@ referenced the vision id elsewhere. The LLM is forbidden from emitting
 out_of_scope items; any it emits are filtered out before Python
 appends the vision-scope set.
 
-Schema descriptions say WHAT a field holds. Prompt bodies teach HOW to
-reason — definitions, dichotomies, cross-domain placeholders. No
-domain, topic, role name, or product category is hardcoded.
+Schema descriptions say WHAT a field holds. Prompt bodies state each
+pass's purpose and the guarantees its output must meet — definitions
+and dichotomies, never step-by-step procedure. No domain, topic, role
+name, or product category is hardcoded.
 
 Python's role: data movement and format guards. Assigning T-NNN temp
 ids before Pass 2, applying merge_groups by replacing referenced
@@ -62,13 +75,13 @@ statements, never adjudicates gaps or conflicts.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, TypeVar
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Tuple, TypeVar
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -79,17 +92,11 @@ logger = logging.getLogger(__name__)
 
 RequirementType = Literal["functional", "non_functional", "system", "out_of_scope"]
 
-SignalVerdict = Literal[
-    "requirement_seed",
-    "supporting_evidence",
-    "non_product",
-]
-
 # Deterministic id-format guards. Source unit ids live inside an EL-NNN
 # record at a specific sub-id; vision ids match canonical prefixes;
 # vision paths are stable strings. Anything else is rejected so the
 # "no bare item ids" rule holds at the schema boundary.
-_SOURCE_UNIT_RE = re.compile(r"^EL-\d{3}-(?:S\d{2,}|T\d{2,}|ASM\d{2,}|RULE)$")
+_SOURCE_UNIT_RE = re.compile(r"^EL-\d{3}-(?:T\d{2,}|ASM\d{2,}|RULE)$")
 _VISION_ID_RE = re.compile(r"^(?:ASM|ROLE|CONCERN|OOS)-\d{2,}$")
 
 T = TypeVar("T")
@@ -106,7 +113,7 @@ def _is_rate_limit_error(exc: BaseException) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class Requirement(BaseModel):
-    id: str = Field(default="", description="Leave empty. Python renumbers per type after the final pass.")
+    id: str = Field(default="", description="Leave empty; ids are assigned automatically.")
     type: RequirementType = Field(description=(
         "functional: product-owned behavior or content surface with a stakeholder-observable outcome. "
         "non_functional: independently reviewable property a behavior must hold (clarity, accuracy, ...). "
@@ -128,28 +135,35 @@ class Requirement(BaseModel):
     ))
     rationale: str = Field(description="One short evidence-grounded sentence.")
     trace_refs: List[str] = Field(default_factory=list, description=(
-        "Source-unit ids (EL-NNN-SNN/TNN/COVNN/ASMNN/RULE), vision ids (ASM-NN, ROLE-NN, CONCERN-NN, OOS-NN), "
-        "or stable paths (ProductVision.scope). No bare item ids."
+        "Source-unit ids and vision ids that anchor this obligation in evidence. Valid forms: "
+        "EL-NNN-TNN (talk turn), EL-NNN-ASMNN (assumption evidence), EL-NNN-RULE (closure "
+        "summary), ASM-NN / ROLE-NN / CONCERN-NN / OOS-NN (vision ids), or stable paths "
+        "starting with 'ProductVision.'. No bare item ids (EL-NNN alone is invalid)."
     ))
     acceptance_criteria: List[str] = Field(default_factory=list, description=(
-        "Smallest non-duplicative set of product-observable checks. Empty for out_of_scope."
+        "Smallest non-duplicative set of product-observable checks. Each AC tests ONE aspect of this "
+        "obligation's mechanism. When the obligation surfaced across stakeholders or operating conditions, "
+        "ACs may be written as context-conditional branches ('When <role/condition>, the product …'). "
+        "Empty for out_of_scope items."
     ))
     status: Literal["confirmed", "excluded"] = Field(description=(
         "confirmed for implementable items; excluded only for out_of_scope boundaries."
     ))
     confidence: Literal["confirmed", "inferred"] = Field(description=(
         "confirmed: obligation directly grounded in stated evidence — input intent named it, "
-        "a stakeholder signal explicitly described it, or a vision assumption was verified by "
-        "interview. inferred: your synthesis from context — symptom→cause translation, "
-        "product-side translation of role process, or a boundary that follows logically from "
-        "multiple signals without being directly stated. Inference is legitimate work when "
-        "evidence supports it; do not avoid inferring just to label everything confirmed."
+        "a stakeholder utterance in the talk explicitly described it, or a vision assumption "
+        "was verified by interview. inferred: your synthesis from context — symptom→cause "
+        "translation, product-side translation of role process, or a boundary that follows "
+        "logically from multiple turns of talk without being directly stated. Inference is "
+        "legitimate work when evidence supports it; do not avoid inferring just to label "
+        "everything confirmed."
     ))
 
     # ── Implementation Parity axes ──────────────────────────────────────────
-    # The synthesize pass merges two candidates only when ALL six align (and
-    # for NFRs, the same quality property — taught in prompt). Fill these
-    # precisely; the synthesize pass keys merge decisions off the JSON.
+    # These axes describe an obligation precisely enough that the cluster pass
+    # can judge which items one build would satisfy. Their meaning lives in the
+    # field descriptions below; the cluster pass reads the values — it is not
+    # handed a rule for combining them.
 
     trigger_event: str = Field(default="", description=(
         "Event class that activates the obligation: a stakeholder action, a state change, a cadence, "
@@ -199,7 +213,7 @@ class Requirement(BaseModel):
 
 
 class Conflict(BaseModel):
-    id: str = Field(default="", description="Leave empty; Python renumbers to CF-NN.")
+    id: str = Field(default="", description="Leave empty; ids are assigned automatically.")
     kind: Literal["clash", "unclear"] = Field(description=(
         "clash for incompatible obligations; unclear for unresolved evidence."
     ))
@@ -211,98 +225,111 @@ class Conflict(BaseModel):
     refs: List[str] = Field(default_factory=list, description="Evidence references supporting the conflict.")
 
 
-class SignalWalkEntry(BaseModel):
-    """One signal's verdict — Pass 1 OUTPUT-required discipline.
+class PerspectiveExtraction(BaseModel):
+    """The product obligations one role's interview evidence implies.
 
-    Signals are the richest evidence source in an interview record (often
-    5-15 per record). Each signal owes a verdict so no signal is silently
-    lost. The walk drives extraction: requirement_seed signals become
-    items (alone or clustered), supporting_evidence signals enrich those
-    items' trace_refs, non_product signals are observation only.
+    Bundles every interview record sharing one perspective (role). The
+    obligations are proposed broadly — overlapping candidates are
+    expected and not a defect; consolidating duplicates is not this
+    step's job. Trace_refs cite specific source units (turn ids
+    EL-NNN-TNN, assumption-evidence ids EL-NNN-ASMNN, rule ids
+    EL-NNN-RULE, and vision ids) so every item is auditable.
     """
-    signal_id: str = Field(description=(
-        "The signal id in the input record (EL-NNN-SNN)."
+    perspective: str = Field(description=(
+        "The shared role name across every record in this batch."
     ))
-    verdict: SignalVerdict = Field(description=(
-        "requirement_seed: this signal carries a distinct product-owned decision and became "
-        "(or co-founded) an item in items[]. "
-        "supporting_evidence: this signal supports another signal's product decision (same "
-        "product object, trigger, audience, outcome cluster). "
-        "non_product: real context (process, role behavior, observation) with no product duty."
+    reasoning: str = Field(description=(
+        "Your thinking before you list the obligations — write this first, as a "
+        "working scratchpad, not polished prose. Reason out from the evidence the "
+        "distinct things this product must owe, and shape each so it stands on its "
+        "own: one independent, valuable, testable obligation a team could size and "
+        "ship by itself. Carving cleanly here is what makes the items below easy "
+        "to compare and fold later."
     ))
-    reason: str = Field(description=(
-        "One short sentence: which cluster/item the signal seeded or supports, or why non_product."
+    notes: str = Field(default="", description=(
+        "Brief reviewer-facing commentary about what the evidence in "
+        "this perspective surfaced — recurring observations, frictions, "
+        "workarounds, wishes, and any inference the items propose."
     ))
-
-
-class Extraction(BaseModel):
-    """Pass 1 output for a single interview record."""
-    notes: str = Field(description="Brief reviewer-facing extraction note. No section header echo.")
     items: List[Requirement] = Field(default_factory=list, description=(
-        "Requirements grounded in this record's evidence. Do NOT emit out_of_scope items — "
-        "Python preserves vision scope 1:1 deterministically."
+        "Product obligations this perspective's evidence implies, each "
+        "grounded in its trace_refs. Propose broadly — overlapping "
+        "candidates are fine and expected, so do not consolidate "
+        "duplicates here. Do not emit out_of_scope items."
     ))
     gaps: List[str] = Field(default_factory=list, description=(
-        "Within-record gaps. Each begins with the source-id and names the missing product decision."
+        "Within-perspective gaps — design questions the talk raised but "
+        "did not settle. Format: '<source-id>: <missing product decision>'."
     ))
-    conflicts: List[Conflict] = Field(default_factory=list, description="Within-record conflicts.")
-    signal_walk: List[SignalWalkEntry] = Field(default_factory=list, description=(
-        "One entry per signal in the input record. Required — every signal owes a verdict. "
-        "The walk is the discipline that prevents silent under-extraction."
+    conflicts: List[Conflict] = Field(default_factory=list, description=(
+        "Within-perspective conflicts only — true clashes the records in "
+        "this batch surface against each other."
     ))
 
 
 class MergeGroup(BaseModel):
-    """One same-build cluster — Pass 2A OUTPUT.
+    """One cluster of items that describe the same product obligation.
 
-    A group identifies two or more Pass 1 items that describe the same
-    product obligation (one feature/surface/flow satisfies all of them)
-    and supplies the unified obligation that replaces them. Pass 1
-    items NOT referenced by any group pass through unchanged via
-    Python; the cluster pass owns only the duplicates.
+    Two or more items that one build (one feature / surface / flow)
+    would satisfy, together with the unified obligation that replaces
+    them. Items not referenced by any group are left unchanged — only
+    the duplicates belong here.
     """
     member_temp_ids: List[str] = Field(description=(
-        "Temporary ids (T-NNN) of the Pass 1 items this group consolidates. "
-        "Two or more required — a group of one is a pass-through (do not emit)."
+        "Temporary ids (T-NNN) of the items this group consolidates. "
+        "Two or more required — a single-item group is not a cluster, do not emit it. "
+        "Items not listed in any group are left unchanged."
     ))
     consolidated: Requirement = Field(description=(
-        "The unified obligation that satisfies every member. Subject is "
-        "product-side; smallest reviewable AC set; six Implementation Parity "
-        "axes filled with the most specific value across members. "
-        "confidence is confirmed only if EVERY member was confirmed."
+        "The base-capability obligation satisfied by ONE build that covers every member. "
+        "Subject is product-side. The acceptance_criteria carry the smallest reviewable check set "
+        "for this capability; when members differ by perspective or operating condition, ACs may "
+        "be written as context-conditional branches so each member's distinct context stays "
+        "visible. Its descriptive fields (trigger, product object, observable outcome, condition, "
+        "participation, stakeholder) hold the broadest value accurate to every member, with the "
+        "specifics carried in the ACs. Confidence is confirmed only if EVERY member was confirmed; "
+        "inferred otherwise."
     ))
     rationale: str = Field(description=(
-        "One short sentence naming the single build (one surface + one code "
-        "path or content flow + one end-to-end test) that satisfies every "
-        "member word-for-word."
+        "One short sentence naming the single concrete build (one surface + one code path or content "
+        "flow + one end-to-end test, possibly parameterised by perspective / condition) that "
+        "satisfies every member."
     ))
 
 
 class MergeDecisions(BaseModel):
-    """Pass 2A output — merge groups only.
+    """The clusters of same-build duplicates found among the obligations.
 
-    The cluster pass owns ONE concern: identify same-build duplicates
-    among Pass 1 items and emit the unified obligation for each cluster.
-    Pass 1 items not referenced by any group are pass-through; Python
-    keeps them untouched. The LLM never writes pass-through items here.
+    Each cluster names the duplicate items and the unified obligation
+    that replaces them. Items in no cluster are left unchanged and are
+    never restated here.
     """
-    notes: str = Field(description=(
-        "Brief reviewer-facing note about clustering decisions. No section "
-        "header echo (Python frames the section)."
+    reasoning: str = Field(description=(
+        "Your thinking before you choose the groups — write this first, as a "
+        "working scratchpad. Reason over the obligations and work out which ones "
+        "describe the same underlying build (the same shippable thing) even when "
+        "their wording, the role they name, or their framing differ, and which "
+        "only look alike but are really separate builds. Naming the equivalences "
+        "here first is what lets the groups below be complete."
     ))
     merge_groups: List[MergeGroup] = Field(default_factory=list, description=(
-        "Only groups of 2+ Pass 1 items that satisfy the same-build test. "
-        "Pass 1 items not listed in any group pass through unchanged via Python."
+        "Capability clusters: groups of 2+ items that one build would satisfy (ONE build covers "
+        "all members). Items not listed in any group are left unchanged; only the consolidation "
+        "belongs here."
+    ))
+    notes: str = Field(description=(
+        "Brief reviewer-facing note about the clustering decisions made — which capability "
+        "clusters were identified and why. No section header echo."
     ))
 
 
 class VisionAndAdjudication(BaseModel):
-    """Pass 2B output — vision constraint walk + gap/conflict adjudication.
+    """Vision-limit obligations plus the adjudicated gaps and conflicts.
 
-    The adjudication pass owns ONE concern: walk the Product Vision for
-    explicit constraints (narrowing verbs) that no Pass 1 item already
-    covers, and adjudicate gaps + conflicts across records. It does NOT
-    decide merges (Pass 2A owns that) and does NOT rewrite Pass 1 items.
+    Covers exactly three things: obligations that come only from the
+    vision's explicit limits (narrowing verbs) that no current item
+    already carries, the adjudicated gaps, and the surviving true
+    conflicts. Does not decide merges and does not rewrite existing items.
     """
     notes: str = Field(description=(
         "Brief reviewer-facing note about vision constraints added and "
@@ -310,15 +337,15 @@ class VisionAndAdjudication(BaseModel):
     ))
     vision_constraint_items: List[Requirement] = Field(default_factory=list, description=(
         "NEW non_functional or system items derived from explicit vision constraints "
-        "(narrowing verbs in vision.concerns / vision.assumptions) that no Pass 1 item "
-        "already covers. Do NOT emit out_of_scope items (Python preserves vision.scope 1:1)."
+        "(narrowing verbs in vision.concerns / vision.assumptions) that no current item "
+        "already covers. Do not emit out_of_scope items."
     ))
     final_gaps: List[str] = Field(default_factory=list, description=(
-        "Gaps adjudicated across all per-record extractions. Format: '<source-id>: <missing "
+        "Gaps adjudicated across all the evidence. Format: '<source-id>: <missing "
         "product decision>'. Merge two gaps when the same answer would close both."
     ))
     final_conflicts: List[Conflict] = Field(default_factory=list, description=(
-        "True cross-record conflicts only — two obligations that cannot both hold in the "
+        "True conflicts only — two obligations that cannot both hold in the "
         "same operating context."
     ))
 
@@ -333,599 +360,211 @@ class RequirementList(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 # Prompt blocks
 #
-# Layout follows VisionaryAgent: every pass uses _FOUNDATIONS +
-# _REASONING_MOVES + one pass-specific block. Concepts live in the shared
-# blocks; pass blocks are narrative, not numbered procedure. Examples use
-# generic placeholders (<role>, <surface>, <object>) — no domain, topic,
-# role name, or category is hardcoded.
+# Layout: every pass uses the shared _FOUNDATIONS block plus one pass-
+# specific block. _FOUNDATIONS states what a requirement is, the build-
+# don't-transcribe mindset, and the guarantees every requirement must meet;
+# each pass block states that pass's purpose and what its output must ensure.
+# Both are narrative — definitions and dichotomies, never numbered procedure.
+# No domain, topic, role name, or category is hardcoded.
 # ─────────────────────────────────────────────────────────────────────────────
 
 _FOUNDATIONS = """\
 FOUNDATIONS
 
-A requirement is one product obligation: something the product must
+A requirement is one product obligation — something the product must
 do, must hold as a property, must guarantee as an invariant, or must
-explicitly not take on. Stakeholder words about what they do, want,
-or need are EVIDENCE for requirements, not requirements themselves —
-your job is to translate that evidence into product-side obligations.
-
-FOUR TYPES (you emit three; Python handles the fourth)
-
-- functional: product behavior or content surface with a
-  stakeholder-observable outcome.
-- non_functional: independently reviewable property a behavior must
-  hold (clarity, accuracy, accessibility, ...).
-- system: product-wide guarantee with no stakeholder trigger.
-- out_of_scope: handled by Python from vision.scope. DO NOT emit.
-
-SUBJECT RULE
-
-Statement subject is product-side: "The product", "The system", or a
-product-owned noun (artifact, surface, content, component). Verb is
-product-owned (provide / expose / preserve / constrain / display /
-communicate / validate / record / prevent / recover / synchronize /
-...). Not a social verb the product cannot perform (gain, earn,
-attract, win, build trust).
-
-If the natural phrasing puts a role as subject ("<role> needs to
-..."), rewrite product-side. If no product object emerges, the
-candidate is observation — drop, emit gap.
-
-ACCEPTANCE CRITERIA — REVIEWABLE OR DROPPED
-
-Each AC is inspectable. Three valid shapes:
-- product state — "The product displays <X>", "Each <object>
-  includes <Y>"
-- product capability accessed by role — "<role> can access <X>",
-  "<role> can switch between <Y> and <Z>"
-- product invariant — "<rule> holds across <conditions>"
-
-NOT valid: user cognition / behavior — "<role> reports <feeling>",
-"<role> understands <thing>", "<role> finds <X> easy". The product
-cannot enforce what users think or feel. Move to observable_outcome
-or drop.
-
-Self-test per AC: "Could the team test this by inspecting the
-product, without interviewing a user?" If no → reshape or drop.
-
-ATOMICITY
-
-One statement = one obligation. Connectives ("and", "or", "plus")
-between two distinct verbs or two distinct objects mark a bundle —
-split.
-
-ONE NFR = ONE QUALITY PROPERTY. Quality dimensions (open list,
-cross-domain): accuracy, reliability, clarity, brevity, consistency,
-accessibility, timeliness, trustworthiness, completeness, privacy,
-recoverability, ... A statement with TWO+ dimensions ("clear and
-concise", "accurate and reliable") is a bundle — split. Themes like
-"good <X>" or "high-quality <Y>" erase dimensions a reviewer must
-judge — split.
-
-CONFIDENCE — be honest about which side you are on
-
-The core test: did the stakeholder/input name the PROBLEM, or did
-they name the SOLUTION?
-
-- confirmed — the stakeholder or input named the product-side
-  obligation in words you essentially preserve. A signal directly
-  says "the product should <X>" or "we need <X>" where X is
-  product-owned; or a vision assumption was verified by interview
-  ("yes that's true"), and the product-side obligation follows
-  word-for-word from the verified assumption.
-
-- inferred — the stakeholder named friction, struggle, workaround,
-  or wish; YOU named the product-side solution. The trace cites
-  problem signals, but the statement's solution-shape is your
-  synthesis. Also inferred: connecting multiple signals into a
-  unified product decision none of them phrased individually;
-  translating a role-side process into a product-side obligation
-  the stakeholder did not articulate.
-
-Default test before marking confirmed: read aloud ONE signal cited
-in trace_refs. Does that single signal name the product-side
-obligation in the statement (not just the problem behind it)?
-If yes → confirmed. If you had to SYNTHESIZE across signals or
-TRANSLATE from friction to solution → inferred.
-
-Solution-proposer work yields LOTS of inferred items. A record
-with 8 struggle signals and 4 emitted requirements typically
-yields 1-2 confirmed (where stakeholders explicitly named the
-product feature) and 2-3 inferred (where you translated friction
-into solutions). If every item in your output is marked confirmed,
-you are either over-claiming or you missed the solution-proposing
-work the evidence asked for.
-
-TRACE DISCIPLINE
-
-Trace_refs are source-unit precision: EL-NNN-SNN (signal), EL-NNN-TNN
-(talk), EL-NNN-ASMNN (assumption evidence), EL-NNN-RULE. Vision ids
-(ASM-NN, ROLE-NN, CONCERN-NN) and stable paths (ProductVision.scope)
-strengthen the trace. Bare item ids (EL-NNN alone) not valid. No
-trace = invention.
-
-DOMAIN NEUTRALITY
-
-Use the vocabulary of the evidence in front of you. No imported
-domain examples, fixed role names, product categories, or policy
-templates from outside this run.
-"""
+explicitly refuse to take on. The interview is evidence about a
+person's life around the product: what they do, want, avoid, work
+around, or struggle with. Evidence is not itself a requirement; your
+work is to decide what the product must therefore be obligated to do.
+The schema names the requirement types; the product's out_of_scope
+boundaries are added separately, so you never emit them.
 
 
-_REASONING_MOVES = """\
-REASONING MOVES
+BUILD THE LIST, DON'T TRANSCRIBE IT. You are composing the requirement
+list a team could build this product from — not minuting what was
+said. Most of what a working product owes is never spoken aloud:
+people describe the friction they feel, not the mechanisms, states,
+recoveries, and guarantees a product needs to remove it. Reason
+outward from the lived evidence to the full set of obligations the
+described product must carry for that life to actually work — the
+happy path and the states around it, the failure someone fears and
+the product's answer to it, the task done by hand and the product
+doing it instead. Inferring an obligation the evidence implies but no
+one named is the heart of this work, not a liberty taken sparingly.
+The only discipline on inference: it must trace to evidence in front
+of you and name a mechanism the product can actually own. Where you
+cannot ground an obligation, that absence is a gap to surface — never
+a requirement to invent.
 
-SOLUTION PROPOSER STANCE
 
-You are not classifying signals. You are PROPOSING the product
-obligations the team should build to satisfy what the evidence
-revealed. When the stakeholder names a friction without naming the
-product solution, the solution-side translation is YOUR work —
-propose it, mark confidence=inferred, trace to the friction signals.
+EVIDENCE LEADS, VISION BOUNDS. The interview is the authority for what
+the product does; infer positive obligations from it freely. The
+vision is the authority for the product's limits — what it must
+respect and what it must leave to others. From the vision take
+constraints and exclusions, not new capabilities the interview never
+implied.
 
-Under-proposing is a failure mode. A record with 8 signals about
-struggles should yield 3-5 product obligations, not 1. Solution-shy
-extraction leaves the team with no list to build.
 
-SYMPTOM → CAUSE
+PRODUCT-SIDE AND BUILDABLE. A requirement speaks as the product or a
+product-owned artifact and uses a verb the product can perform —
+something a team can write code or content for and a reviewer can
+later check on the product itself. When the natural phrasing makes a
+person the subject, or names something only humans do — feeling,
+trusting, deciding outside the product — find the product-owned object
+the obligation really turns on and state it from the product's side.
 
-Role-experience signals ("<role> tries X", "<role> avoids Y",
-"<role> asks others when uncertain") describe product obligations
-indirectly. Translate: role-looks-for-X → product-displays-X. A
-candidate that preserves the workaround is wrong.
 
-PROCESS → PRODUCT TRANSLATE
+ATOMIC — SPRINT-READY. Downstream the team sizes, estimates, and
+accepts these one at a time, so each must stand as a single piece of
+work: independent enough to ship alone, valuable enough that shipping
+it means something, small enough to fit a sprint, and checkable as one
+obligation. An item hiding two obligations reads as one ticket but
+behaves as two — it cannot be sized or accepted cleanly. This is the
+why behind every judgment of grain, not a checklist: when one
+shippable build that one end-to-end check verifies would cover a
+candidate, it is one item; when it would force two distinct builds or
+two independent checks, it is two. Everything else — a different
+surface, condition, audience, or example — is weighed inside that
+one-build-one-check judgment, never a reflex to split or fold.
 
-A stakeholder process (review, assessment, trust formation,
-endorsement, discussion) becomes a product requirement ONLY when
-evidence names a product-owned object the process depends on:
-information, state, content, rule, feedback, record, constraint,
-interaction. If no product-owned object emerges, the process is
-observation.
 
-The product cannot enforce social verbs. "Product gains trust",
-"product earns endorsement" are not obligations. Find the
-product-owned object the role uses to participate:
-- expose evidence the role uses to judge — provenance, citations,
-  source labels, transparency markers
-- display signals from outside the product — badges, attestations
-- present what other roles said — testimonials, case studies
+DISTINCT — NO ASPECT TWICE. A long list earns its length from the
+range of distinct obligations in it, never from restating one
+mechanism in different words. Breadth means covering the many
+different things the evidence implies the product owes; it does not
+mean saying one obligation from several angles. Two items one build
+would satisfy and one check would verify are one obligation said
+twice.
 
-If none supported, drop and emit gap.
 
-The statement-verb test applies to NFRs too. "The product should
-gain X / earn Y / attract Z" is misframed, regardless of type —
-rewrite product-side or drop.
+ACCEPTANCE CRITERIA THE TEAM CAN CHECK. Each criterion is something a
+reviewer could confirm by inspecting the product, not by asking a user
+how they feel. Each verifies one aspect of its parent's single
+obligation; a criterion that introduces a separate object, workflow,
+or independently checkable constraint is a different obligation hiding
+in the wrong item — let it become its own.
 
-PRESERVATION vs BASELINE (vision dichotomy)
 
-Interview evidence is authority for product behavior. Vision is
-authority for explicit constraints (narrowing verbs) and excluded
-responsibilities.
+CONFIDENCE — PROBLEM OR SOLUTION. Mark an obligation confirmed when a
+turn of talk, or a vision assumption the interview verified, already
+states it in product terms; mark it inferred when you synthesised the
+product-side obligation yourself from friction, workaround, wish, or a
+chain of turns that never named it. Both are honest work and a good
+list is a healthy mix of the two; judge each item on its own, never
+toward a ratio.
 
-- preservation candidate — verb narrows or excludes. Allowed.
-- baseline candidate — verb names positive product action
-  ("provide", "ensure", "maintain", "support", "enable") the
-  interview did not confirm. Drop. Filling a gap with vision
-  content is invention.
 
-GAP / CONFLICT
+GROUNDED IN CITED EVIDENCE. Every requirement cites the source units
+that support it; the schema documents the valid id forms. An obligation
+with no genuine evidence behind it is invention.
 
-A gap is probed, unsettled, necessary. Format: "<source-id>:
-<missing product decision>". Two gaps naming the same concept (same
-answer would close both) → merge into one.
 
-A conflict is two obligations that cannot both hold in the SAME
-operating context. Condition differences absorbed into AC ≠
-conflict. Mixed evidence on a theme (one role enthusiastic, another
-sceptical) = ambivalence, not conflict.
-
-IMPLEMENTATION PARITY (for the synthesize pass)
-
-Two candidates describe the same obligation only when ALL align:
-trigger_event, product_object, observable_outcome, stakeholder,
-operating_condition, participation_structure (and for NFRs the same
-quality property). Fill these axes precisely on every requirement.
+THE EVIDENCE'S OWN VOCABULARY. Name things as the evidence in front of
+you names them. Do not import role names, product categories, domain
+examples, or policy templates from outside this run.
 """
 
 
 _PASS_EXTRACT = """\
-PASS 1 OF 2 — EXTRACT FROM ONE INTERVIEW RECORD (SIGNAL-DRIVEN)
+THIS PASS — OBLIGATIONS FROM ONE PERSPECTIVE'S EVIDENCE
 
-You see ONE interview record plus the compact Product Vision. You
-are a software solution proposer reading lived evidence and emitting
-the product obligations the team should build.
+You see every interview record from one role, plus the compact Product
+Vision. Your purpose is to build, from this evidence, the broadest
+honest set of distinct product obligations the described life implies,
+and to hold nothing back for fear of overlap. A later pass folds true
+duplicates and another settles gaps and conflicts; here, the only loss
+that cannot be recovered is a real obligation never proposed, so reason
+expansively.
 
-INPUT FIELDS
+Treat the records as a window into how this role actually lives around
+the product: every friction, workaround, wish, surprise, fear, and
+unmet need is a place the product could owe an obligation. One record
+usually implies several distinct mechanisms — such as a surface to act
+on, a state to track, a rule to enforce, a recovery when something
+fails, a signal that makes status visible, something worth recording,
+or a property the result must hold. Follow each one the evidence
+implies. Let the evidence's real density decide how many obligations
+you draw; a thin record yields few and a rich one many. Never aim at a
+number, and never thin the list because it is growing.
 
-The record carries:
-- perspective — which role's view
-- context — the scene
-- vision_refs — vision elements this item probed
-- decision_target — what fork the dialogue was meant to move
-- signals — atomic stakeholder facts, each EL-NNN-SNN (primary
-  evidence — typically 5-15 per record)
-- talk — Q&A turns, each EL-NNN-TNN (richer context)
-- assumption_evidence — stance + implication on vision assumptions,
-  each EL-NNN-ASMNN (key for confirmed vs inferred)
-- rule — closure summary if present (EL-NNN-RULE)
-
-MENTAL MODEL
-
-1. READ HOLISTICALLY. What is this role saying about their life?
-   What pain, workaround, wish, or boundary did they name?
-
-2. WALK EVERY SIGNAL. For each signal:
-   (a) Does it name or imply a distinct product-owned decision?
-       → requirement_seed. Translate to product side, propose
-       obligation.
-   (b) Does it support another signal's product decision (same
-       product object + trigger + audience + outcome)?
-       → supporting_evidence.
-   (c) Is it process / role behavior / context only?
-       → non_product.
-   Every signal gets one verdict. No silent skips.
-
-3. CLUSTER SEEDS into items. Signals converging on the SAME
-   product object + trigger + audience + outcome form ONE cluster
-   = ONE requirement. Keep clusters NARROW; when uncertain, split.
-
-   Typical rhythm:
-     10-15 signals → 5-8 items
-     5-10 signals → 3-6 items
-     <5 signals → 2-4 items
-
-   1-2 items from a signal-rich record = over-collapsed. Re-split.
-
-4. PROPOSE SOLUTIONS. For each cluster:
-   - Name the product-owned object the obligation acts on.
-   - State the obligation with a product-side subject.
-   - Write ACs in one of 3 reviewable shapes (state / capability /
-     invariant).
-   - If evidence names friction without naming the product
-     solution, YOU propose the solution — that is solution-
-     proposer's work. Mark confidence=inferred and trace to the
-     friction signals.
-
-5. ENRICH. Walk assumption_evidence, talk, rule:
-   - assumption_evidence verifying a vision assumption → marks
-     related item as confidence=confirmed; add the ASM id and
-     the vision_ref id to trace_refs.
-   - talk turn adding lived context → trace_refs union.
-   - rule summarizing closure → trace_refs union if relevant.
-
-6. MARK CONFIDENCE per item (see Foundations):
-   - confirmed when evidence directly grounds it (input intent,
-     explicit signal phrasing, verified vision assumption).
-   - inferred when you synthesized symptom→cause or connected
-     multiple signals into a product-side conclusion.
-
-7. FILL THE SIX IMPLEMENTATION PARITY AXES precisely.
-
-8. TRACE — union ALL contributing source-unit ids on each item.
-
-SIGNAL_WALK — OUTPUT REQUIRED
-
-Every signal in the input record owes one entry in signal_walk.
-The reason field names the cluster it seeded or supports (e.g.
-"co-founded <X> cluster" / "supports cluster from EL-NNN-S03" /
-"role process with no product object").
-
-WITHIN-RECORD GAPS
-
-If an assumption_evidence entry probed a decision (stance=unclear
-or weakens) that no signal cluster settled at AC precision, emit
-in gaps[] as "<source-id>: <missing product decision>".
-
-DO NOT EMIT out_of_scope ITEMS. Python preserves vision.scope 1:1.
-
-NOTES
-
-Brief substantive observation about this record's extraction.
-Don't echo a section header (Python frames the section).
+Think the carve-up through in the reasoning field first, then list the
+obligations. You ensure each is distinct from the others, is grounded
+in the specific evidence it cites, carries honest confidence, and is
+stated so a team could build and check it. You do not fold near-
+duplicates here — that is the next pass — and you do not emit
+out_of_scope items. Where the evidence raised a decision it never
+settled, surface it as a gap rather than guessing the answer.
 """
 
 
 _PASS_CLUSTER = """\
-PASS 2A OF 3 — CLUSTER SAME-BUILD DUPLICATES (DECISION ONLY)
+THIS PASS — FOLD TRUE DUPLICATES INTO ONE OBLIGATION
 
-You see every per-record Extraction (each item already carries a
-temporary id T-NNN) plus the compact Product Vision. Your ONE job:
+You see every obligation the previous pass produced across all
+perspectives — each with a temporary id and a lookup giving its
+perspective and source records — plus the compact Product Vision. That
+pass was told to reason broadly and ignore overlap, so near-duplicates
+within a perspective and across perspectives are expected. Your purpose
+is to make the list non-redundant: where several items would all be
+satisfied by one shippable build that one end-to-end check verifies,
+replace them with the single obligation that covers them.
 
-  Decide which Pass 1 items describe the same product obligation
-  (same build) and emit one MergeGroup per such cluster.
+Think the clustering through first in the reasoning field, then emit
+only the merge groups; any item you do not name in a group is kept
+unchanged, so you never restate pass-through items.
+The judgment is semantic, not lexical: two items are the same
+obligation when one shippable build would satisfy both — even if their
+wording, the role they name, or their framing share nothing, and even
+when they differ by a surface, audience, or condition that one
+parameterised build still covers. They stay distinct only when the
+builds genuinely differ, however alike the words look. What matters is
+the build underneath the words, and no obligation should survive this
+pass stated twice. When a cluster mixes confirmed and inferred members, the
+confirmed member's phrasing is the spine of the consolidated
+obligation. The consolidated form must still read as one buildable,
+checkable obligation; if pulling members together would bury two real
+obligations under one heading, they were never duplicates — leave them
+separate.
 
-You do NOT emit pass-through items. Items not referenced in any
-merge_group are kept verbatim by Python; touching them is wasted
-work and risks accidental drift.
-
-You do NOT walk the vision for new constraints, you do NOT
-adjudicate gaps, you do NOT adjudicate conflicts — a separate pass
-owns those concerns.
-
-DUPLICATE HANDLING — REASON LIKE A PRODUCT ENGINEER
-
-Different records often surface the same product decision from
-different perspectives. Decide whether two items cluster by running
-two intuition tests in order, not by matching fields in a checklist.
-
-TEST 1 — SAME-BUILD TEST (the primary merge question)
-
-Imagine the team builds ONE feature, component, route, content
-surface, or data flow to satisfy item A. Picture the actual
-implementation: the screen the role sees, the code path that
-serves it, the persisted state, the API or content artifact
-behind it.
-
-Does that SAME build also satisfy item B?
-  - same surface where the role finds it
-  - same code path or content flow producing the effect
-  - same end-to-end test would verify both
-
-If YES on all three → A and B are the same obligation. Cluster.
-
-If the team would build TWO different things, OR the items live on
-TWO different surfaces, OR you would need TWO end-to-end tests to
-cover both → distinct, do NOT cluster.
-
-TEST 2 — SPECIAL-CASE TEST (a frequent sibling of merge)
-
-Is one item a specific scenario, condition, audience-narrowing,
-or sub-case of the other? Patterns:
-  - "X for <general audience>" + "X for <narrower sub-group>"
-  - "X in <general context>" + "X in <specific situation>"
-  - "X across <conditions>" + "X under <one condition>"
-
-When this holds, the narrower item is not its own requirement;
-its evidence becomes an acceptance criterion or operating
-condition on the broader item. Cluster them and fold the
-narrower's statement into the consolidated ACs.
-
-SURFACE-MATCH RECOGNITION — DESCRIPTORS DRIFT, SURFACE PERSISTS
-
-When two items describe the same product surface (content,
-component, decision aid, interaction, invariant) using synonymous
-or relatable-variant descriptors, the surface match wins — they
-are same-build. Pass 1 picked one phrasing for the same product
-object out of many available ones; treating each phrasing as a
-distinct obligation creates near-siblings on the list.
-
-Signs the surface is the same:
-  - product_object axis denotes the same artifact after stripping
-    decorative adjectives — synonyms or near-synonyms of the
-    object word are not evidence of distinct surfaces
-  - the obligation lives in ONE deliverable artifact the team
-    would build once
-  - the acceptance_criteria across both items inspect the same
-    artifact, even if worded with different descriptors
-
-Cross-quality cluster: when two NFRs name overlapping quality
-descriptors of the SAME product object (e.g. one says <q1>+<q2>
-of <object>, the other says <q3>+<q4> of <object>, and the
-descriptor sets overlap or are listed as synonyms in the
-foundational quality list), they constrain one property of one
-artifact. Cluster under the broadest quality term covered.
-
-Cross-perspective cluster: a Pass 1 item written from one record's
-perspective and another from a different perspective can describe
-the SAME build if the product_object and observable_outcome match.
-Perspective is the evidence's lens, not the obligation's audience —
-the stakeholder axis on the obligation may differ from the record's
-perspective, and two records' perspectives may converge on one
-audience.
-
-Surface-match does NOT override the contradiction guard: if two
-items' acceptance_criteria genuinely contradict, they are not the
-same build even when the descriptors align.
-
-WHEN NEITHER TEST FIRES — DO NOT CLUSTER
-
-Same topic does NOT mean same obligation. Items sharing a theme
-but landing on different product objects, surfaces, or flows are
-distinct obligations. Different audiences whose surfaces or flows
-differ are distinct even when the topic word is identical.
-
-Different requirement TYPE (functional vs non_functional) is
-never a duplicate; the build is in different layers.
-
-HOW TO WRITE THE CONSOLIDATED FORM for a cluster
-
-  member_temp_ids: list every Pass 1 temp id in the cluster (2+).
-
-  consolidated.statement: pick the most precise wording across the
-    cluster; rewrite if needed to capture the union of evidence
-    without drifting from any member's intent.
-
-  consolidated.acceptance_criteria: union the ACs across members;
-    remove exact duplicates; keep the smallest reviewable set.
-    Special-case members contribute their statements as ACs or
-    operating conditions on the parent. If two ACs contradict each
-    other, the cluster is NOT actually one obligation — split it
-    back: emit two narrower groups, or do not cluster at all.
-
-  consolidated.rationale: one evidence-grounded sentence covering
-    the cluster.
-
-  consolidated.confidence: confirmed only if EVERY member was
-    confirmed; inferred otherwise.
-
-  consolidated.6 axes (trigger_event, product_object,
-    observable_outcome, operating_condition,
-    participation_structure, stakeholder): choose the most specific
-    value across members for each axis; do not let a vague
-    descriptor erase a specific one.
-
-  consolidated.trace_refs: list the member ids you consider load-
-    bearing for this obligation; Python additionally unions every
-    member's trace_refs into this field after the call, so the
-    final consolidated item carries every member's evidence.
-
-  rationale: one sentence naming the single build (one surface +
-    one code path or content flow + one end-to-end test) that
-    satisfies every member word-for-word.
-
-MEMBERSHIP COMPLETENESS — ANTI-LEAK RULE
-
-Python applies the member_temp_ids list verbatim. It does NOT
-infer membership from semantic overlap, shared trace_refs, or
-similar statements. A Pass 1 item is in the cluster only if its
-T-NNN appears in member_temp_ids — otherwise it passes through
-beside your consolidated form as a separate item, regardless of
-how thoroughly its evidence is already absorbed.
-
-Before finalizing each MergeGroup, run the anti-leak scan:
-
-  1. Read your consolidated.statement and consolidated.rationale.
-  2. For every product-side claim, condition, or audience-narrowing
-     in those sentences, identify the Pass 1 item whose evidence
-     you used.
-  3. Every such item's T-NNN must appear in member_temp_ids.
-
-Common leak shapes that produce duplicate items in the final list:
-
-  - You absorbed a sub-case's evidence into the broader consolidated
-    statement (folded it as an AC or operating condition), but
-    forgot to list the sub-case's T-NNN as a member. The sub-case
-    item then passes through with its own statement — the reviewer
-    sees the broad obligation AND the sub-case as siblings, both
-    citing overlapping signals.
-
-  - You cited a Pass 1 item's trace_refs (e.g. one of its signal
-    ids) inside the consolidated trace_refs without listing the
-    item itself as a member. The signal appears twice in the final
-    list, once inside the consolidated form and once inside the
-    leaked item's preserved entry.
-
-If you would NOT include a Pass 1 item as a member, do NOT cite
-its statement, ACs, or signal ids inside the consolidated form.
-The two decisions move together — either fully cluster the item
-or fully leave it pass-through.
-
-DEFAULT IS DO-NOT-CLUSTER — THE COST IS ASYMMETRIC
-
-A false cluster hides a distinct obligation inside another item:
-its statement is gone, only its trace_refs remain visible to a
-reviewer. Recovery requires re-reading every per-record extraction.
-A false non-cluster leaves two near-siblings visible side by side
-and a reviewer folds them in one click.
-
-This asymmetry sets the bar. Emit a MergeGroup only when you can
-name ONE concrete build that satisfies every member word-for-word:
-
-  - one surface where the role finds it,
-  - one code path or content flow producing the effect,
-  - one end-to-end test that would verify all members.
-
-If you have to hand-wave on any of the three, do not cluster.
-"Same theme" / "same vocabulary" / "same audience" / "same quality
-property name" are NOT cluster evidence — only same build is.
-
-EVIDENCE OF AGGRESSIVE CLUSTERING — STOP AND RE-SPLIT
-
-Two soft signals that you collapsed too much:
-
-  1. Your merge_groups list, after Python applies pass-through,
-     would leave fewer than half the Pass 1 items visible.
-     Aggressive clustering at this scale almost always paired
-     items on topic, not on build.
-  2. A consolidated item's member_temp_ids span >3 different
-     EL-NNN records and you cannot, in one sentence, name the
-     single build that satisfies every member statement.
-
-When either signal fires, re-read that cluster and split it back.
-The reviewer would rather see five near-siblings than four items
-with one obligation hidden inside.
-
-NOTES
-
-Brief substantive note on clustering decisions made. No section
-header echo (Python frames the section).
+The two mistakes cost the same. Burying two obligations as one hides
+work the team must size; leaving the same obligation in twice inflates
+the backlog and distorts sizing and priority just as badly. So when one
+build genuinely covers several items, folding them is the correct call,
+not a risky one — never leave a true repeat standing for safety's sake.
+You ensure the folded list loses no distinct obligation and keeps none
+stated twice. You do not walk the vision, settle gaps, or settle
+conflicts — those are the next pass.
 """
 
 
 _PASS_ADJUDICATE = """\
-PASS 2B OF 3 — VISION CONSTRAINTS + GAP/CONFLICT ADJUDICATION
+THIS PASS — VISION LIMITS, GAPS, AND CONFLICTS
 
-You see every per-record Extraction (each item already carries a
-temporary id T-NNN) plus the compact Product Vision. Your ONE job:
+You see the obligations after duplicates have been folded — each with
+a temporary id, the merged ones carrying the union of their members'
+evidence — plus every gap and conflict the earlier pass collected, a
+summary of what was merged, and the compact Product Vision. Your
+purpose is exactly three things: add obligations that come only from
+the vision's limits, settle the gaps, and settle the conflicts.
 
-  (a) Walk vision.concerns and vision.assumptions for explicit
-      constraints (narrowing verbs) that no Pass 1 item already
-      covers — emit them as vision_constraint_items.
-  (b) Adjudicate gaps across records.
-  (c) Adjudicate conflicts across records.
+From the vision, add an obligation only where it genuinely narrows or
+excludes something no current item already carries — a limit the
+product must respect. A positive capability the interview never
+implied is invention, not a vision constraint, so leave it out. The
+prompt hands you the vision ids no current item references, so the
+candidates to weigh are few.
 
-You do NOT decide which Pass 1 items merge — a separate pass owns
-that concern. You do NOT rewrite Pass 1 items. You do NOT emit
-out_of_scope items (Python preserves vision.scope 1:1).
+For the gaps, deliver the reader one clean list: fold gaps the same
+answer would close into the best-worded one, and drop any a current
+obligation already settles. For the conflicts, keep only true clashes
+— two obligations that cannot both hold in the same situation. A
+difference in condition that an obligation's own criteria absorb is
+not a clash, and two items that were just merged are not in conflict.
 
-VISION CONSTRAINT WALK
-
-For each entry in vision.concerns and vision.assumptions:
-- Is the verb narrowing / bounding ("must be", "shall preserve",
-  "must remain consistent with", "shall not contradict", ...)?
-  → constraint candidate.
-- Is the verb positive product action ("provide", "ensure",
-  "enable") that the interview did not confirm anywhere?
-  → baseline; drop (vision is not a source for unconfirmed
-  behavior).
-
-VISION ID IS A TRACE MARKER
-
-Each per-record item's trace_refs already lists the vision elements
-its obligation derives from. A vision id (ASM-NN, ROLE-NN,
-CONCERN-NN) appearing in any per-record item's trace_refs is that
-item's claim "this obligation authors this vision element into the
-requirement list". The constraint is already represented through
-that item — Python keeps it.
-
-For each constraint candidate, do the trace-marker scan FIRST:
-
-- The vision id appears in at least one per-record item's
-  trace_refs → the constraint is already authored. Skip. Emitting
-  a new vision_constraint_item duplicates the constraint and shows
-  up as a near-sibling in the reviewer's list.
-- The vision id appears in NO per-record item's trace_refs → run
-  the statement-level scan: does any per-record item's statement
-  or AC carry the narrowing-verb constraint without naming the
-  vision id? If yes → still skip (the obligation lives there). If
-  no → emit as a new vision_constraint_item. Choose type:
-  non_functional for a reviewable property, system for a
-  product-wide invariant.
-
-Two failure modes the trace marker scan prevents:
-- "Clarity" or "trust" constraints already carried by per-record
-  items that traced the CONCERN id — without the marker scan, you
-  will rephrase them slightly and emit a duplicate.
-- A vision assumption verified by interview evidence (the
-  per-record item already lists the ASM id) — without the marker
-  scan, you will treat it as new and emit a duplicate.
-
-Mark confidence on vision_constraint_items:
-- confirmed when the vision statement directly states the
-  constraint with a narrowing verb.
-- inferred when the constraint is your synthesis from vision
-  intent (rarer; prefer confirmed when verb is explicit).
-
-GAP ADJUDICATION
-
-Collect all gaps from all per-record extractions. Two gaps name
-the same concept when the same answer would close both — merge
-into one with the most precise wording. Drop a gap when a per-
-record item already names the audience's own answer at AC
-precision. Format: "<source-id>: <missing product decision>".
-
-CONFLICT ADJUDICATION
-
-A conflict is two per-record items that cannot both hold in the
-SAME operating context. Condition differences absorbed into AC ≠
-conflict. Ambivalence (mixed positive/negative signals on same
-theme) ≠ conflict — that becomes a gap or an AC.
-
-NOTES
-
-Brief: which vision constraints you added and why; gap
-adjudication summary. No section header echo.
+You ensure you neither re-merge nor rewrite obligations and never emit
+out_of_scope items; merging is done, and the vision's scope is
+preserved separately.
 """
 
 
@@ -986,6 +625,33 @@ class DistillerAgent(BaseAgent):
             raise last_exc
         raise RuntimeError(f"{label}: retry loop exited without result")
 
+    async def _a_with_rate_limit_retry(
+        self, label: str, async_fn: Callable[[], Awaitable[T]],
+    ) -> T:
+        """Async counterpart of ``_with_rate_limit_retry``.
+
+        Uses ``asyncio.sleep`` so the back-off does not block the event
+        loop while other Pass 1 perspective batches are still in flight.
+        """
+        attempts = self._rate_limit_retries + 1
+        last_exc: Optional[BaseException] = None
+        for attempt in range(attempts):
+            try:
+                return await async_fn()
+            except Exception as exc:
+                last_exc = exc
+                if not _is_rate_limit_error(exc) or attempt + 1 >= attempts:
+                    raise
+                delay = self._rate_limit_base_delay * (3 ** attempt)
+                logger.warning(
+                    "[DistillerAgent] %s rate-limited; retrying in %.1fs (attempt %d/%d).",
+                    label, delay, attempt + 1, attempts,
+                )
+                await asyncio.sleep(delay)
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError(f"{label}: retry loop exited without result")
+
     # ── Data shaping ─────────────────────────────────────────────────────────
 
     @staticmethod
@@ -1026,31 +692,20 @@ class DistillerAgent(BaseAgent):
     def _slim_interview_item(item: Dict[str, Any]) -> Dict[str, Any]:
         """Slim one interview record to just what the distiller needs.
 
-        Fields kept (9): id, perspective, context, vision_refs,
-        decision_target, signals, talk, assumption_evidence, rule.
+        Kept: id, perspective, scene, frictions_to_probe, talk (raw Q/A
+        turns), assumption_evidence (stance + evidence only), rule.
 
-        Fields dropped (6): item (agenda id), status, close_when,
-        coverage_points, coverage, interviewer_gaps — these are meta /
-        interviewer-only / redundant with the signals + assumption_evidence
-        the distiller already needs. Less context = less overload.
+        Talk is the primary evidence. Pass 1 re-extracts atomic facts
+        directly from dialogue. The interviewer's per-turn signal
+        atomization is no longer fed — distiller's stronger model in
+        batch mode does the extraction more reliably from talk than
+        from an interviewer's lossy pre-extraction.
+
+        Dropped: status, close_when, coverage, signals (entirely
+        removed from pipeline), assumption_evidence's implication field
+        — meta or interviewer-side guesses that bias synthesis.
         """
         item_id = item.get("id") or item.get("item") or "EL"
-        signals = [
-            {"id": f"{item_id}-S{index:02d}", "text": text}
-            for index, text in enumerate(item.get("signals") or [], 1)
-            if str(text or "").strip()
-        ]
-        talk = []
-        for index, turn in enumerate(item.get("talk") or [], 1):
-            question = (turn.get("question") or "").strip()
-            answer = (turn.get("answer") or "").strip()
-            if question or answer:
-                talk.append({
-                    "id": f"{item_id}-T{index:02d}",
-                    "question": question,
-                    "answer": answer,
-                })
-
         rule = (item.get("rule") or "").strip()
         assumption_evidence = [
             {
@@ -1058,19 +713,32 @@ class DistillerAgent(BaseAgent):
                 "vision_ref": entry.get("vision_ref") or entry.get("assumption_ref"),
                 "stance": entry.get("stance"),
                 "evidence": entry.get("evidence"),
-                "implication": entry.get("implication"),
             }
             for index, entry in enumerate(item.get("assumption_evidence") or [], 1)
             if isinstance(entry, dict) and str(entry.get("vision_ref") or entry.get("assumption_ref") or "").strip()
         ]
+        # Raw Q/A turns from the interview. Pass 1 reads these as primary
+        # evidence; the explicit `id` field gives the LLM a ready-made
+        # trace_ref it can cite directly (EL-NNN-TNN) without having to
+        # construct the id by hand.
+        talk_turns = [
+            {
+                "id": f"{item_id}-T{index:02d}",
+                "turn": index,
+                "question": (entry.get("question") or "").strip(),
+                "answer": (entry.get("answer") or "").strip(),
+            }
+            for index, entry in enumerate(item.get("talk") or [], 1)
+            if isinstance(entry, dict)
+            and (entry.get("question") or "").strip()
+            and (entry.get("answer") or "").strip()
+        ]
         return {
             "id": item_id,
             "perspective": item.get("perspective"),
-            "context": item.get("context"),
-            "vision_refs": item.get("vision_refs") or item.get("assumption_refs") or [],
-            "decision_target": item.get("decision_target"),
-            "signals": signals,
-            "talk": talk,
+            "scene": item.get("scene") or item.get("context"),
+            "frictions_to_probe": item.get("frictions_to_probe") or item.get("coverage_points") or [],
+            "talk": talk_turns,
             "assumption_evidence": assumption_evidence,
             "rule": {"id": f"{item_id}-RULE", "text": rule} if rule else None,
         }
@@ -1083,9 +751,6 @@ class DistillerAgent(BaseAgent):
         """Union of source-unit ids exposed this run plus every vision id."""
         known: set = set()
         for record in slim_records:
-            for signal in record.get("signals") or []:
-                if isinstance(signal, dict) and signal.get("id"):
-                    known.add(signal["id"])
             for turn in record.get("talk") or []:
                 if isinstance(turn, dict) and turn.get("id"):
                     known.add(turn["id"])
@@ -1204,7 +869,7 @@ class DistillerAgent(BaseAgent):
 
     @staticmethod
     def _assign_temp_ids(
-        extraction_results: List[Tuple[str, Extraction]],
+        perspective_results: List[Tuple[str, "PerspectiveExtraction"]],
     ) -> List[Tuple[str, Requirement]]:
         """Assign T-NNN temp ids to every Pass 1 item, in Pass 1 order.
 
@@ -1215,7 +880,7 @@ class DistillerAgent(BaseAgent):
         """
         ordered: List[Tuple[str, Requirement]] = []
         counter = 1
-        for _record_id, extraction in extraction_results:
+        for _perspective, extraction in perspective_results:
             for item in extraction.items or []:
                 tid = f"T-{counter:03d}"
                 counter += 1
@@ -1278,53 +943,204 @@ class DistillerAgent(BaseAgent):
                             unioned.append(ref)
                             seen_refs.add(ref)
                 consolidated.trace_refs = unioned
+                # Keep a stable post-merge id so Pass 2B can reference
+                # the consolidated form. Final FR/NFR/SYS numbering
+                # happens later in _renumber_requirements.
                 consolidated.id = ""
                 final.append(consolidated)
                 emitted.add(gidx)
             else:
-                item.id = ""
+                # Pass-through items keep their T-NNN so Pass 2B can
+                # cite them; final numbering reassigns later.
                 final.append(item)
 
         return final, unknown_temp_ids, len(valid_members_per_group)
 
+    @staticmethod
+    def _assign_post_merge_ids(items: List[Requirement]) -> None:
+        """Assign post-merge temp ids in place.
+
+        Pass-through items keep their T-NNN (already set in Pass 1).
+        Consolidated items (id was cleared in _apply_merge_groups) get
+        M-NNN so Pass 2B can reference both kinds cleanly. Final
+        FR/NFR/SYS numbering happens later in _renumber_requirements.
+        """
+        merged_counter = 1
+        for item in items:
+            if not (item.id or "").strip():
+                item.id = f"M-{merged_counter:03d}"
+                merged_counter += 1
+
     # ── LLM passes ───────────────────────────────────────────────────────────
 
-    def _extract_per_item(
+    @staticmethod
+    def _touched_vision_stances(
+        slim_records: List[Dict[str, Any]],
+    ) -> Dict[str, List[Dict[str, str]]]:
+        """Aggregate assumption_evidence stances across the batch.
+
+        Pure shape-reorganization of data the interviewer already emitted —
+        no semantic judgment. Returns vision_ref → list of
+        {record, stance, evidence_id} so Pass 1 sees which vision ids
+        the dialogue has explicit stance on (used to mark confidence
+        accurately).
+        """
+        stances: Dict[str, List[Dict[str, str]]] = {}
+        for record in slim_records:
+            rid = str(record.get("id") or "")
+            for entry in record.get("assumption_evidence") or []:
+                if not isinstance(entry, dict):
+                    continue
+                vref = str(entry.get("vision_ref") or "").strip()
+                stance = str(entry.get("stance") or "").strip()
+                if not vref or not stance:
+                    continue
+                stances.setdefault(vref, []).append({
+                    "record": rid,
+                    "stance": stance,
+                    "evidence_id": str(entry.get("id") or ""),
+                })
+        return stances
+
+    async def _aextract_per_perspective(
         self,
-        slim_record: Dict[str, Any],
+        perspective: str,
+        slim_records: List[Dict[str, Any]],
         compact_vision: Dict[str, Any],
         feedback_block: str,
-    ) -> Extraction:
-        record_id = slim_record.get("id", "EL?")
-        return self._with_rate_limit_retry(
-            label=f"per-record extract {record_id}",
-            fn=lambda: self.extract_structured(
-                schema=Extraction,
+    ) -> PerspectiveExtraction:
+        """Pass 1 batch — assemble requirements across one perspective's records.
+
+        Async so perspective batches can be driven concurrently with
+        ``asyncio.gather``. The model sees every record of one role as
+        one corpus of lived evidence and emits items directly on the
+        PerspectiveExtraction — trace_refs cite specific turn ids so a
+        single item may draw evidence from one record or several.
+        Cross-perspective consolidation remains Pass 2A's concern.
+        """
+        record_ids = [str(r.get("id") or "EL?") for r in slim_records]
+        label = f"per-perspective extract {perspective} ({len(slim_records)} records)"
+        # Compact batch payload — the model sees every record in one
+        # call and assembles items across them. record_ids are listed
+        # for context (so the model can cite specific turn ids cleanly)
+        # but no longer a per-record emission contract.
+        batch_payload = {
+            "perspective": perspective,
+            "record_ids": record_ids,
+            "records": slim_records,
+        }
+        # Touched-stances map: reorganized view of assumption_evidence
+        # already emitted by the interviewer. Pure aggregation; no
+        # semantic judgment. Helps Pass 1 mark confidence accurately —
+        # when a vision_ref has stance=supports here, items derived
+        # from that ASM can legitimately be confidence=confirmed.
+        touched_stances = self._touched_vision_stances(slim_records)
+
+        async def _call() -> PerspectiveExtraction:
+            return await self.aextract_structured(
+                schema=PerspectiveExtraction,
                 system_prompt=(
                     self.profile.prompt
                     + "\n\n" + _FOUNDATIONS
-                    + "\n\n" + _REASONING_MOVES
                     + "\n\n" + _PASS_EXTRACT
                     + feedback_block
                 ),
                 user_prompt=(
                     f"COMPACT PRODUCT VISION:\n{self._json(compact_vision)}\n\n"
-                    f"INTERVIEW RECORD:\n{self._json(slim_record)}\n\n"
-                    "Return an Extraction. Fill signal_walk with one entry per signal in the input "
-                    "record; fill the six Implementation Parity axes on every Requirement; do NOT "
-                    "emit out_of_scope items (Python preserves vision scope 1:1)."
+                    f"TOUCHED VISION STANCES (vision_ref → the stances the "
+                    f"dialogue recorded for it):\n{self._json(touched_stances)}\n\n"
+                    f"PERSPECTIVE BATCH:\n{self._json(batch_payload)}\n\n"
+                    "Return a PerspectiveExtraction whose perspective equals the "
+                    "batch perspective. Build the broadest set of distinct "
+                    "product obligations this evidence implies, each grounded in "
+                    "the source units it cites (turn ids EL-NNN-TNN, assumption-"
+                    "evidence ids EL-NNN-ASMNN, rule ids EL-NNN-RULE, vision ids). "
+                    "Do not fold near-duplicates and do not emit out_of_scope "
+                    "items."
                 ),
                 include_memory=False,
-            ),
-        )
+            )
+
+        return await self._a_with_rate_limit_retry(label, _call)
+
+    async def _arun_pass1(
+        self,
+        perspective_groups: Dict[str, List[Dict[str, Any]]],
+        compact_vision: Dict[str, Any],
+        feedback_block: str,
+    ) -> List[Tuple[str, Any]]:
+        """Drive every Pass 1 perspective batch concurrently.
+
+        A semaphore caps in-flight calls at ``self._max_parallel`` so the
+        provider's per-second / concurrent-request budget still binds.
+        Returns ``(perspective, result_or_exception)`` tuples in input
+        order; the caller maps each batch back to its expected record_ids.
+        Exceptions are returned rather than raised so a single failing
+        perspective does not abort the rest of the synthesis run.
+        """
+        semaphore = asyncio.Semaphore(self._max_parallel)
+
+        async def _bounded(
+            persp: str, records: List[Dict[str, Any]],
+        ) -> PerspectiveExtraction:
+            async with semaphore:
+                return await self._aextract_per_perspective(
+                    persp, records, compact_vision, feedback_block,
+                )
+
+        persps = list(perspective_groups.keys())
+        coros = [_bounded(persp, perspective_groups[persp]) for persp in persps]
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        return list(zip(persps, results))
+
+    @staticmethod
+    def _temp_id_context(
+        perspective_extractions: List[Dict[str, Any]],
+    ) -> Dict[str, Dict[str, str]]:
+        """Map T-NNN → {perspective, source_records}.
+
+        Pure lookup over the perspective_extractions Python has already
+        built. Pass 2A uses this to write context-conditional ACs when
+        clustering members from different perspectives. Source records
+        are derived from each item's trace_refs (EL-NNN prefixes) so the
+        cluster pass can still see which records contributed evidence,
+        without forcing a 1:1 record-to-item shape upstream.
+        """
+        ctx: Dict[str, Dict[str, str]] = {}
+        for entry in perspective_extractions:
+            persp = str(entry.get("perspective") or "")
+            for item in entry.get("items") or []:
+                if not isinstance(item, dict):
+                    continue
+                tid = str(item.get("id") or "")
+                if not tid:
+                    continue
+                source_records: List[str] = []
+                seen: set = set()
+                for ref in item.get("trace_refs") or []:
+                    text = str(ref or "")
+                    # EL-NNN-* → source record prefix
+                    if text.startswith("EL-") and len(text) >= 6:
+                        rid = text.split("-", 2)
+                        if len(rid) >= 2:
+                            record = f"{rid[0]}-{rid[1]}"
+                            if record not in seen:
+                                seen.add(record)
+                                source_records.append(record)
+                ctx[tid] = {
+                    "perspective": persp,
+                    "source_records": ", ".join(source_records) or "(no record ids)",
+                }
+        return ctx
 
     def _cluster(
         self,
         compact_vision: Dict[str, Any],
-        record_extractions: List[Dict[str, Any]],
+        perspective_extractions: List[Dict[str, Any]],
         feedback_block: str,
     ) -> MergeDecisions:
         """Pass 2A — emit merge groups only."""
+        temp_id_ctx = self._temp_id_context(perspective_extractions)
         return self._with_rate_limit_retry(
             label="cluster",
             fn=lambda: self.extract_structured(
@@ -1332,32 +1148,82 @@ class DistillerAgent(BaseAgent):
                 system_prompt=(
                     self.profile.prompt
                     + "\n\n" + _FOUNDATIONS
-                    + "\n\n" + _REASONING_MOVES
                     + "\n\n" + _PASS_CLUSTER
                     + feedback_block
                 ),
                 user_prompt=(
                     f"COMPACT PRODUCT VISION:\n{self._json(compact_vision)}\n\n"
-                    f"PER-RECORD EXTRACTIONS:\n{self._json(record_extractions)}\n\n"
-                    "Each item carries a temporary id (T-NNN) in its id field. Return "
-                    "MergeDecisions: merge_groups only, each grouping 2+ items that "
-                    "satisfy the same-build test. Items not referenced by any group are "
-                    "pass-through — do NOT emit them. For each group, list member_temp_ids "
-                    "and write the consolidated Requirement (statement, six axes, ACs "
-                    "unioned, confidence per the all-confirmed rule). Do NOT emit "
-                    "out_of_scope items."
+                    f"TEMP_ID CONTEXT (T-NNN → perspective / source_records for "
+                    f"the members you cluster):\n{self._json(temp_id_ctx)}\n\n"
+                    f"PER-PERSPECTIVE EXTRACTIONS:\n{self._json(perspective_extractions)}\n\n"
+                    "The earlier pass built obligations broadly without merging, "
+                    "so duplicates within and across perspectives are expected. "
+                    "Fold each cluster whose members one shippable build would "
+                    "satisfy into a single consolidated obligation, and leave "
+                    "every other item to pass through. When a cluster mixes "
+                    "confirmed and inferred members, keep the confirmed member's "
+                    "phrasing as the spine. Do not emit out_of_scope items."
                 ),
                 include_memory=False,
             ),
         )
 
+    @staticmethod
+    def _untouched_vision_ids(
+        compact_vision: Dict[str, Any],
+        post_merge_items: List[Dict[str, Any]],
+    ) -> Dict[str, List[str]]:
+        """Compute vision IDs that no post-merge item references in trace_refs.
+
+        Pure set difference between the vision's id inventory and the
+        union of trace_refs across every post-merge item (consolidated
+        forms already carry the union of every member's trace_refs).
+        Out_of_scope ids are excluded from the result (Python preserves
+        them 1:1 elsewhere). Pass 2B uses this to focus adjudication on
+        real gaps rather than re-scanning the full vision.
+        """
+        by_kind: Dict[str, List[str]] = {
+            "assumptions": [],
+            "concerns": [],
+            "scope": [],
+        }
+        for key in by_kind.keys():
+            for entry in compact_vision.get(key) or []:
+                if isinstance(entry, dict) and entry.get("id"):
+                    by_kind[key].append(str(entry["id"]))
+
+        touched: set = set()
+        for item in post_merge_items:
+            if not isinstance(item, dict):
+                continue
+            for ref in item.get("trace_refs") or []:
+                touched.add(str(ref).strip())
+
+        untouched: Dict[str, List[str]] = {}
+        for kind, ids in by_kind.items():
+            missing = [vid for vid in ids if vid not in touched]
+            if missing:
+                untouched[kind] = missing
+        return untouched
+
     def _adjudicate(
         self,
         compact_vision: Dict[str, Any],
-        record_extractions: List[Dict[str, Any]],
+        post_merge_items: List[Dict[str, Any]],
+        all_gaps: List[str],
+        all_conflicts: List[Dict[str, Any]],
+        cluster_summary: List[Dict[str, Any]],
         feedback_block: str,
     ) -> VisionAndAdjudication:
-        """Pass 2B — vision constraint walk + gap/conflict adjudication."""
+        """Pass 2B — vision constraint walk + gap/conflict adjudication.
+
+        Runs AFTER Pass 2A so it sees the post-merge item set (each item
+        carrying a T-NNN for a pass-through or M-NNN for a consolidated
+        form). This prevents Pass 2B from emitting conflicts on items
+        Pass 2A already merged, or vision_constraint_items duplicating
+        a consolidated capability.
+        """
+        untouched = self._untouched_vision_ids(compact_vision, post_merge_items)
         return self._with_rate_limit_retry(
             label="adjudicate",
             fn=lambda: self.extract_structured(
@@ -1365,20 +1231,35 @@ class DistillerAgent(BaseAgent):
                 system_prompt=(
                     self.profile.prompt
                     + "\n\n" + _FOUNDATIONS
-                    + "\n\n" + _REASONING_MOVES
                     + "\n\n" + _PASS_ADJUDICATE
                     + feedback_block
                 ),
                 user_prompt=(
                     f"COMPACT PRODUCT VISION:\n{self._json(compact_vision)}\n\n"
-                    f"PER-RECORD EXTRACTIONS:\n{self._json(record_extractions)}\n\n"
-                    "Each item carries a temporary id (T-NNN) in its id field — use it "
-                    "when scanning for already-covered constraints. Return "
-                    "VisionAndAdjudication: vision_constraint_items (new vision-derived "
-                    "only, do not echo per-record items here), final_gaps (adjudicated, "
-                    "format '<source-id>: <missing product decision>'), final_conflicts "
-                    "(true cross-record clashes only), notes. Do NOT emit out_of_scope "
-                    "items or decide merges."
+                    f"UNTOUCHED VISION IDS (no post-merge item references "
+                    f"these in trace_refs — focus your vision constraint walk "
+                    f"here):\n{self._json(untouched)}\n\n"
+                    f"CLUSTER SUMMARY (Pass 2A merge decisions; consolidated "
+                    f"items now carry M-NNN ids and union the trace_refs of "
+                    f"every member — do NOT emit vision_constraint_items or "
+                    f"conflicts that duplicate a consolidated "
+                    f"capability):\n{self._json(cluster_summary)}\n\n"
+                    f"POST-MERGE ITEMS (every Pass 1 item, with consolidated "
+                    f"forms replacing merged members; ids are T-NNN for pass-"
+                    f"through items, M-NNN for consolidated):"
+                    f"\n{self._json(post_merge_items)}\n\n"
+                    f"ALL GAPS COLLECTED ACROSS PERSPECTIVES (deduplicate and "
+                    f"drop any whose missing decision is already settled at AC "
+                    f"precision by a post-merge item):\n{self._json(all_gaps)}\n\n"
+                    f"ALL CONFLICTS COLLECTED ACROSS PERSPECTIVES (filter to "
+                    f"true clashes that remain after merge; condition-difference "
+                    f"absorbed into AC is not a conflict):"
+                    f"\n{self._json(all_conflicts)}\n\n"
+                    "Return VisionAndAdjudication: vision_constraint_items "
+                    "(vision-derived only, never echoing a current item), "
+                    "final_gaps, final_conflicts (true clashes only, referencing "
+                    "the post-merge ids T-NNN / M-NNN), and notes. Do not emit "
+                    "out_of_scope items or decide merges."
                 ),
                 include_memory=False,
             ),
@@ -1409,95 +1290,111 @@ class DistillerAgent(BaseAgent):
 
         compact_vision = self._compact_vision(raw_vision)
 
-        # ── Pass 1: per-record extraction in parallel ─────────────────
+        # ── Pass 1: assembly batched by perspective ────────────────────
+        # Records sharing one perspective go in one LLM call. The model
+        # reads them as one corpus of lived evidence for that role and
+        # emits requirements directly on PerspectiveExtraction.items;
+        # trace_refs cite turn ids so a single item may draw evidence
+        # from one record or several. Cross-perspective consolidation
+        # remains Pass 2A's concern.
         slim_records = [self._slim_interview_item(item) for item in items]
-        slim_by_id: Dict[str, Dict[str, Any]] = {
-            str(slim.get("id") or ""): slim for slim in slim_records
-        }
-        extraction_results: List[Tuple[str, Extraction]] = []
+        perspective_groups: Dict[str, List[Dict[str, Any]]] = {}
+        for slim in slim_records:
+            persp = (slim.get("perspective") or "").strip() or "(unknown)"
+            perspective_groups.setdefault(persp, []).append(slim)
+
+        perspective_results: List[Tuple[str, PerspectiveExtraction]] = []
+        perspective_notes: List[str] = []
         map_failures: List[str] = []
 
-        if slim_records:
-            with ThreadPoolExecutor(max_workers=self._max_parallel) as executor:
-                future_to_id = {
-                    executor.submit(
-                        self._extract_per_item, slim, compact_vision, feedback_block
-                    ): slim.get("id", "EL?")
-                    for slim in slim_records
-                }
-                for future in as_completed(future_to_id):
-                    record_id = future_to_id[future]
-                    try:
-                        extraction_results.append((record_id, future.result()))
-                    except Exception as exc:
-                        logger.warning(
-                            "[DistillerAgent] Pass 1 extraction failed for %s: %s",
-                            record_id, exc,
-                        )
-                        map_failures.append(f"{record_id}: {exc}")
+        if perspective_groups:
+            # Drive every perspective batch concurrently on an asyncio
+            # event loop. Semaphore inside _arun_pass1 caps in-flight
+            # calls at self._max_parallel so the provider's rate-limit
+            # budget still binds. process() is called from synchronous
+            # LangGraph nodes, so asyncio.run is safe here.
+            persp_results = asyncio.run(
+                self._arun_pass1(perspective_groups, compact_vision, feedback_block)
+            )
+            for persp, batch_or_exc in persp_results:
+                record_count = len(perspective_groups[persp])
+                if isinstance(batch_or_exc, BaseException):
+                    logger.warning(
+                        "[DistillerAgent] Pass 1 batch failed for perspective '%s' "
+                        "(%d records): %s",
+                        persp, record_count, batch_or_exc,
+                    )
+                    map_failures.append(
+                        f"perspective '{persp}' ({record_count} records): {batch_or_exc}"
+                    )
+                    continue
+
+                batch = batch_or_exc
+                if (batch.reasoning or "").strip():
+                    logger.info(
+                        "[DistillerAgent] Pass 1 reasoning [%s]:\n%s",
+                        persp, batch.reasoning.strip(),
+                    )
+                if (batch.notes or "").strip():
+                    perspective_notes.append(
+                        f"[{persp}] {batch.notes.strip()}"
+                    )
+                perspective_results.append((persp, batch))
 
         # Assign T-NNN temp ids in Pass 1 order — this mutates each
         # Requirement.id so the value carries through the model_dump
         # below, letting Pass 2A reference items by id and letting
         # Python apply merge groups deterministically.
-        pass1_items_in_order = self._assign_temp_ids(extraction_results)
+        pass1_items_in_order = self._assign_temp_ids(perspective_results)
         pass1_item_count = len(pass1_items_in_order)
 
-        # Bundle per-record extractions for Pass 2A + Pass 2B (same input
-        # for both passes — they consume it for different concerns).
-        record_extractions: List[Dict[str, Any]] = []
-        for record_id, extraction in extraction_results:
-            slim = slim_by_id.get(str(record_id) or "") or {}
-            record_extractions.append({
-                "record_id": record_id,
-                "perspective": slim.get("perspective"),
-                "vision_refs": slim.get("vision_refs") or [],
-                "context": slim.get("context"),
-                "extraction": extraction.model_dump(),
+        # Bundle per-perspective extractions for Pass 2A + Pass 2B
+        # (same input for both passes — they consume it for different
+        # concerns). Each entry carries perspective, the assembled
+        # items (with T-NNN ids), gaps, and conflicts.
+        perspective_extractions: List[Dict[str, Any]] = []
+        for persp, batch in perspective_results:
+            perspective_extractions.append({
+                "perspective": persp,
+                "record_ids": [
+                    str(r.get("id") or "")
+                    for r in perspective_groups.get(persp, [])
+                ],
+                "notes": batch.notes,
+                "items": [item.model_dump() for item in (batch.items or [])],
+                "gaps": list(batch.gaps or []),
+                "conflicts": [c.model_dump() for c in (batch.conflicts or [])],
             })
 
-        # ── Pass 2A (cluster) + Pass 2B (adjudicate) in parallel ───────
-        # They consume the same Pass 1 bundle but have independent
-        # concerns: Pass 2A decides merges, Pass 2B walks the vision and
-        # adjudicates gaps/conflicts. Running in parallel halves the
-        # serial latency without changing the rate-limit budget.
+        # ── Pass 2A (cluster) — SEQUENTIAL, runs first ─────────────────
+        # Pass 2B needs to see the post-merge item set, otherwise it
+        # adjudicates conflicts and walks vision constraints against
+        # raw Pass 1 items that Pass 2A is about to consolidate, which
+        # produces dangling conflict refs and duplicate vision items.
         cluster_result: Optional[MergeDecisions] = None
         adjudicate_result: Optional[VisionAndAdjudication] = None
         pass2_failures: List[str] = []
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            cluster_future = executor.submit(
-                self._cluster, compact_vision, record_extractions, feedback_block
+        try:
+            cluster_result = self._cluster(
+                compact_vision, perspective_extractions, feedback_block
             )
-            adjudicate_future = executor.submit(
-                self._adjudicate, compact_vision, record_extractions, feedback_block
+            if cluster_result and (cluster_result.reasoning or "").strip():
+                logger.info(
+                    "[DistillerAgent] Pass 2A reasoning:\n%s",
+                    cluster_result.reasoning.strip(),
+                )
+        except Exception as exc:
+            logger.error(
+                "[DistillerAgent] Pass 2A (cluster) failed: %s", exc, exc_info=True,
             )
-            try:
-                cluster_result = cluster_future.result()
-            except Exception as exc:
-                logger.error(
-                    "[DistillerAgent] Pass 2A (cluster) failed: %s", exc, exc_info=True,
-                )
-                pass2_failures.append(f"Pass 2A (cluster): {exc}")
-            try:
-                adjudicate_result = adjudicate_future.result()
-            except Exception as exc:
-                logger.error(
-                    "[DistillerAgent] Pass 2B (adjudicate) failed: %s", exc, exc_info=True,
-                )
-                pass2_failures.append(f"Pass 2B (adjudicate): {exc}")
-
-        if cluster_result is None and adjudicate_result is None:
-            return {
-                "_needs_srs_synthesis": False,
-                "interview_complete": True,
-                "errors": (state.get("errors") or []) + pass2_failures,
-            }
+            pass2_failures.append(f"Pass 2A (cluster): {exc}")
 
         # ── Apply merge groups deterministically (Python data movement) ─
         # Pass-through items not in any group are preserved in Pass 1
         # order. Consolidated forms replace their first member's slot.
         # Member trace_refs are unioned into the consolidated form so no
         # Pass 1 evidence is lost regardless of what the LLM emitted.
+        # When Pass 2A failed, treat as no-merge and continue.
         merge_groups = (cluster_result.merge_groups if cluster_result else []) or []
         merged_items, unknown_temp_ids, applied_groups = self._apply_merge_groups(
             pass1_items_in_order, merge_groups,
@@ -1507,6 +1404,54 @@ class DistillerAgent(BaseAgent):
                 "[DistillerAgent] Pass 2A referenced %d unknown temp id(s): %s",
                 len(unknown_temp_ids), ", ".join(unknown_temp_ids[:8]),
             )
+
+        # Assign post-merge ids (M-NNN for consolidated, T-NNN preserved
+        # for pass-through) so Pass 2B can reference both kinds cleanly.
+        self._assign_post_merge_ids(merged_items)
+
+        # ── Build post-merge view for Pass 2B ──────────────────────────
+        post_merge_items_view = [item.model_dump() for item in merged_items]
+        all_gaps: List[str] = []
+        all_conflicts: List[Dict[str, Any]] = []
+        for entry in perspective_extractions:
+            all_gaps.extend(entry.get("gaps") or [])
+            all_conflicts.extend(entry.get("conflicts") or [])
+        cluster_summary = [
+            {
+                "consolidated_id": item.id,
+                "member_temp_ids": list(group.member_temp_ids or []),
+                "statement": item.statement,
+            }
+            for item, group in zip(
+                (
+                    it for it in merged_items if (it.id or "").startswith("M-")
+                ),
+                merge_groups,
+            )
+        ]
+
+        # ── Pass 2B (adjudicate) — SEQUENTIAL, sees post-merge view ────
+        try:
+            adjudicate_result = self._adjudicate(
+                compact_vision,
+                post_merge_items_view,
+                all_gaps,
+                all_conflicts,
+                cluster_summary,
+                feedback_block,
+            )
+        except Exception as exc:
+            logger.error(
+                "[DistillerAgent] Pass 2B (adjudicate) failed: %s", exc, exc_info=True,
+            )
+            pass2_failures.append(f"Pass 2B (adjudicate): {exc}")
+
+        if cluster_result is None and adjudicate_result is None:
+            return {
+                "_needs_srs_synthesis": False,
+                "interview_complete": True,
+                "errors": (state.get("errors") or []) + pass2_failures,
+            }
 
         vision_constraint_items: List[Requirement] = list(
             adjudicate_result.vision_constraint_items if adjudicate_result else []
@@ -1544,11 +1489,19 @@ class DistillerAgent(BaseAgent):
         final_items = self._renumber_requirements(final_items)
         final_conflicts = self._renumber_conflicts(final_conflicts)
 
+        # ── Per-requirement summary log ───────────────────────────────────────
+        for item in final_items:
+            icon = "✓" if item.confidence == "confirmed" else "~"
+            logger.info(
+                "[DistillerAgent]   %s [%s] (%s) %s",
+                icon, item.id, item.type,
+                (item.statement or "")[:100],
+            )
+
         # ── Assemble reviewer notes ──────────────────────────────────
-        per_record_notes = "\n".join(
-            f"  [{record_id}]: {(extraction.notes or '').strip()}"
-            for record_id, extraction in extraction_results
-            if extraction.notes
+        perspective_notes_block = (
+            "\n".join(f"  {line}" for line in perspective_notes)
+            if perspective_notes else "  (no perspective notes)"
         )
         cluster_note = (
             (cluster_result.notes or "").strip() if cluster_result else ""
@@ -1577,8 +1530,8 @@ class DistillerAgent(BaseAgent):
 
         final = RequirementList(
             notes=(
-                "PASS 1 — PER-RECORD EXTRACTION\n"
-                f"{per_record_notes or '  (no per-record notes)'}\n\n"
+                "PASS 1 — PER-PERSPECTIVE ASSEMBLY\n"
+                f"{perspective_notes_block}\n\n"
                 "PASS 2A — CLUSTER\n"
                 f"  {cluster_note}\n"
                 f"{cluster_stats}\n\n"
