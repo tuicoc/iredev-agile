@@ -31,18 +31,38 @@ Elicitation state (v9)
 
 Agenda-driven flow (InterviewerAgent v10)
 ─────────────────────────────────────────
-  InterviewerAgent reads the current agenda item (vision_refs,
+  Each agenda item is assumption-backed, concern-led:
+    concern_ref      → single CONCERN-NN that opens the lived gate
+    assumption_refs  → 1+ ASM-NN forks the evidence should move into features
+    scope_refs       → 0+ OOS-NN boundary edges touched in this scene
+  AgendaRuntimeItem also exposes a derived `vision_refs` (concern_ref +
+  assumption_refs + scope_refs combined) so downstream consumers
+  (InterviewerAgent, EndUserAgent, DistillerAgent) can keep using one
+  flat list of vision ids for lookups.
+
+  InterviewerAgent reads the current agenda item (vision_refs flat list,
   perspective, context, decision_target, seed_question, close_when,
-  coverage_points). vision_refs is a single list of vision ids
-  (assumption / concern / scope) — the agenda no longer carries focus_kind,
-  focus_ref, covered_refs, or three separate ref lists.
-  EndUserAgent receives only perspective + scene context + current question.
-  System gates enforce only safety limits; interview strategy lives in the
-  ReAct addendum prompt and tool descriptions.
+  coverage_points). EndUserAgent receives only perspective + scene context
+  + current question. System gates enforce only safety limits; interview
+  strategy lives in the ReAct addendum prompt and tool descriptions.
+
+Vision mode (VisionaryAgent)
+────────────────────────────
+  vision_mode = "fidelity" runs Pass 1 (STATED+IMPLIED reading) and
+  Pass 2 (STATED+IMPLIED forks). Output reflects what the project
+  intent says or strictly implies. The minimum-stakeholder guarantee
+  (infer a primary user from actor+action+object when the intent is
+  silent) lives inside Pass 1 and applies in every mode.
+
+  vision_mode = "coverage" additionally runs Pass 3 (INFERRED) which
+  expands the vision with what generic product knowledge says products
+  of this shape typically owe — additional roles, forks, concerns,
+  scope edges — and is allowed to chain its inferences on the output
+  of Pass 1+2.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Literal, Optional, TypedDict
 
 
 class SystemPhase(str, Enum):
@@ -74,6 +94,14 @@ class WorkflowState(TypedDict, total=False):
     # ── Phase management ───────────────────────────────────────────────────
     system_phase: str
 
+    # ── Vision generation mode ─────────────────────────────────────────────
+    # "fidelity"  → run only stated+implied passes (Pass 1 + Pass 2)
+    # "coverage"  → also run Pass 3 (INFERRED expansion from generic
+    #               product knowledge — surfaces additional roles, forks,
+    #               concerns, scope edges the project intent did not name)
+    # Default is "fidelity"; chosen at session start (CLI / UI).
+    vision_mode: Literal["fidelity", "coverage"]
+
     # ── Artifact store ─────────────────────────────────────────────────────
     artifacts:    Dict[str, Any]
     artifact_ids: Dict[str, str]
@@ -94,10 +122,11 @@ class WorkflowState(TypedDict, total=False):
 
     # Serialised AgendaRuntime dict:
     #   { items: [...], current_index: int, elicitation_complete: bool }
-    # Each item (AgendaRuntimeItem): { id, vision_refs, perspective,
-    #   context, decision_target, seed_question, close_when, coverage_points,
-    #   merge_anchor, notes, status, question, answer, talk, rule, signals,
-    #   assumption_evidence, gaps, coverage }
+    # Each item (AgendaRuntimeItem): { id, concern_ref, assumption_refs,
+    #   scope_refs, vision_refs (derived flat list), perspective, context,
+    #   decision_target, seed_question, close_when, coverage_points, notes,
+    #   status, question, answer, talk, rule, signals, assumption_evidence,
+    #   gaps, coverage }
     elicitation_agenda: Dict[str, Any]
 
     # Handshake keys between InterviewerAgent and EndUserAgent.
@@ -119,15 +148,14 @@ class WorkflowState(TypedDict, total=False):
     item_turn_count: int
 
     # ── Sprint / Analyst collaboration intermediate artifacts ──────────────
-    # user_story_draft: produced by SprintAgent Pass 1.
+    # user_story_draft: produced by SprintAgent step 9a (shaping the approved
+    # requirements into an INVEST-clean backlog story set).
     user_story_draft: Dict[str, Any]
 
-    # analyst_estimation: produced by AnalystAgent (feasibility + INVEST + estimation).
+    # analyst_estimation: produced by AnalystAgent step 9c (Fibonacci sizing +
+    # INVEST assessment + in-pass reshaping). Its `stories` list is the
+    # authoritative post-reshape set consumed by SprintAgent step 9b.
     analyst_estimation: Dict[str, Any]
-
-    # split_round: tracks how many split cycles have occurred between
-    # SprintAgent and AnalystAgent. Hard limit = 2 to prevent infinite loops.
-    split_round: int
 
     # ── Sprint Zero HITL ───────────────────────────────────────────────────
     review_feedback:              Optional[str]
@@ -152,6 +180,12 @@ class WorkflowState(TypedDict, total=False):
     # interviewer_turn instead of routing to enduser_turn.
     _agenda_needs_question:     bool
     _agenda_needs_followup: bool
+
+    # Set by record_answer when the LLM disagreed with the heuristic
+    # auto-skip route and tried to close an item without enough
+    # covered_by_prior coverage. Suppresses the next process() retry so
+    # interviewer_turn falls through to ask_question instead of looping.
+    _disabled_prior_skip: bool
 
     # ── UI signalling (transient) ──────────────────────────────────────────
     _workflow_started_message: bool

@@ -27,34 +27,33 @@ Phase 3 — Sprint Execution (sprint_execution):
 Phase 4 — Sprint Review (sprint_review):
   Placeholder.
 
-SprintAgent pipeline (Steps 9a → 9c → 9b)
-──────────────────────────────────────────
-The product backlog is now built through a three-step collaboration between
+Backlog creation (Steps 9a → 9c → 9b) — linear, no refinement loop
+───────────────────────────────────────────────────────────────────
+The product backlog is built in three single-pass steps between
 SprintAgent (Product Owner) and AnalystAgent (Technical Lead):
 
-  Step 9a — Story Creation (sprint_agent_turn):
-    SprintAgent reads requirement_list_approved and converts each requirement
-    into a user story ("As a … I can … so that …"). No estimation at this stage.
-    Output: user_story_draft artifact.
+  Step 9a — Shaping (sprint_agent_turn):
+    SprintAgent shapes requirement_list_approved into an INVEST-clean story
+    set — carrying 1:1, folding near-duplicates, splitting bundles, rewriting,
+    adding implied stories, or dropping with a reason. Every change is
+    reported for the backlog gate. Output: user_story_draft.
 
-  Step 9c — Technical Estimation & Validation (analyst_estimation_turn):
-    AnalystAgent reads user_story_draft and performs:
-      Pass 1 — Feasibility + INVEST assessment + dependency mapping.
-               Stories > 8 points are flagged with split_proposals.
-      Pass 2 — Fibonacci estimation (sole source of story_points in pipeline).
-    If split_proposals exist, SprintAgent creates sub-stories and calls
-    AnalystAgent again (max split_round = 2, tracked in state).
-    Output: analyst_estimation artifact.
+  Step 9c — Size + INVEST-assess + reshape (analyst_estimation_turn):
+    AnalystAgent reasons feasibility, the six INVEST qualities, dependencies,
+    risk, and a Fibonacci story-point size stated directly per story, and
+    reshapes (rewrite / split into sized children) any story that misses an
+    INVEST quality. Unsalvageable stories are marked needs_human_input.
+    analyst_estimation.stories is the authoritative post-reshape set.
 
-  Step 9b — WSJF Prioritization + Assembly (sprint_agent_turn):
-    SprintAgent reads both user_story_draft and analyst_estimation, runs
-    dependency-aware WSJF ranking, and assembles the final product_backlog.
-    Output: product_backlog artifact with new consolidated schema.
+  Step 9b — Prioritise + assemble (sprint_agent_turn):
+    SprintAgent reasons BusinessValue / TimeCriticality / RiskReduction per
+    story; Python computes WSJF = (BV+TC+RR)/points, applies dependency-aware
+    ranking, and assembles product_backlog. Output: product_backlog.
 
 AnalystAgent pipeline (Step 1, Phase 2)
 ────────────────────────────────────────
 After product_backlog_approved, AnalystAgent runs a single AC-generation pass:
-  Pass 3 — Given-When-Then Acceptance Criteria per PBI (2–5 per story).
+  Given-When-Then Acceptance Criteria per PBI from trace evidence.
   INVEST and estimation are already complete from Phase 1 — not repeated here.
   Output: validated_product_backlog artifact.
 
@@ -143,9 +142,11 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 produces_artifact="elicitation_agenda_artifact",
                 agent_name="agenda",
                 description=(
-                    "AgendaAgent builds the ElicitationAgenda as evidence-job items "
-                    "with vision_refs, perspective, context, seed question, decision "
-                    "target, coverage points, and close condition.\n"
+                    "AgendaAgent builds the ElicitationAgenda as assumption-backed, "
+                    "concern-led evidence-job items: concern_ref (lived gate), "
+                    "assumption_refs (forks the evidence settles toward features), "
+                    "scope_refs (optional boundary edges), perspective, context, "
+                    "seed question, decision target, coverage points, close condition.\n"
                     "Any elicitation_agenda_feedback from a prior HITL rejection is injected "
                     "so the agent rebuilds with reviewer comments."
                 ),
@@ -206,15 +207,15 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 produces_artifact="requirement_list",
                 agent_name="distiller",
                 description=(
-                    "DistillerAgent runs the synthesis pipeline: "
-                    "map pass — per-record extraction in parallel → "
-                    "vision pass — preserve explicit constraints and excluded "
-                    "responsibilities → "
-                    "final merge & audit pass — pairwise merge, decomposition self-check, "
-                    "and Subject test (rewrite human-subject statements to "
-                    "product-subject). Output: structured requirement_list (FR, NFR, "
-                    "SYS, OOS). Any requirement_list_feedback from a prior HITL "
-                    "rejection is injected into all passes."
+                    "DistillerAgent reasons the interview evidence into product "
+                    "obligations (build/infer, not transcribe): "
+                    "build pass — per-perspective in parallel, proposing every "
+                    "distinct obligation the lived evidence implies → "
+                    "fold pass — cluster same-build duplicates into one obligation → "
+                    "adjudicate pass — add vision-limit obligations, settle gaps and "
+                    "conflicts against the post-merge set. Output: structured "
+                    "requirement_list (FR, NFR, SYS, OOS). Any requirement_list_feedback "
+                    "from a prior HITL rejection is injected into all passes."
                 ),
             ),
             # 8. Human reviews requirement list (Node: review_requirement_list_turn)
@@ -233,7 +234,7 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                     "  Note: interview_record is NOT removed — only synthesis re-runs."
                 ),
             ),
-            # 9a. SprintAgent converts requirements to user stories (Node: sprint_agent_turn)
+            # 9a. SprintAgent shapes approved requirements into a backlog (Node: sprint_agent_turn)
             ArtifactStep(
                 step_name="create_user_stories",
                 node_name="sprint_agent_turn",
@@ -241,15 +242,17 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 produces_artifact="user_story_draft",
                 agent_name="sprint_agent",
                 description=(
-                    "SprintAgent (Product Owner) reads requirement_list_approved and "
-                    "converts each confirmed requirement into a user story using the "
-                    "mandatory format: 'As a <role>, I can <capability>, so that <benefit>.' "
-                    "No estimation occurs at this stage — story points are assigned by "
-                    "AnalystAgent in the next step. Any product_backlog_feedback from a "
-                    "prior PO rejection is injected so stories are rewritten accordingly."
+                    "SprintAgent (Product Owner) shapes requirement_list_approved into an "
+                    "INVEST-clean backlog of user stories ('As a <role>, I can <capability>, "
+                    "so that <benefit>.'). One pass: it may carry a requirement through 1:1, "
+                    "fold near-duplicate requirements into one story (keeping all source ids), "
+                    "split a bundled requirement, rewrite raw wording, add an implied story, or "
+                    "drop a requirement with a reason. Every change is reported for the backlog "
+                    "HITL gate. No estimation here — sizing is AnalystAgent's. Any "
+                    "product_backlog_feedback from a prior PO rejection is injected."
                 ),
             ),
-            # 9c. AnalystAgent performs technical estimation and validation (Node: analyst_estimation_turn)
+            # 9c. AnalystAgent sizes, INVEST-assesses, and reshapes (Node: analyst_estimation_turn)
             ArtifactStep(
                 step_name="estimate_and_validate_stories",
                 node_name="analyst_estimation_turn",
@@ -257,23 +260,18 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 produces_artifact="analyst_estimation",
                 agent_name="analyst",
                 description=(
-                    "AnalystAgent (Technical Lead) reads user_story_draft and runs two passes:\n"
-                    "  Pass 1 — Feasibility + INVEST + Dependency Mapping:\n"
-                    "    Each story is assessed for technical feasibility, INVEST compliance,\n"
-                    "    and hidden dependencies. Stories > 8 points after estimation are\n"
-                    "    flagged with split_proposals containing concrete sub-story breakdowns.\n"
-                    "  Pass 2 — Fibonacci Estimation:\n"
-                    "    Complexity (1–5) + Effort (1–5) + Uncertainty (1–5) → mapped to\n"
-                    "    nearest Fibonacci number. This is the sole source of story_points\n"
-                    "    in the entire pipeline — SprintAgent does not re-estimate.\n"
-                    "If split_proposals exist (has_pending_splits=True), SprintAgent creates\n"
-                    "sub-stories and calls analyst_estimation_turn again (state.split_round\n"
-                    "is incremented; hard limit = 2 rounds to prevent infinite loops).\n"
-                    "Output: analyst_estimation artifact with per-story points, INVEST flags,\n"
-                    "dependency mapping, risk notes, and any split proposals."
+                    "AnalystAgent (Technical Lead) reads user_story_draft and, in one pass, "
+                    "reasons per story: feasibility, the six INVEST qualities, dependencies, "
+                    "technical risk, and a Fibonacci story-point size stated DIRECTLY from its "
+                    "reasoning (no complexity/effort/uncertainty formula, no Python snap of the "
+                    "estimate). When a story misses an INVEST quality it fixes it in place — "
+                    "rewriting the sentence or splitting into sized child stories; a story no "
+                    "honest reshape can save is marked needs_human_input. The resulting "
+                    "analyst_estimation.stories is the authoritative post-reshape set the next "
+                    "step consumes. No refinement loop — reshaping is in-pass."
                 ),
             ),
-            # 9b. SprintAgent runs WSJF + assembly using estimation from Analyst (Node: sprint_agent_turn)
+            # 9b. SprintAgent prioritises + assembles the backlog (Node: sprint_agent_turn)
             ArtifactStep(
                 step_name="build_product_backlog",
                 node_name="sprint_agent_turn",
@@ -281,23 +279,14 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 produces_artifact="product_backlog",
                 agent_name="sprint_agent",
                 description=(
-                    "SprintAgent reads both user_story_draft and analyst_estimation, then:\n"
-                    "  Pass 2 (WSJF Prioritization):\n"
-                    "    Assigns BusinessValue, TimeCriticality, RiskReduction per story.\n"
-                    "    Computes WSJF = (BV + TC + RR) / StoryPoints.\n"
-                    "    Dependency-aware ranking: if Story A has higher WSJF than Story B\n"
-                    "    but A is blocked_by B, Story B is promoted above A in the final rank.\n"
-                    "  Pass 3 (Quality Gate + Assembly):\n"
-                    "    Validates user story format, snaps non-Fibonacci points, recomputes\n"
-                    "    WSJF, and assembles product_backlog using the consolidated PBI schema:\n"
-                    "      estimation { story_points, complexity, effort, uncertainty }\n"
-                    "      prioritization { priority_rank, wsjf_score, business_value, ... }\n"
-                    "      dependencies { blocked_by, blocks }\n"
-                    "      planning { status, target_sprint, tags }\n"
-                    "      quality { invest_pass, invest_flags, acceptance_criteria: [] }\n"
-                    "    requirement_trace is preserved on every PBI for review and AC generation.\n"
-                    "Any product_backlog_feedback from a prior PO rejection is injected "
-                    "into all passes so the backlog is rebuilt with reviewer comments."
+                    "SprintAgent reads analyst_estimation (the authoritative sized, "
+                    "INVEST-assessed story set) and, in one pass, reasons BusinessValue, "
+                    "TimeCriticality, and RiskReduction (1–10) per story. Python then computes "
+                    "WSJF = (BV+TC+RR)/story_points, ranks, applies dependency-aware reorder "
+                    "(a blocker ranks ahead of what it blocks), assigns PBI ids, and assembles "
+                    "the product_backlog (estimation / prioritization / dependencies / planning "
+                    "/ quality blocks; requirement_trace preserved for AC generation). Any "
+                    "product_backlog_feedback from a prior PO rejection is injected."
                 ),
             ),
             # 10. Human reviews product backlog (Node: review_product_backlog_turn)
@@ -325,14 +314,13 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
     # ── Phase 2: Backlog Refinement ────────────────────────────────────────────
     PhaseDefinition(
         phase_name="backlog_refinement",
-        display_name="Backlog Refinement — Acceptance Criteria Generation",
+        display_name="Backlog Refinement — Acceptance Criteria",
         description=(
-            "AnalystAgent writes 2–5 Given-When-Then Acceptance Criteria per PBI, "
-            "derived from the user story capability clause and the original requirement "
-            "fields carried in requirement_trace on each approved PBI. "
-            "INVEST validation and story point estimation are already complete from Phase 1 "
-            "and are NOT repeated here. "
-            "Output: validated_product_backlog — every PBI enriched with AC, status='ready'."
+            "The acceptance criteria were written by the Analyst during estimation "
+            "(step 9c) and travel on each story. This phase deterministically attaches "
+            "them to the approved PBIs and marks readiness — no LLM call. "
+            "validated_product_backlog (post-Analyst, with AC) stays a distinct artifact "
+            "to compare against product_backlog (post-Sprint, without AC)."
         ),
         steps=[
             ArtifactStep(
@@ -342,15 +330,12 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 produces_artifact="validated_product_backlog",
                 agent_name="analyst",
                 description=(
-                    "AnalystAgent runs a single AC-generation pass (Pass 3) against the "
-                    "approved product_backlog. For every PBI:\n"
-                    "  • Writes 2–5 Given-When-Then criteria (happy_path, edge_case, error_case).\n"
-                    "  • Sources: requirement_trace data (original statement, rationale,\n"
-                    "    source acceptance criteria, trace fields) + user story text.\n"
-                    "  • Sets status='ready' for every PBI with AC written.\n"
-                    "INVEST and estimation from Phase 1 are preserved unchanged.\n"
-                    "Any analyst_feedback from a prior HITL rejection is injected so\n"
-                    "AC are rewritten addressing the reviewer's specific comments."
+                    "Deterministic assembly (Python, no LLM): for every approved PBI, "
+                    "attach the Given-When-Then acceptance criteria the Analyst already "
+                    "wrote for that story in step 9c (matched by source_story_id), assign "
+                    "AC ids, and set the final status (ready when it has criteria and "
+                    "cleared INVEST). Estimates, dependencies, WSJF ordering, and INVEST "
+                    "carry over unchanged. Output: validated_product_backlog."
                 ),
             ),
             ArtifactStep(
@@ -362,8 +347,9 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                 description=(
                     "Product Owner reviews the validated_product_backlog in one gate. "
                     "• Approved → validated_product_backlog_approved sentinel; Sprint N can begin. "
-                    "• Rejected → validated_product_backlog removed; analyst_feedback "
-                    "  injected; flow returns to generate_acceptance_criteria (AC re-written)."
+                    "• Rejected → since AC originate in step 9c, the Analyst is re-run: "
+                    "  validated_product_backlog + analyst_estimation + product_backlog "
+                    "  (+ its approval) are cleared and feedback injected so 9c rewrites the AC."
                 ),
             ),
         ],

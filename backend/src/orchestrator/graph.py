@@ -20,24 +20,18 @@ Graph topology
     ├─► review_validated_product_backlog_turn → supervisor  (Backlog Refinement step 2 — HITL)
     └─► END
 
-Sprint Zero backlog creation flow (steps 9a → 9c → 9b):
-  sprint_agent_turn (9a: create_user_stories → user_story_draft)
-    → analyst_estimation_turn (9c: estimate_and_validate_stories → analyst_estimation)
-        [if has_pending_splits AND split_round < MAX]
-        → sprint_agent_turn (split loop: apply split_proposals → updated user_story_draft)
-        → analyst_estimation_turn (re-estimate sub-stories)
-        [repeat until no splits or split_round = MAX]
-    → sprint_agent_turn (9b: build_product_backlog → product_backlog)
+Sprint Zero backlog creation flow (linear, steps 9a → 9c → 9b):
+  sprint_agent_turn (9a: shape approved requirements → user_story_draft)
+    → analyst_estimation_turn (9c: size + INVEST-assess + reshape → analyst_estimation)
+    → sprint_agent_turn (9b: prioritise + assemble → product_backlog)
 
-sprint_agent_turn routing (after_sprint_agent conditional edge):
-  • user_story_draft absent               → process_stories()  (Step 9a)
-  • analyst_estimation present
-    AND has_pending_splits=True
-    AND split_round < MAX                 → process_splits()   (split loop)
-  • user_story_draft present
-    AND analyst_estimation present
-    AND (has_pending_splits=False OR
-         split_round >= MAX)              → process_backlog()  (Step 9b)
+Reshaping (split / rewrite / merge / add / drop) and INVEST fixing happen
+inside the single 9a and 9c passes, so there is no refinement loop and no
+split_round.
+
+sprint_agent_turn routing:
+  • user_story_draft absent                       → process_stories()  (Step 9a)
+  • user_story_draft + analyst_estimation present → process_backlog()  (Step 9b)
 
 HITL review order:
   1. review_product_vision_turn      — human reviews/edits the ProductVision
@@ -97,7 +91,6 @@ from .supervisor import supervisor_node, supervisor_router
 logger = logging.getLogger(__name__)
 
 _INTERVIEW_SAFETY_MAX_TURNS = 3
-_MAX_SPLIT_ROUND            = 2   # mirrors sprint.py constant
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -113,37 +106,53 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
     "elicitation_agenda": (
         "## Elicitation Agenda Ready for Review\n\n"
         "AgendaAgent has turned the approved Product Vision into evidence jobs. "
-        "Each agenda item asks one role to answer from one concrete scene so the "
-        "next interview can settle real product decisions.\n\n"
+        "Each item is **assumption-backed, concern-led**: a concern opens the "
+        "lived gate so the role can answer from today's experience, and one or "
+        "more assumptions name the design forks whose evidence the interview "
+        "should turn into product features.\n\n"
         "**What's inside (per item):**\n"
-        "- **vision_refs** — the assumptions, concerns, roles, or scope boundaries this item covers\n"
+        "- **concern_ref** — the user-perceptible quality (clarity, trust, "
+        "timeliness, …) that opens the lived gate for the question\n"
+        "- **assumption_refs** — the design fork(s) the evidence will move "
+        "toward a feature choice (at least one per item)\n"
+        "- **scope_refs** — optional boundary edges the scene touches at runtime\n"
         "- **perspective** — the role that will answer from lived use or impact\n"
         "- **context** — the operating moment the EndUser will step into\n"
-        "- **decision_target** — the downstream fork this evidence should move\n"
+        "- **decision_target** — the fork(s) the dialogue should move toward a feature\n"
         "- **seed_question** — the opening interview probe\n"
         "- **coverage_points** and **close_when** — what evidence must be settled before moving on\n\n"
         "**Your action:** Review the agenda below. "
         "If coverage and item quality look correct, click **Accept** "
-        "to start the interview. If roles are missing, evidence jobs are too generic, or coverage is thin, "
-        "click **Request Changes** — the agenda will be rebuilt with your feedback."
+        "to start the interview. If roles are missing, assumptions are unbacked, "
+        "or coverage is thin, click **Request Changes** — the agenda will be "
+        "rebuilt with your feedback."
     ),
 
     # Sent inside review_product_vision_turn interrupt — alongside the artifact.
     "product_vision": (
         "## Product Vision Ready for Review\n\n"
-        "VisionaryAgent has read the project intent in two passes: first to capture "
-        "the product direction and role inventory, then to surface the first-release "
-        "forks, quality concerns, and scope boundaries downstream agents must respect.\n\n"
+        "VisionaryAgent has read the project intent in three passes:\n"
+        "1. **STATED + IMPLIED reading** (always) — direction and role inventory "
+        "drawn from what the input names or forces.\n"
+        "2. **STATED + IMPLIED forks** (always) — assumptions, concerns, and "
+        "scope boundaries the input states or implies.\n"
+        "3. **INFERRED expansion** (only in Coverage mode) — items the input "
+        "did not name but generic product knowledge says a product of this "
+        "shape typically owes.\n\n"
+        "Items carry a **lens** (stated / implied / inferred) describing how "
+        "they were reached and an **anchor** justifying that lens — Pass 1+2 "
+        "items cite the input phrase or claim; Pass 3 items name the specific "
+        "generic principle.\n\n"
         "**What's inside:**\n"
         "- **Intent and outcome** — what the input is asking for and what should improve\n"
         "- **Known signals** — concrete facts the input gave about today's situation\n"
         "- **Roles** — product users and affected roles, including meaningful subgroups when the input separates them\n"
-        "- **Assumptions** — first-release design forks, each with a stated / implied / inferred lens and an anchor\n"
-        "- **Concerns** — user-perceptible quality topics to carry into elicitation\n"
-        "- **Scope** — responsibilities the product should not take on\n\n"
+        "- **Assumptions** — first-release design forks (each with lens + anchor)\n"
+        "- **Concerns** — user-perceptible quality topics to carry into elicitation (each with lens + anchor)\n"
+        "- **Scope** — responsibilities the product should not take on (each with lens + anchor)\n\n"
         "**Your action:** Review the vision below. "
         "If everything reads truthfully, click **Accept** to proceed to the elicitation agenda. "
-        "If the direction is wrong, an assumption's lens/anchor is off, a role is missing, or scope is incomplete, "
+        "If the direction is wrong, an item's lens/anchor is off, a role is missing, or scope is incomplete, "
         "click **Request Changes** — the vision will be regenerated with your feedback."
     ),
 
@@ -185,30 +194,34 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
         "SprintAgent and AnalystAgent have built the first reviewable backlog from the "
         "approved Requirement List.\n\n"
         "**What's inside:**\n"
-        "- User stories written from requirement traces\n"
-        "- Analyst estimates, INVEST checks, risks, dependencies, and split proposals\n"
-        "- Any accepted split proposals applied before backlog assembly\n"
+        "- User stories shaped from the approved requirements\n"
+        "- **Shaping report** (in notes) — every merge, split, rewrite, added, and dropped "
+        "requirement, since these change the approved set and need your sign-off\n"
+        "- Fibonacci story points reasoned by the Analyst, plus INVEST checks, risks, and dependencies\n"
         "- WSJF priority scores and dependency-aware ordering\n"
-        "- Planning status and quality warnings for stories that still need refinement\n\n"
-        "**Your action:** Review the backlog below. "
+        "- `needs_human_input` flags on stories no automated reshape could make INVEST-clean\n\n"
+        "**Your action:** Review the backlog and the shaping report below. "
         "Click **Accept** to hand it to the Analyst for Acceptance Criteria generation. "
         "Click **Request Changes** to send it back for revision — describe what "
-        "story points, priorities, or story descriptions need adjustment. "
-        "A rejection will trigger a full rebuild: stories → estimation → assembly."
+        "story points, priorities, shaping, or story descriptions need adjustment. "
+        "A rejection will trigger a full rebuild: shaping → estimation → assembly."
     ),
 
     # Sent inside review_validated_product_backlog_turn interrupt — alongside the artifact.
     "validated_product_backlog": (
         "## Validated Product Backlog Ready\n\n"
-        "AnalystAgent has generated acceptance criteria for the approved Product Backlog.\n\n"
+        "Every approved PBI now carries the acceptance criteria the Analyst wrote "
+        "during estimation (step 9c); this view attaches them and marks readiness.\n\n"
         "**What was done:**\n"
-        "- **Acceptance Criteria** — Given-When-Then criteria written from requirement traces and story capability clauses\n"
-        "- **Readiness update** — stories with usable acceptance criteria are marked ready\n"
-        "- **Preserved planning data** — estimates, dependencies, WSJF ordering, and INVEST results remain from backlog creation\n\n"
+        "- **Acceptance Criteria** — Given-When-Then criteria, sourced from each story's requirement trace\n"
+        "- **Readiness update** — PBIs with usable criteria are marked ready\n"
+        "- **Preserved planning data** — estimates, dependencies, WSJF ordering, and INVEST results carry over unchanged from the Product Backlog\n\n"
+        "This is the **post-Analyst** artifact — compare it against the **post-Sprint** "
+        "Product Backlog (same items, without AC) to see exactly what the Analyst added.\n\n"
         "**Your action:** Review the validated backlog below. "
         "Click **Accept** to mark all `ready` stories available for Sprint planning. "
-        "Click **Request Changes** to send the backlog back for AC re-generation — "
-        "describe any AC quality issues or missing coverage."
+        "Click **Request Changes** to send it back — the Analyst re-assesses and rewrites "
+        "the criteria (describe any AC quality issues or missing coverage)."
     ),
 }
 
@@ -474,18 +487,18 @@ def enduser_turn_fn(state: WorkflowState) -> Dict[str, Any]:
 
 def sprint_agent_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     """
-    Route to the correct SprintAgent method based on current state.
+    Route to the correct SprintAgent method based on current state (linear,
+    no refinement loop):
+      1. user_story_draft absent → process_stories()  (Step 9a: shaping)
+      2. user_story_draft + analyst_estimation present → process_backlog()
+         (Step 9b: prioritise + assemble)
 
-    Routing logic:
-      1. user_story_draft absent → process_stories() (Step 9a: create stories)
-      2. analyst_estimation present AND has_pending_splits=True
-         AND split_round < MAX → process_splits() (split loop)
-      3. user_story_draft present AND analyst_estimation present
-         AND (no pending splits OR split_round >= MAX) → process_backlog() (Step 9b)
+    Reshaping (split / rewrite / merge / add / drop) and INVEST fixing now
+    happen inside the single 9a and 9c passes, so there is no sprint↔analyst
+    cycle and no split_round.
     """
     agent      = _get_sprint_agent()
     artifacts  = state.get("artifacts") or {}
-    split_round = state.get("split_round", 0)
 
     has_draft      = "user_story_draft"   in artifacts
     has_estimation = "analyst_estimation" in artifacts
@@ -493,27 +506,9 @@ def sprint_agent_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     if not has_draft:
         logger.info("sprint_agent_turn: no user_story_draft → process_stories() (Step 9a).")
         updates = agent.process_stories(state)
-
     elif has_estimation:
-        estimation         = artifacts.get("analyst_estimation") or {}
-        has_pending_splits = estimation.get("has_pending_splits", False)
-
-        if has_pending_splits and split_round < _MAX_SPLIT_ROUND:
-            logger.info(
-                "sprint_agent_turn: has_pending_splits=True, split_round=%d → process_splits().",
-                split_round,
-            )
-            updates = agent.process_splits(state)
-        else:
-            if has_pending_splits and split_round >= _MAX_SPLIT_ROUND:
-                logger.warning(
-                    "sprint_agent_turn: split_round=%d reached MAX (%d). "
-                    "Proceeding to assembly with oversized stories.",
-                    split_round, _MAX_SPLIT_ROUND,
-                )
-            logger.info("sprint_agent_turn: estimation ready → process_backlog() (Step 9b).")
-            updates = agent.process_backlog(state)
-
+        logger.info("sprint_agent_turn: estimation present → process_backlog() (Step 9b).")
+        updates = agent.process_backlog(state)
     else:
         # user_story_draft present but analyst_estimation not yet available.
         # Supervisor should have routed to analyst_estimation_turn instead.
@@ -529,12 +524,8 @@ def sprint_agent_turn_fn(state: WorkflowState) -> Dict[str, Any]:
 
 
 def analyst_estimation_turn_fn(state: WorkflowState) -> Dict[str, Any]:
-    """
-    Run AnalystAgent.process_estimation() — Phase 1 technical estimation.
-
-    Called for Step 9c (estimate_and_validate_stories) and also during
-    split loop re-estimation when SprintAgent has applied split proposals.
-    """
+    """Run AnalystAgent.process_estimation() — Step 9c: size, INVEST-assess,
+    and reshape stories in one pass → analyst_estimation."""
     updates = _get_analyst().process_estimation(state)
     logger.debug("analyst_estimation_turn updates: %s", list(updates.keys()))
     _sync_artifacts_to_store(state, updates)
@@ -542,7 +533,9 @@ def analyst_estimation_turn_fn(state: WorkflowState) -> Dict[str, Any]:
 
 
 def analyst_turn_fn(state: WorkflowState) -> Dict[str, Any]:
-    """Run AnalystAgent.process() — Phase 2 AC generation."""
+    """Run AnalystAgent.process() — Phase 2: deterministically assemble
+    validated_product_backlog by attaching the acceptance criteria the Analyst
+    already wrote in step 9c. No LLM call."""
     updates = _get_analyst().process(state)
     logger.debug("analyst_turn updates: %s", list(updates.keys()))
     _sync_artifacts_to_store(state, updates)
@@ -880,7 +873,6 @@ def review_product_backlog_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     return {
         "artifacts":               artifacts,
         "product_backlog_feedback": feedback or "The reviewer did not provide specific feedback.",
-        "split_round":             0,   # reset split counter for fresh cycle
     }
 
 
@@ -897,9 +889,12 @@ def review_validated_product_backlog_turn_fn(state: WorkflowState) -> Dict[str, 
 
     After resume:
       approved=True  → write validated_product_backlog_approved sentinel; Sprint N can begin.
-      approved=False → remove validated_product_backlog, inject analyst_feedback;
-                       flow returns to generate_acceptance_criteria (AC re-written only,
-                       INVEST and estimation are NOT repeated).
+      approved=False → AC now live on the stories from step 9c, and Phase 2 is a
+                       deterministic re-assembly, so to actually change AC we must
+                       re-run the Analyst. Remove validated_product_backlog AND
+                       analyst_estimation (+ the downstream product_backlog /
+                       product_backlog_approved), inject the feedback as
+                       product_backlog_feedback; the Analyst re-assesses + rewrites AC.
     """
     artifacts = dict(state.get("artifacts") or {})
     validated = artifacts.get("validated_product_backlog") or {}
@@ -931,11 +926,18 @@ def review_validated_product_backlog_turn_fn(state: WorkflowState) -> Dict[str, 
             "analyst_feedback": None,
         }
 
-    artifacts.pop("validated_product_backlog", None)
+    # AC are written by the Analyst in step 9c (they live on analyst_estimation),
+    # and Phase 2 only re-assembles deterministically — so to change AC we re-run
+    # the Analyst. Clear validated + estimation + the downstream backlog so the
+    # 9c → 9b → review → Phase 2 chain re-runs with the feedback.
+    for key in ("validated_product_backlog", "analyst_estimation",
+                "product_backlog", "product_backlog_approved"):
+        artifacts.pop(key, None)
     logger.info("[AnalystReview] REJECTED. Feedback: %s", feedback or "(none)")
     return {
-        "artifacts":       artifacts,
-        "analyst_feedback": feedback or "The reviewer did not provide specific feedback.",
+        "artifacts":                artifacts,
+        "analyst_feedback":         None,
+        "product_backlog_feedback": feedback or "The reviewer did not provide specific feedback.",
     }
 
 
@@ -1007,22 +1009,32 @@ def _build_elicitation_agenda_review_payload(
 ) -> Dict[str, Any]:
     """Build the structured payload shown when reviewing elicitation_agenda_artifact.
 
-    Shows evidence-job agenda items with perspective, scene, decision target,
-    and close condition. Items may attach to assumptions, concerns, or scope
-    boundaries from the vision; items with multiple refs carry a merge_anchor.
+    Each item is assumption-backed, concern-led: concern_ref opens the
+    lived gate, assumption_refs name the forks the evidence will move
+    toward features, scope_refs (optional) are boundary edges the scene
+    touches. The flat `vision_refs` is derived (concern_ref +
+    assumption_refs + scope_refs) for backward-compatible display.
     """
     items = []
     for item in agenda.get("items") or []:
+        concern_ref = (item.get("concern_ref") or "").strip()
+        assumption_refs = list(item.get("assumption_refs") or [])
+        scope_refs = list(item.get("scope_refs") or [])
+        flat_refs = list(item.get("vision_refs") or [])
+        if not flat_refs:
+            flat_refs = ([concern_ref] if concern_ref else []) + assumption_refs + scope_refs
         items.append({
             "id": item.get("id"),
-            "vision_refs": list(item.get("vision_refs") or []),
+            "concern_ref": concern_ref,
+            "assumption_refs": assumption_refs,
+            "scope_refs": scope_refs,
+            "vision_refs": flat_refs,
             "perspective": item.get("perspective"),
             "context": item.get("context"),
             "decision_target": item.get("decision_target", ""),
             "seed_question": item.get("seed_question"),
             "coverage_points": list(item.get("coverage_points") or []),
             "close_when": item.get("close_when"),
-            "merge_anchor": item.get("merge_anchor", ""),
             "notes": item.get("notes"),
         })
 
@@ -1174,10 +1186,13 @@ def _build_product_backlog_review_payload(backlog: Dict[str, Any]) -> Dict[str, 
         qual  = item.get("quality") or {}
         trace = item.get("requirement_trace") or {}
 
+        analysis = item.get("analysis") or {}
         story_summaries.append({
             "id":            item.get("id"),
             "source_story_id": item.get("source_story_id"),
-            "source_requirement_id": item.get("source_requirement_id"),
+            # All approved requirement ids this PBI covers (≥1 after a merge).
+            "source_requirement_ids": item.get("source_requirement_ids")
+            or ([item.get("source_requirement_id")] if item.get("source_requirement_id") else []),
             "title":         item.get("title"),
             "type":          item.get("type"),
             "description":   item.get("description"),
@@ -1186,11 +1201,10 @@ def _build_product_backlog_review_payload(backlog: Dict[str, Any]) -> Dict[str, 
                 "requirement_type": trace.get("requirement_type"),
                 "stakeholder": trace.get("stakeholder"),
                 "trace_refs": list(trace.get("trace_refs") or []),
-                "threshold_needed": bool(trace.get("threshold_needed", False)),
-                "priority": trace.get("priority"),
                 "statement": trace.get("statement"),
                 "rationale": trace.get("rationale"),
                 "acceptance_criteria": list(trace.get("acceptance_criteria") or []),
+                "merged_requirement_ids": list(trace.get("merged_requirement_ids") or []),
             },
             "story_points":  est.get("story_points"),
             "priority_rank": pri.get("priority_rank"),
@@ -1199,13 +1213,22 @@ def _build_product_backlog_review_payload(backlog: Dict[str, Any]) -> Dict[str, 
             "status":        plan.get("status"),
             "blocked_by":    deps.get("blocked_by", []),
             "blocks":        deps.get("blocks", []),
+            # How this PBI was shaped from the approved set + why it is sized
+            # this way, so the reviewer can sign off on changes to the
+            # approved requirements.
+            "reshape_op":            analysis.get("reshape_op", "none"),
+            "estimation_reasoning":  analysis.get("estimation_reasoning", ""),
+            "wsjf_thought":          analysis.get("wsjf_thought", ""),
         })
 
     return {
         "total_stories":   len(items),
         "methodology":     backlog.get("methodology", {}),
         "quality_warnings": backlog.get("quality_warnings", {}),
+        # notes carries the shaping report (merges / splits / adds / drops)
+        # the human signs off on at this gate.
         "notes":           backlog.get("notes", ""),
+        "needs_human_input_count": backlog.get("needs_human_input_count", 0),
         "stories":         story_summaries,
     }
 
