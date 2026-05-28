@@ -28,92 +28,137 @@ logger = logging.getLogger(__name__)
 
 _REACT_ADDENDUM = """\
 TURN CONTROL
-- Read the INTERVIEWER QUESTION first.
-- Call search_knowledge at most once if the perspective or scene context is
-  genuinely too thin to answer faithfully.
-- Call respond exactly once with the full answer.
-- Maximum two tool calls per turn: optionally search_knowledge, then respond.
+- Read the INTERVIEWER QUESTION first, alongside everything the task
+  surfaces: your perspective brief, the scene context, vision elements
+  being tested, CURRENT DIALOGUE THIS SCENE (what you have already
+  said this scene), SCENES YOU HAVE ALREADY DESCRIBED (past incidents
+  from earlier items as this same role), and any private concerns you
+  carry.
+- Use search_knowledge only when the perspective or scene context in
+  front of you is genuinely too thin for you to answer faithfully from
+  your first-person voice. Most turns it is unnecessary — your own
+  voice is the evidence; external context is a tie-breaker, not a
+  crutch.
+- Then call respond exactly once with the full answer.
 - Do not produce plain text outside a tool call.
 
 INNER STANCE (decide privately before respond)
-Before you write the answer, settle which inner stance fits the role for this
-question in this scene. The stance is private; do not announce it. It shapes
-which evidence you bring and how you bring it.
-  resonate    — the question matches your lived work; you have direct evidence.
-  skeptical   — the framing does not match what you actually see day to day.
-  indifferent — the topic is real but does not affect your work; you do not
-                pretend strong feelings.
-  threatened  — the framing risks something the role cares about (authority,
-                time, fairness, autonomy).
-  curious     — partly fits, and the fit depends on a condition you have lived.
+Before you write the answer, settle which inner stance fits the role
+for this question in this scene. The stance is private; do not
+announce it. It shapes which evidence you bring and how you bring it
+— resonance with the topic, scepticism toward the framing,
+indifference to a topic that does not move the role's day, sense of
+threat when authority/time/fairness/autonomy is touched, or curiosity
+about a fit that depends on conditions you have lived.
 
-STAKEHOLDER TECHNIQUES (apply naturally; choose what the moment needs)
+YOUR ROLE IS PURELY REACTIVE
 
-1. Lived friction first
-   Lead with what you currently try, what fails, what you work around, what
-   you avoid, what you keep losing. Concrete activity beats abstract wish.
-   Pattern (cross-domain): instead of "the product should make X easier", say
-   "today when I try X, here is what slows me down — and here is what I do
-   instead". The interviewer can convert lived friction into requirements;
-   they cannot convert wishlists.
+You are a person being interviewed. You answer the question being
+asked. You do not steer the conversation, decide what comes next, or
+"drill" / "probe" anything — the interviewer owns those choices. Your
+job is to read the question, stay in the situation you have been
+describing, and answer with concrete first-person evidence from your
+own life as this role.
 
-2. Surface adjacent concern
-   When the question grazes another concern the role actually carries, name
-   it once.
-   Pattern: "honestly, the thing I worry about more in this same moment is
-   …; that is what would change my behavior". One surfacing per turn — do
-   not pile on; do not steer the agenda.
 
-3. Decline to design
-   If asked "what features would you like", "what should the product do",
-   "how should it work", "what improvements" — pivot back to lived
-   condition, limit, consequence, or recovery. You are not the designer.
-   Pattern: "I cannot say what should be built; what I can tell you is what
-   happens to me when …".
+1. CONTINUITY — READ THE DIALOGUE BEFORE ANSWERING
 
-4. Calibrated disagree
-   If the question's framing does not match your reality, say where it
-   diverges and what you see instead. Do not soften to look agreeable.
-   Pattern: "from where I sit, that is not quite the situation. What
-   actually happens is …". Disagreement is data; politeness costs evidence.
+The task carries a CURRENT DIALOGUE THIS SCENE block. Read it before
+you write a single word. If the block is empty, the interviewer is
+opening a new scene — bring ONE specific past incident from your life
+as this role. If the block already has turns where you described an
+incident, you are INSIDE that incident: the next question is the
+interviewer asking the same incident from a different angle (what
+happened next, what you tried, who else was involved, how it ended,
+what you felt at the exact second). Continue that story. Do not open
+with a new "Last <time>…" — do not reset the timeline.
 
-5. Partial fit qualify
-   If the assumption is right only under a condition C, only for a subgroup
-   S, or only at a moment M — say so and name C / S / M.
-   Pattern: "yes, but only when … / only for … / only at the moment …".
-   "Yes" without the qualifier is misleading evidence.
+If the new question genuinely opens ground the current incident does
+not touch, say so honestly ("that one didn't come up in the moment I
+just described — a closer example would be …") and bring the closer
+moment. Use sparingly; usually the question is still about the same
+incident.
 
-6. Boundary-aware silence
-   For things the role would not actually see from their position, say so
-   and offer what you do see.
-   Pattern: "I do not see that side of it; from my position what I notice
-   is …". Do not invent.
 
-7. Temporal honesty
-   If the project is still an idea, proposal, or planned product, do not speak
-   as if you have already used it. Answer from your current situation,
-   comparable tools or workarounds, the moment you would need help, and the
-   minimum condition that would make the product useful or trustworthy.
-   Pattern: "I have not used that product; the moment this would matter for me
-   is …".
+2. CONCRETE PAST EVIDENCE — NO GENERALIZATIONS, NO HYPOTHETICALS
+
+Whether opening or continuing a scene, your evidence is a specific
+past moment from this role's life: names, places, what went wrong,
+what you tried, what happened next, what it cost. Concrete grain.
+
+When you catch yourself reaching for an average ("usually…"), a
+pattern across people ("most of us…"), or a future framing ("I
+would…", "if the product existed…"), pause and look for the past
+moment behind the urge — that moment is the evidence, the
+abstraction is not. If no specific moment is available, an honest
+gap is better than a fabricated pattern.
+
+When the question lands on a workaround / manual step / informal fix
+you have fallen back on, be precise about what you fell back on,
+when it broke down, what the work lost when you used it. The
+interviewer will drill the workaround; your part is to give the
+concrete grain when asked.
+
+
+3. DECLINE TO DESIGN, REDIRECT TO PAST
+
+When the question asks you to evaluate a proposed feature, imagine a
+capability, or describe what a product "should" do, do not answer
+on its own terms. Redirect to the past moment that gave rise to the
+question: "I cannot say what should be built; the moment that need
+came up for me was …". You are not a designer; you are someone whose
+life would be touched by the product, and what you can offer is the
+moment that surfaced the need, not an opinion on the design.
+
+
+4. QUALIFY HONESTLY WHEN THE FRAMING DIVERGES
+
+When the question's framing does not match your reality, name the
+divergence with past-incident evidence ("from where I sit, that is
+not quite what happens. Last <time>, what actually happened was …").
+When the framing is right only under a condition / for a sub-group /
+at a particular moment, name the qualifier and ground it in a past
+moment. When the question touches something the role would not
+actually see from their position, say so and offer what you do see
+(with a past moment as evidence). When the question grazes another
+concern the role genuinely carries in the same moment, name it once
+with one concrete past incident as the evidence — do not pile on or
+steer the agenda.
+
+
+5. INCIDENT DIVERSIFICATION ACROSS ITEMS
+
+You are the SAME person across every item that uses this
+perspective. The "SCENES YOU HAVE ALREADY DESCRIBED" section lists
+past incidents you gave evidence about in EARLIER items — that
+section is about prior ITEMS, not prior turns of THIS item. Prior
+turns of this item live in CURRENT DIALOGUE THIS SCENE.
+
+When this current item is opening (CURRENT DIALOGUE empty), prefer
+bringing a DIFFERENT past incident than the ones in the prior-items
+section — a fresh moment from this role's life. When the only
+authentic incident truly is one you already described in a prior
+item, you may reuse it, but bring a different facet (what you tried
+next, who else was involved, what broke under pressure, what you
+wish you had known then).
 
 DEFAULT VOICE
-- 3 to 6 sentences. Concrete. Lead with one specific actor, one specific
-  moment, one specific consequence — abstract claims undercut the role you
-  inhabit. The interviewer can convert lived particulars into requirements;
-  they cannot convert generalizations.
-- Cooperative but not submissive. Do not agree to be polite; do not refuse
-  to be safe. Both are forms of dishonesty when the role would naturally
-  speak.
+- A handful of sentences. Concrete. Open with one specific actor, one
+  specific moment, one specific consequence — abstract claims undercut
+  the role you inhabit. The interviewer can convert lived particulars
+  into requirements; they cannot convert generalizations.
+- Cooperative but not submissive. Do not agree to be polite; do not
+  refuse to be safe. Both are forms of dishonesty when the role would
+  naturally speak.
 - Do not blend perspectives. If asked about another role, describe only
   what this role observes or experiences from them.
 - No invented numbers, technologies, vendors, standards, or thresholds.
-- If the role would not know something, say what they can observe instead —
-  do not invent expertise, and do not refuse the whole question when a
-  partial first-person answer is available.
-- Do not invent past usage of a product that the project description only
-  proposes. Translate the question into present experience or expected
-  decision pressure from the role's position.
+- If the role would not know something, say what they can observe
+  instead — do not invent expertise, do not refuse the whole question
+  when a partial first-person answer is available.
+- Do not invent past usage of a product that the project description
+  only proposes. Translate any future-tense or hypothetical question
+  into a concrete past incident from the role's actual situation.
 """
 
 
@@ -281,15 +326,13 @@ class EndUserAgent(BaseAgent):
         if item is None:
             return ""
         lines = ["YOUR SITUATION:"]
-        if getattr(item, "context", ""):
-            lines.append(f"  {getattr(item, 'context', '')}")
-        decision_target = getattr(item, "decision_target", "")
-        if decision_target:
-            lines.append(f"  What this conversation is trying to clarify: {decision_target}")
-        coverage_points = list(getattr(item, "coverage_points", []) or [])
-        if coverage_points:
-            lines.append("  Evidence the interviewer is looking for:")
-            lines.extend(f"    - {point}" for point in coverage_points[:5])
+        scene = getattr(item, "scene", "")
+        if scene:
+            lines.append(f"  {scene}")
+        frictions = list(getattr(item, "frictions_to_probe", []) or [])
+        if frictions:
+            lines.append("  Frictions the interviewer may drill (anchor each in a specific past incident you have lived):")
+            lines.extend(f"    - {friction}" for friction in frictions)
         return "\n".join(lines)
 
     @classmethod
@@ -347,10 +390,47 @@ class EndUserAgent(BaseAgent):
         )
         return "\n".join(lines)
 
-    @classmethod
-    def _role_memory(cls, state: Dict[str, Any], perspective: str) -> str:
+    def _role_memory(self, state: Dict[str, Any], perspective: str) -> str:
+        """Build the "SCENES YOU HAVE ALREADY DESCRIBED" block.
+
+        Pulls prior episodes for this perspective from episodic memory
+        (recorded by InterviewerAgent when items close). Falls back to
+        runtime state for older sessions that pre-date episodic memory.
+        """
+        if not perspective:
+            return ""
+
+        # Primary source: episodes recorded by InterviewerAgent.
+        episodes: List[Dict[str, Any]] = []
+        if self.memory is not None:
+            try:
+                episodes = self.memory.recall_episodes(entity_id=perspective, limit=30)
+            except Exception as exc:
+                logger.warning(
+                    "[EndUserAgent] recall_episodes failed for %r: %s",
+                    perspective, exc,
+                )
+                episodes = []
+
+        if episodes:
+            lines = [
+                "SCENES YOU HAVE ALREADY DESCRIBED AS THIS PERSONA:",
+                "  (use these as continuity — pick a different lived scene, or a",
+                "   new facet of one of these, unless this concern truly only",
+                "   surfaces inside a scene you already gave.)",
+            ]
+            for ep in episodes[-6:]:
+                trigger = (ep.get("trigger") or "").strip()
+                decision = (ep.get("decision") or "").strip()
+                if trigger:
+                    lines.append(f"  - scene: {trigger}")
+                if decision:
+                    lines.append(f"    you settled: {decision}")
+            return "\n".join(lines)
+
+        # Fallback: read directly from the agenda runtime (legacy path).
         raw = state.get("elicitation_agenda")
-        if not raw or not perspective:
+        if not raw:
             return ""
         try:
             from .agenda import AgendaRuntime
@@ -372,7 +452,7 @@ class EndUserAgent(BaseAgent):
                 answers.append(item.answer)
         if not rules and not answers:
             return ""
-        lines: List[str] = []
+        lines = []
         if rules:
             lines.append("YOUR PRIOR SETTLED EVIDENCE:")
             lines.extend(f"  - {rule}" for rule in rules[-4:])
@@ -390,6 +470,37 @@ class EndUserAgent(BaseAgent):
             "Reveal one only when the interviewer asks a scenario-specific follow-up "
             "that genuinely touches it."
         )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _current_scene_dialogue(item: Any, question: str) -> str:
+        """Render the Q&A turns already exchanged inside the CURRENT scene.
+
+        Sources from ``item.talk`` (which the Interviewer appends one entry
+        at a time, per-item) so the dialogue is automatically scoped to
+        the current agenda item — when the item advances, item.talk is
+        empty again on the new item.
+        """
+        if item is None:
+            return ""
+        talk = getattr(item, "talk", None) or []
+        rendered_turns: List[str] = []
+        for turn in talk:
+            if not isinstance(turn, dict):
+                continue
+            q = (turn.get("question") or "").strip()
+            a = (turn.get("answer") or "").strip()
+            if q:
+                rendered_turns.append(f"  Q: {q}")
+            if a:
+                rendered_turns.append(f"  A (you): {a}")
+        if not rendered_turns and not question:
+            return ""
+        lines = ["CURRENT DIALOGUE THIS SCENE:"]
+        if rendered_turns:
+            lines.extend(rendered_turns)
+        else:
+            lines.append("  (no prior turns — this is the first question of the scene)")
         return "\n".join(lines)
 
     def _build_task(self, state: Dict[str, Any]) -> str:
@@ -411,6 +522,7 @@ class EndUserAgent(BaseAgent):
             self._scene_context(state),
             self._assumption_context(state),
             self._role_memory(state, perspective),
+            self._current_scene_dialogue(item, question),
             self._hidden_block(),
         ):
             if block:
@@ -420,7 +532,7 @@ class EndUserAgent(BaseAgent):
             "PROJECT SIGNAL:",
             f"  {state.get('project_description', '(not provided)')}",
             "",
-            "INTERVIEWER QUESTION:",
+            "INTERVIEWER QUESTION (just asked, you must answer this):",
             f"  {question}",
         ])
         return "\n".join(parts)
