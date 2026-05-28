@@ -29,7 +29,7 @@ function PlainList({ items, emptyLabel }) {
   return (
     <ul className="space-y-1.5">
       {rows.map((item, index) => (
-        <li key={index} className="flex gap-2 text-[10.5px] leading-relaxed text-[#4A4038]">
+        <li key={index} className="flex gap-2 text-[10.5px] leading-relaxed text-[#3A3A3A]">
           <span className="font-mono text-[#B86F50]">-</span>
           <span>{text(item)}</span>
         </li>
@@ -42,8 +42,8 @@ function DirectionLine({ label, value }) {
   if (!value) return null;
 
   return (
-    <p className="text-[11px] leading-relaxed text-[#4A4038]">
-      <span className="font-semibold text-[#211914]">{label}: </span>
+    <p className="text-[11px] leading-relaxed text-[#3A3A3A]">
+      <span className="font-semibold text-[#1A1A1A]">{label}: </span>
       {value}
     </p>
   );
@@ -51,19 +51,19 @@ function DirectionLine({ label, value }) {
 
 function RoleCard({ role, index }) {
   return (
-    <article className="rounded-lg border border-[#E2D6C5] bg-[#FFFDF8]">
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-[#E9DFD1] bg-[#FCF8F1] px-3 py-2.5">
+    <article className="rounded-lg border border-[#E5E5E5] bg-[#FFFFFF]">
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-[#E8E8E8] bg-[#F8F8F8] px-3 py-2.5">
         <span className="font-mono text-[10px] text-[#B86F50]">
           {role.id || `ROLE-${index + 1}`}
         </span>
-        <span className="text-[12px] font-semibold text-[#211914]">
+        <span className="text-[12px] font-semibold text-[#1A1A1A]">
           {role.name || "Role"}
         </span>
         <Tag tone={lensTone(role.lens)}>{role.lens}</Tag>
       </div>
       <div className="space-y-2 px-3 py-2.5">
         {role.need && (
-          <p className="text-[10.5px] leading-relaxed text-[#4A4038]">
+          <p className="text-[10.5px] leading-relaxed text-[#3A3A3A]">
             {role.need}
           </p>
         )}
@@ -74,18 +74,18 @@ function RoleCard({ role, index }) {
 
 function AssumptionCard({ item, index }) {
   return (
-    <article className="rounded-lg border border-[#E2D6C5] bg-[#FFFDF8] px-3 py-2.5">
+    <article className="rounded-lg border border-[#E5E5E5] bg-[#FFFFFF] px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="font-mono text-[10px] text-[#B86F50]">
           {item.id || `ASM-${index + 1}`}
         </span>
         <Tag tone={lensTone(item.lens)}>{item.lens}</Tag>
       </div>
-      <p className="mt-1.5 text-[12px] font-semibold leading-relaxed text-[#211914]">
+      <p className="mt-1.5 text-[12px] font-semibold leading-relaxed text-[#1A1A1A]">
         {item.statement}
       </p>
       {item.why_it_matters && (
-        <p className="mt-1.5 text-[10.5px] leading-relaxed text-[#776B60]">
+        <p className="mt-1.5 text-[10.5px] leading-relaxed text-[#6B6B6B]">
           {item.why_it_matters}
         </p>
       )}
@@ -95,7 +95,7 @@ function AssumptionCard({ item, index }) {
 
 function ConcernCard({ concern, index }) {
   return (
-    <article className="rounded-lg border border-[#E2D6C5] bg-[#FFFDF8] px-3 py-2.5">
+    <article className="rounded-lg border border-[#E5E5E5] bg-[#FFFFFF] px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="font-mono text-[10px] text-[#B86F50]">
           {concern.id || `CONCERN-${index + 1}`}
@@ -111,7 +111,7 @@ function ConcernCard({ concern, index }) {
         </div>
       )}
       {concern.rationale && (
-        <p className="mt-2 text-[10.5px] leading-relaxed text-[#4A4038]">
+        <p className="mt-2 text-[10.5px] leading-relaxed text-[#3A3A3A]">
           {concern.rationale}
         </p>
       )}
@@ -121,7 +121,7 @@ function ConcernCard({ concern, index }) {
 
 function ScopeCard({ item, index }) {
   return (
-    <article className="rounded-lg border border-[#E2D6C5] bg-[#FFFDF8] px-3 py-2.5">
+    <article className="rounded-lg border border-[#E5E5E5] bg-[#FFFFFF] px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="font-mono text-[10px] text-[#B86F50]">
           {item.id || `OOS-${index + 1}`}
@@ -129,11 +129,11 @@ function ScopeCard({ item, index }) {
         <Tag tone="purple">out of scope</Tag>
         <Tag tone={lensTone(item.lens)}>{item.lens}</Tag>
       </div>
-      <p className="mt-1.5 text-[12px] font-semibold leading-relaxed text-[#211914]">
+      <p className="mt-1.5 text-[12px] font-semibold leading-relaxed text-[#1A1A1A]">
         {item.item}
       </p>
       {item.reason && (
-        <p className="mt-1.5 text-[10.5px] leading-relaxed text-[#776B60]">
+        <p className="mt-1.5 text-[10.5px] leading-relaxed text-[#6B6B6B]">
           {item.reason}
         </p>
       )}
@@ -149,15 +149,15 @@ export default function ProductVisionView({ data }) {
   const knownSignals = asArray(data?.known_signals);
 
   return (
-    <div className="h-full overflow-auto bg-[#FFFDF8]">
+    <div className="h-full overflow-auto bg-[#FFFFFF]">
       <div className="p-4 space-y-3">
-        <div className="rounded-lg border border-[#E2D6C5] bg-[#FBF7F0] p-3">
-          <div className="flex items-center gap-2 text-[12px] font-semibold text-[#211914]">
+        <div className="rounded-lg border border-[#E5E5E5] bg-[#F8F8F8] p-3">
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-[#1A1A1A]">
             <FileText size={14} className="text-[#B86F50]" />
             Product Vision
           </div>
           {data?.description && (
-            <p className="mt-2 text-[11px] leading-relaxed text-[#776B60]">
+            <p className="mt-2 text-[11px] leading-relaxed text-[#6B6B6B]">
               {data.description}
             </p>
           )}
@@ -176,7 +176,7 @@ export default function ProductVisionView({ data }) {
           <DirectionLine label="Intent" value={data?.intent_summary} />
           <DirectionLine label="Target outcome" value={data?.target_outcome} />
           <div>
-            <div className="mb-1.5 text-[10.5px] font-semibold text-[#776B60]">
+            <div className="mb-1.5 text-[10.5px] font-semibold text-[#6B6B6B]">
               Known signals
             </div>
             <PlainList items={knownSignals} emptyLabel="No known signals found." />

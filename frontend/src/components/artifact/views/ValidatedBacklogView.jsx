@@ -80,7 +80,7 @@ function InvestScore({ item }) {
 
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[9.5px] font-semibold uppercase text-[#A89C91]">INVEST</span>
+      <span className="text-[9.5px] font-semibold uppercase text-[#A0A0A0]">INVEST</span>
       {INVEST_KEYS.map((key, index) => {
         const ok = !failed.includes(key);
         return (
@@ -106,20 +106,20 @@ function ScoreRail({ item }) {
   const status = planning.status ?? item.status;
 
   return (
-    <div className="mt-2 grid gap-x-4 gap-y-1 text-[10.5px] text-[#776B60] sm:grid-cols-2">
+    <div className="mt-2 grid gap-x-4 gap-y-1 text-[10.5px] text-[#6B6B6B] sm:grid-cols-2">
       <span>
-        <span className="font-semibold text-[#4A4038]">Story points:</span>{" "}
+        <span className="font-semibold text-[#3A3A3A]">Story points:</span>{" "}
         <span className={pointsTone(storyPoints) === "red" ? "text-red-600 font-semibold" : ""}>
           {storyPoints}
         </span>
       </span>
-      <span><span className="font-semibold text-[#4A4038]">Priority rank:</span> {rank || "-"}</span>
+      <span><span className="font-semibold text-[#3A3A3A]">Priority rank:</span> {rank || "-"}</span>
       <span>
-        <span className="font-semibold text-[#4A4038]">WSJF score:</span>{" "}
+        <span className="font-semibold text-[#3A3A3A]">WSJF score:</span>{" "}
         {wsjf === undefined ? "-" : Number(wsjf).toFixed(2)}
       </span>
       <span>
-        <span className="font-semibold text-[#4A4038]">Planning:</span>{" "}
+        <span className="font-semibold text-[#3A3A3A]">Planning:</span>{" "}
         <span className={statusTone(status) === "amber" ? "text-amber-700 font-medium" : ""}>
           {String(status || "-").replace(/_/g, " ")}
         </span>
@@ -138,7 +138,7 @@ function AcceptanceCriteria({ criteria }) {
   return (
     <div className="space-y-2">
       {list.map((criterion, index) => (
-        <div key={criterion.id || index} className="rounded-lg border border-[#E9DFD1] bg-[#FBF7F0] px-3 py-2">
+        <div key={criterion.id || index} className="rounded-lg border border-[#E8E8E8] bg-[#F8F8F8] px-3 py-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="font-mono text-[9.5px] text-[#B86F50]">
               {criterion.id || `AC-${index + 1}`}
@@ -147,10 +147,10 @@ function AcceptanceCriteria({ criteria }) {
               {String(criterion.type || "").replace(/_/g, " ")}
             </Tag>
           </div>
-          <div className="mt-1.5 space-y-0.5 text-[10.5px] leading-relaxed text-[#4A4038]">
-            <p><span className="font-semibold text-[#776B60]">Given</span> {text(criterion.given)}</p>
-            <p><span className="font-semibold text-[#776B60]">When</span> {text(criterion.when)}</p>
-            <p><span className="font-semibold text-[#776B60]">Then</span> {text(criterion.then)}</p>
+          <div className="mt-1.5 space-y-0.5 text-[10.5px] leading-relaxed text-[#3A3A3A]">
+            <p><span className="font-semibold text-[#6B6B6B]">Given</span> {text(criterion.given)}</p>
+            <p><span className="font-semibold text-[#6B6B6B]">When</span> {text(criterion.when)}</p>
+            <p><span className="font-semibold text-[#6B6B6B]">Then</span> {text(criterion.then)}</p>
           </div>
         </div>
       ))}
@@ -167,18 +167,18 @@ function PbiValidationCard({ item, index }) {
     .join(" / ");
 
   return (
-    <article className="rounded-xl border border-[#E2D6C5] bg-[#FFFDF8]">
-      <div className="px-3 py-2.5 border-b border-[#E9DFD1] bg-[#FCF8F1]">
+    <article className="rounded-xl border border-[#E5E5E5] bg-[#FFFFFF]">
+      <div className="px-3 py-2.5 border-b border-[#E8E8E8] bg-[#F8F8F8]">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="font-mono text-[10px] text-[#B86F50]">{itemId}</span>
           <Tag tone={typeTone(item.type)}>{String(item.type || "").replace(/_/g, " ")}</Tag>
           <Tag tone={criteria.length ? "green" : "amber"}>{criteria.length} AC</Tag>
         </div>
-        <h4 className="mt-2 text-[12.5px] font-semibold leading-snug text-[#211914]">
+        <h4 className="mt-2 text-[12.5px] font-semibold leading-snug text-[#1A1A1A]">
           {item.title || item.description || itemId}
         </h4>
         {item.description && (
-          <p className="mt-1 text-[10.5px] leading-relaxed text-[#776B60]">
+          <p className="mt-1 text-[10.5px] leading-relaxed text-[#6B6B6B]">
             {item.description}
           </p>
         )}
@@ -188,7 +188,7 @@ function PbiValidationCard({ item, index }) {
       <div className="px-3 py-2.5 space-y-3">
         <InvestScore item={item} />
         <div>
-          <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase text-[#776B60]">
+          <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase text-[#6B6B6B]">
             <TestTube2 size={12} className="text-[#B86F50]" />
             Acceptance Criteria
           </div>
@@ -196,8 +196,8 @@ function PbiValidationCard({ item, index }) {
         </div>
 
         {(traceTopic || asArray(dependencies.blocked_by).length > 0 || asArray(dependencies.blocks).length > 0 || analysis.ac_generation_note) && (
-          <details className="text-[10.5px] leading-relaxed text-[#776B60]">
-            <summary className="cursor-pointer font-semibold text-[#4A4038]">
+          <details className="text-[10.5px] leading-relaxed text-[#6B6B6B]">
+            <summary className="cursor-pointer font-semibold text-[#3A3A3A]">
               Trace, dependencies, and notes
             </summary>
             <div className="mt-2 space-y-1.5">
@@ -236,10 +236,10 @@ export function ValidatedBacklogView({ data }) {
   const totalItems = stats.total_pbis ?? data?.total_items ?? items.length;
 
   return (
-    <div className="h-full overflow-auto bg-[#FFFDF8]">
+    <div className="h-full overflow-auto bg-[#FFFFFF]">
       <div className="p-4 space-y-3">
-        <div className="rounded-xl border border-[#E2D6C5] bg-[#FBF7F0] p-3">
-          <div className="flex items-center gap-2 text-[12px] font-semibold text-[#211914]">
+        <div className="rounded-xl border border-[#E5E5E5] bg-[#F8F8F8] p-3">
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-[#1A1A1A]">
             <ClipboardCheck size={14} className="text-[#B86F50]" />
             Validated Product Backlog
           </div>

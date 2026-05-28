@@ -55,6 +55,26 @@ export async function register(data) {
 
 // ── Projects ──────────────────────────────────────────────────────────────────
 
+export const BASE_PROJECT_NAME = "__base__";
+const BASE_PROJECT_CACHE_KEY   = "cara_base_project_id";
+
+/** Returns (and caches) the ID of the hidden base project, creating it if needed. */
+export async function getOrCreateBaseProject() {
+  const cached = localStorage.getItem(BASE_PROJECT_CACHE_KEY);
+  if (cached) return cached;
+  try {
+    const projects = await fetchProjects();
+    const found = projects.find((p) => p.name === BASE_PROJECT_NAME);
+    if (found) {
+      localStorage.setItem(BASE_PROJECT_CACHE_KEY, found.id);
+      return found.id;
+    }
+  } catch {}
+  const created = await createProject(BASE_PROJECT_NAME);
+  localStorage.setItem(BASE_PROJECT_CACHE_KEY, created.id);
+  return created.id;
+}
+
 export const fetchProjects       = ()                           => get("/api/projects");
 export const createProject       = (name, description = "")    => post("/api/projects", { name, description });
 export const updateProject       = (projectId, data)           => put(`/api/projects/${projectId}`, data);
@@ -67,8 +87,8 @@ export const createProjectChat   = (projectId, title)          => post(`/api/pro
 export const fetchChats   = ()                          => get("/api/chats");
 export const createChat   = (title, projectId = null)   => post("/api/chats", { title, projectId });
 export const deleteChat   = (chatId)                    => del(`/api/chats/${chatId}`);
-export const fetchMessages = (chatId, newSubChat)       => get(`/api/chats/${chatId}/${newSubChat}/messages`);
-export const sendMessage   = (chatId, content, subChat) => post(`/api/chats/${chatId}/${subChat}/messages`, { role: "user", content });
+export const fetchMessages = (chatId, newSubChat)       => get(`/api/chats/${chatId}/${newSubChat ?? 0}/messages`);
+export const sendMessage   = (chatId, content, subChat) => post(`/api/chats/${chatId}/${subChat ?? 0}/messages`, { role: "user", content });
 export const saveAssistantMessage = (chatId, content, subChat = 0) =>
   post(`/api/chats/${chatId}/${subChat}/messages`, { role: "assistant", content });
 export const startReq      = (config, chat_id)          => post(`/api/chats/process/start/${chat_id}`, { ...config });

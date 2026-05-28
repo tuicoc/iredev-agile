@@ -26,12 +26,12 @@ export function ArtifactTable({ data, column, tableTitle }) {
       <div className="px-4 py-3 overflow-x-auto">
         <table className="w-full text-[12px] border-collapse min-w-[700px]">
           <thead>
-            <tr className="text-left border-b border-[#E2D6C5]">
+            <tr className="text-left border-b border-[#E5E5E5]">
               {columns.map((val, idx) => (
                 <th
                   key={idx}
                   className={
-                    val.titleStyle ?? `py-2 pr-3 font-semibold text-[#776B60]`
+                    val.titleStyle ?? `py-2 pr-3 font-semibold text-[#6B6B6B]`
                   }
                 >
                   {val.title}
@@ -44,7 +44,7 @@ export function ArtifactTable({ data, column, tableTitle }) {
               return (
                 <tr
                   key={idx}
-                  className="border-b border-[#E9DFD1] hover:bg-[#FCF8F1] group"
+                  className="border-b border-[#E8E8E8] hover:bg-[#F8F8F8] group"
                 >
                   {/* Rank */}
                   {columns.map((col, idex) => (

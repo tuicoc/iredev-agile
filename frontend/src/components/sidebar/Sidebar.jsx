@@ -1,9 +1,4 @@
 // src/components/sidebar/Sidebar.jsx
-// ─────────────────────────────────────────────────────────────────────────────
-// Sidebar with project folders.
-// Clicking a project → opens ProjectHomeScreen in main area.
-// Expanding the chevron → shows chat list inline.
-// ─────────────────────────────────────────────────────────────────────────────
 import { useState, useCallback, useEffect } from "react";
 import {
   PanelLeftClose, PanelLeft, Search, Settings, LogOut,
@@ -18,22 +13,27 @@ import { AGENT_MOCK_MODE } from "../../config/env";
 import { MOCK_CHAT_ID, MOCK_PROJECT_ID } from "../../data/agentMockData";
 import {
   fetchProjects, createProject, deleteProject, updateProject,
-  fetchProjectChats, deleteChat,
+  fetchProjectChats, deleteChat, BASE_PROJECT_NAME,
 } from "../../services/chatService";
 
-const MOCK_PROJECT = {
-  id: MOCK_PROJECT_ID,
-  name: "Mock Cafe Queue",
+// ── Color tokens (Claude-aligned neutral palette) ──────────────────────────
+const S = {
+  bg:         "#F3F3F3",   // sidebar background
+  border:     "#E5E5E5",   // dividers
+  hover:      "#EBEBEB",   // hover row
+  active:     "#E3E3E3",   // active/selected
+  text:       "#1A1A1A",   // primary text
+  muted:      "#6B6B6B",   // secondary text / icons
+  icon:       "#6B6B6B",   // icon default color
+  brand:      "#B86F50",   // CARA brand (logo only)
+  inputBg:    "#FAFAFA",
+  inputBorder:"#D9D9D9",
 };
 
-const MOCK_PROJECT_CHATS = [
-  {
-    id: MOCK_CHAT_ID,
-    title: "Mock Agent Workflow",
-  },
-];
+const MOCK_PROJECT       = { id: MOCK_PROJECT_ID, name: "Mock Cafe Queue" };
+const MOCK_PROJECT_CHATS = [{ id: MOCK_CHAT_ID, title: "Mock Agent Workflow" }];
 
-// ── Single chat row inside expanded folder ─────────────────────────────────
+// ── Single chat row ─────────────────────────────────────────────────────────
 function ChatRow({ chat, isActive, onSelect, onDelete }) {
   const [hovered, setHovered] = useState(false);
   return (
@@ -41,17 +41,20 @@ function ChatRow({ chat, isActive, onSelect, onDelete }) {
       onClick={onSelect}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className={`flex items-center gap-2 pl-8 pr-2 py-[6px] rounded-lg
-                  cursor-pointer text-[12px] transition-colors duration-100
-                  ${isActive
-                    ? "bg-[#E5D9C9] text-[#211914]"
-                    : "text-[#5B5048] hover:bg-[#E7DDCF]"}`}
+      style={{ backgroundColor: isActive ? S.active : hovered ? S.hover : "transparent" }}
+      className="flex items-center gap-2 pl-8 pr-2 py-[6px] rounded-lg
+                 cursor-pointer text-[12px] transition-colors duration-100"
     >
-      <span className="flex-1 truncate leading-snug">{chat.title}</span>
+      <span className="flex-1 truncate leading-snug" style={{ color: isActive ? S.text : S.muted }}>
+        {chat.title}
+      </span>
       {hovered && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(chat.id); }}
-          className="p-0.5 rounded text-[#B0A49A] hover:text-red-400 flex-shrink-0"
+          className="p-0.5 rounded transition-colors flex-shrink-0"
+          style={{ color: S.muted }}
+          onMouseEnter={e => e.currentTarget.style.color = "#E53E3E"}
+          onMouseLeave={e => e.currentTarget.style.color = S.muted}
         >
           <Trash2 size={11} />
         </button>
@@ -60,7 +63,7 @@ function ChatRow({ chat, isActive, onSelect, onDelete }) {
   );
 }
 
-// ── Inline rename input ────────────────────────────────────────────────────
+// ── Inline rename input ─────────────────────────────────────────────────────
 function RenameInput({ value, onSave, onCancel }) {
   const [text, setText] = useState(value);
   function handleKey(e) {
@@ -74,63 +77,78 @@ function RenameInput({ value, onSave, onCancel }) {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKey}
-        className="flex-1 min-w-0 bg-[#FFFDF8] border border-[#B86F50]/50 rounded px-1.5 py-0.5
-                   text-[12px] text-[#211914] focus:outline-none focus:ring-1 focus:ring-[#B86F50]/30"
+        className="flex-1 min-w-0 rounded px-1.5 py-0.5 text-[12px] focus:outline-none"
+        style={{
+          background: S.inputBg,
+          border: `1px solid ${S.brand}60`,
+          color: S.text,
+        }}
       />
-      <button
-        onClick={() => text.trim() && onSave(text.trim())}
-        className="text-[#B86F50] hover:text-[#A76145] flex-shrink-0"
-      >
+      <button onClick={() => text.trim() && onSave(text.trim())} style={{ color: S.brand }} className="flex-shrink-0">
         <Check size={12} />
       </button>
-      <button onClick={onCancel} className="text-[#A89C91] hover:text-[#776B60] flex-shrink-0">
+      <button onClick={onCancel} style={{ color: S.muted }} className="flex-shrink-0">
         <X size={12} />
       </button>
     </div>
   );
 }
 
-// ── Project folder row ─────────────────────────────────────────────────────
+// ── Base project chat list (flat, no folder header) ─────────────────────────
+function BaseChatList({ baseProject, activeChatId, onSelectChat }) {
+  const [chats, setChats] = useState([]);
+
+  useEffect(() => {
+    if (!baseProject?.id) return;
+    fetchProjectChats(baseProject.id).then(setChats).catch(() => {});
+  }, [baseProject?.id, activeChatId]); // refresh whenever active chat changes (new chat created)
+
+  const handleDelete = useCallback(async (chatId) => {
+    await deleteChat(chatId).catch(() => {});
+    setChats((prev) => prev.filter((c) => c.id !== chatId));
+  }, []);
+
+  if (!baseProject || chats.length === 0) return null;
+
+  return (
+    <div className="mb-1">
+      {chats.map((chat) => (
+        <ChatRow
+          key={chat.id}
+          chat={chat}
+          isActive={chat.id === activeChatId}
+          onSelect={() => onSelectChat(chat.id, baseProject.id)}
+          onDelete={handleDelete}
+        />
+      ))}
+      <div className="h-px mx-1 my-2" style={{ background: S.border }} />
+    </div>
+  );
+}
+
+// ── Project folder row ──────────────────────────────────────────────────────
 function ProjectFolder({
-  project,
-  isExpanded,
-  isActive,        // true when this project's home is showing
-  activeChatId,
-  onOpenProject,   // click on name → show project home
-  onToggleExpand,  // click on chevron → expand/collapse chat list
-  onSelectChat,
-  onDelete,
-  onRename,
+  project, isExpanded, isActive, activeChatId,
+  onOpenProject, onToggleExpand, onSelectChat, onDelete, onRename, onCreateChat,
 }) {
-  const [showMenu,  setShowMenu]  = useState(false);
-  const [renaming,  setRenaming]  = useState(false);
-  const [chats,     setChats]     = useState([]);
+  const [showMenu,     setShowMenu]     = useState(false);
+  const [renaming,     setRenaming]     = useState(false);
+  const [chats,        setChats]        = useState([]);
   const [loadingChats, setLoadingChats] = useState(false);
+  const [hovered,      setHovered]      = useState(false);
 
   useEffect(() => {
     if (!isExpanded) return;
-    if (AGENT_MOCK_MODE) {
-      setChats(MOCK_PROJECT_CHATS);
-      setLoadingChats(false);
-      return;
-    }
+    if (AGENT_MOCK_MODE) { setChats(MOCK_PROJECT_CHATS); return; }
     setLoadingChats(true);
-    fetchProjectChats(project.id)
-      .then(setChats)
-      .catch(() => {})
-      .finally(() => setLoadingChats(false));
+    fetchProjectChats(project.id).then(setChats).catch(() => {}).finally(() => setLoadingChats(false));
   }, [isExpanded, project.id]);
 
-  // Expose refresh so parent can call it after a new chat is created
   const refreshChats = useCallback(() => {
-    if (AGENT_MOCK_MODE) {
-      setChats(MOCK_PROJECT_CHATS);
-      return;
-    }
+    if (AGENT_MOCK_MODE) { setChats(MOCK_PROJECT_CHATS); return; }
     fetchProjectChats(project.id).then(setChats).catch(() => {});
   }, [project.id]);
 
-  // Make refresh available via ref-like prop
   useEffect(() => {
     if (project._refreshRef) project._refreshRef.current = refreshChats;
   }, [project._refreshRef, refreshChats]);
@@ -141,35 +159,39 @@ function ProjectFolder({
     setChats((prev) => prev.filter((c) => c.id !== chatId));
   }, []);
 
+  const isRowActive = isActive && !activeChatId;
+  const rowBg = isRowActive ? S.active : hovered ? S.hover : "transparent";
+
   return (
     <>
-      {/* Folder row */}
       <div
-        className={`group flex items-center gap-1.5 px-2 py-[7px] rounded-lg
-                    cursor-pointer text-[13px] transition-colors duration-100 select-none
-                    ${isActive && !activeChatId
-                      ? "bg-[#E5D9C9] text-[#211914]"
-                      : "text-[#4A4038] hover:bg-[#E7DDCF]"}`}
+        className="group flex items-center gap-1.5 px-2 py-[7px] rounded-lg
+                   cursor-pointer text-[13px] transition-colors duration-100 select-none"
+        style={{ backgroundColor: rowBg, color: S.text }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
-        {/* Chevron — toggles expand/collapse */}
+        {/* Chevron */}
         <button
           onClick={(e) => { e.stopPropagation(); onToggleExpand(project.id); }}
-          className="p-0.5 -ml-0.5 rounded hover:bg-black/[0.06] flex-shrink-0"
+          className="p-0.5 -ml-0.5 rounded flex-shrink-0"
+          style={{ color: S.muted }}
         >
           <ChevronRight
-            size={13}
-            className={`text-[#A89C91] transition-transform duration-150
-                        ${isExpanded ? "rotate-90" : ""}`}
+            size={12}
+            className={`transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
           />
         </button>
 
         {/* Folder icon */}
-        {isExpanded || isActive
-          ? <FolderOpen size={14} className="text-[#B86F50] flex-shrink-0" />
-          : <Folder     size={14} className="text-[#776B60] flex-shrink-0 group-hover:text-[#B86F50]" />
-        }
+        <div className="flex-shrink-0 flex items-center justify-center w-5 h-5">
+          {isExpanded || isActive
+            ? <FolderOpen size={15} style={{ color: S.text }} />
+            : <Folder     size={15} style={{ color: hovered ? S.text : S.icon }} />
+          }
+        </div>
 
-        {/* Name — clicking opens project home */}
+        {/* Name */}
         {renaming ? (
           <RenameInput
             value={project.name}
@@ -190,23 +212,26 @@ function ProjectFolder({
           <div className="relative opacity-0 group-hover:opacity-100 flex-shrink-0">
             <button
               onClick={(e) => { e.stopPropagation(); setShowMenu((v) => !v); }}
-              className="p-1 rounded hover:bg-[#D8CBBB] text-[#A89C91] hover:text-[#4A4038]"
+              className="p-1 rounded transition-colors"
+              style={{ color: S.muted }}
             >
               <MoreHorizontal size={13} />
             </button>
             {showMenu && (
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setShowMenu(false)} />
-                <div className="absolute right-0 top-5 ml-1 z-40 bg-[#FFFDF8] border border-[#E2D6C5]
-                                rounded-xl shadow-lg py-1 w-[140px]">
+                <div
+                  className="absolute right-0 top-5 z-40 rounded-xl shadow-lg py-1 w-[140px]"
+                  style={{ background: "#FFFFFF", border: `1px solid ${S.border}` }}
+                >
                   <button
                     onClick={(e) => { e.stopPropagation(); setRenaming(true); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px]
-                               text-[#4A4038] hover:bg-[#FCF8F1] transition-colors"
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] transition-colors hover:bg-[#F3F3F3]"
+                    style={{ color: S.text }}
                   >
-                    <Pencil size={11} className="text-[#776B60]" /> Rename
+                    <Pencil size={11} style={{ color: S.muted }} /> Rename
                   </button>
-                  <div className="h-px bg-[#E9DFD1] my-1" />
+                  <div className="h-px my-1" style={{ background: S.border }} />
                   <button
                     onClick={(e) => { e.stopPropagation(); onDelete(project.id); setShowMenu(false); }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px]
@@ -221,16 +246,15 @@ function ProjectFolder({
         )}
       </div>
 
-      {/* Expanded: inline chat list */}
       {isExpanded && (
         <div className="ml-1 mb-1">
           {loadingChats ? (
             <div className="flex items-center gap-2 pl-8 py-1.5">
-              <LoadingSpinner size={10} className="text-[#B86F50]" />
-              <span className="text-[11px] text-[#A89C91]">Loading…</span>
+              <LoadingSpinner size={10} style={{ color: S.brand }} />
+              <span className="text-[11px]" style={{ color: S.muted }}>Loading…</span>
             </div>
           ) : chats.length === 0 ? (
-            <div className="pl-8 py-1.5 text-[11px] text-[#B0A49A] italic">No processes yet</div>
+            <div className="pl-8 py-1.5 text-[11px] italic" style={{ color: S.muted }}>No processes yet</div>
           ) : (
             chats.map((chat) => (
               <ChatRow
@@ -248,7 +272,7 @@ function ProjectFolder({
   );
 }
 
-// ── Inline new project form ────────────────────────────────────────────────
+// ── New project form ─────────────────────────────────────────────────────────
 function NewProjectForm({ onSave, onCancel }) {
   const [name, setName] = useState("");
   function handleKey(e) {
@@ -257,35 +281,40 @@ function NewProjectForm({ onSave, onCancel }) {
   }
   return (
     <div className="flex items-center gap-1.5 px-2 py-1.5 mb-1">
-      <Folder size={14} className="text-[#B86F50] flex-shrink-0" />
+      <Folder size={13} style={{ color: S.icon }} className="flex-shrink-0" />
       <input
         autoFocus
         placeholder="Project name…"
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={handleKey}
-        className="flex-1 bg-[#FFFDF8] border border-[#B86F50]/50 rounded-lg px-2 py-1
-                   text-[12px] text-[#211914] focus:outline-none focus:ring-1 focus:ring-[#B86F50]/30"
+        className="flex-1 rounded-lg px-2 py-1 text-[12px] focus:outline-none"
+        style={{
+          background: S.inputBg,
+          border: `1px solid ${S.brand}50`,
+          color: S.text,
+        }}
       />
       <button
         onClick={() => name.trim() && onSave(name.trim())}
         disabled={!name.trim()}
-        className="text-[#B86F50] hover:text-[#A76145] disabled:opacity-30 flex-shrink-0"
+        className="flex-shrink-0 disabled:opacity-30"
+        style={{ color: S.brand }}
       >
         <Check size={13} />
       </button>
-      <button onClick={onCancel} className="text-[#A89C91] hover:text-[#776B60] flex-shrink-0">
+      <button onClick={onCancel} className="flex-shrink-0" style={{ color: S.muted }}>
         <X size={13} />
       </button>
     </div>
   );
 }
 
-// ── Main Sidebar export ────────────────────────────────────────────────────
-export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelectChat }) {
+// ── Main Sidebar ─────────────────────────────────────────────────────────────
+export function Sidebar({ activeChatId, activeProjectId, onNewChat, onOpenProject, onSelectChat, onCreateChat }) {
   const [projects,        setProjects]        = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
-  const [expandedFolders, setExpandedFolders] = useState({}); // {projectId: bool}
+  const [expandedFolders, setExpandedFolders] = useState({});
   const [creatingProject, setCreatingProject] = useState(false);
   const [collapsed,       setCollapsed]       = useState(false);
   const [showSettings,    setShowSettings]    = useState(false);
@@ -302,22 +331,15 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
     }
     if (authVersion === 0) { setProjects([]); setLoadingProjects(false); return; }
     setLoadingProjects(true);
-    fetchProjects()
-      .then(setProjects)
-      .catch(() => {})
-      .finally(() => setLoadingProjects(false));
+    fetchProjects().then(setProjects).catch(() => {}).finally(() => setLoadingProjects(false));
   }, [authVersion]);
 
   const handleCreateProject = async (name) => {
-    if (AGENT_MOCK_MODE) {
-      setCreatingProject(false);
-      return;
-    }
+    if (AGENT_MOCK_MODE) { setCreatingProject(false); return; }
     setCreatingProject(false);
     try {
       const p = await createProject(name);
       setProjects((prev) => [p, ...prev]);
-      // Auto-open + auto-expand new project
       onOpenProject(p);
       setExpandedFolders((prev) => ({ ...prev, [p.id]: true }));
     } catch {}
@@ -325,7 +347,6 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
 
   const handleDeleteProject = async (projectId) => {
     if (AGENT_MOCK_MODE) return;
-    // If currently viewing this project, clear view
     if (activeProjectId === projectId) onOpenProject(null);
     try {
       await deleteProject(projectId);
@@ -334,41 +355,47 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
   };
 
   const handleRenameProject = async (projectId, name) => {
-    if (AGENT_MOCK_MODE) return;
-    if (!name) return;
+    if (AGENT_MOCK_MODE || !name) return;
     try {
       const updated = await updateProject(projectId, { name });
       setProjects((prev) => prev.map((p) => (p.id === projectId ? updated : p)));
     } catch {}
   };
 
-  const toggleExpand = (projectId) => {
+  const toggleExpand = (projectId) =>
     setExpandedFolders((prev) => ({ ...prev, [projectId]: !prev[projectId] }));
-  };
 
+  const baseProject      = projects.find((p) => p.name === BASE_PROJECT_NAME);
   const filteredProjects = projects.filter((p) =>
+    p.name !== BASE_PROJECT_NAME &&
     p.name.toLowerCase().includes(query.toLowerCase())
   );
 
-  // ── Collapsed strip ──────────────────────────────────────────────────────
+  // ── Collapsed strip ────────────────────────────────────────────────────────
   if (collapsed) {
     return (
-      <aside className="w-[52px] h-full flex flex-col items-center
-                        bg-[#EFE8DC] border-r border-[#D8CBBB] py-3 gap-2 flex-shrink-0">
-        <Tooltip text="Expand">
+      <aside
+        className="w-[52px] h-full flex flex-col items-center py-3 gap-2 flex-shrink-0"
+        style={{ background: S.bg, borderRight: `1px solid ${S.border}` }}
+      >
+        <Tooltip text="Expand sidebar">
           <button
             onClick={() => setCollapsed(false)}
-            className="w-8 h-8 flex items-center justify-center rounded-lg
-                       text-[#776B60] hover:bg-[#E7DDCF] transition-colors"
+            className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
+            style={{ color: S.icon }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = S.hover}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
           >
             <PanelLeft size={16} />
           </button>
         </Tooltip>
-        <Tooltip text="New project">
+        <Tooltip text="New chat">
           <button
-            onClick={() => { setCollapsed(false); setCreatingProject(true); }}
-            className="w-8 h-8 flex items-center justify-center rounded-lg
-                       text-[#776B60] hover:bg-[#E7DDCF] transition-colors"
+            onClick={() => { setCollapsed(false); onNewChat?.(); }}
+            className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors"
+            style={{ color: S.icon }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = S.hover}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
           >
             <Plus size={15} />
           </button>
@@ -377,64 +404,96 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
     );
   }
 
-  // ── Expanded ─────────────────────────────────────────────────────────────
+  // ── Expanded ───────────────────────────────────────────────────────────────
   return (
     <>
-      <aside className="w-[260px] h-full flex flex-col flex-shrink-0
-                        bg-[#EFE8DC] border-r border-[#D8CBBB]">
+      <aside
+        className="w-[260px] h-full flex flex-col flex-shrink-0"
+        style={{ background: S.bg, borderRight: `1px solid ${S.border}` }}
+      >
         {/* Logo + collapse */}
         <div className="flex items-center justify-between px-3 pt-3 pb-2">
           <div className="flex items-center gap-2">
-            <div className="w-[26px] h-[26px] rounded-full bg-[#B86F50]
-                            flex items-center justify-center flex-shrink-0">
+            <div
+              className="w-[26px] h-[26px] rounded-full flex items-center justify-center flex-shrink-0"
+              style={{ background: "linear-gradient(135deg, #E07840 0%, #C04898 100%)" }}
+            >
               <span className="text-white text-[10px] font-semibold">C</span>
             </div>
-            <span className="text-[13px] font-semibold text-[#211914]">
-              CARA
-            </span>
+            <span className="text-[13px] font-semibold" style={{ color: S.text }}>CARA</span>
           </div>
           <Tooltip text="Close sidebar">
             <button
               onClick={() => setCollapsed(true)}
-              className="w-7 h-7 flex items-center justify-center rounded-lg
-                         text-[#776B60] hover:bg-[#E7DDCF] transition-colors"
+              className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors"
+              style={{ color: S.icon }}
+              onMouseEnter={e => e.currentTarget.style.backgroundColor = S.hover}
+              onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
             >
               <PanelLeftClose size={15} />
             </button>
           </Tooltip>
         </div>
 
-        {/* New Project */}
+        {/* New Chat button */}
         <div className="px-2 pb-2">
           <button
-            onClick={() => setCreatingProject(true)}
             className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg
-                       text-[13px] text-[#4A4038] hover:bg-[#E7DDCF] transition-colors"
+                       text-[13px] transition-colors"
+            style={{ color: S.text }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = S.hover}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
+            onClick={onNewChat}
           >
-            <Plus size={14} className="text-[#B86F50]" />
-            New project
+            <Plus size={14} style={{ color: S.icon }} />
+            New chat
           </button>
         </div>
 
         {/* Search */}
         <div className="px-2 pb-2">
           <div className="relative">
-            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#A89C91]" />
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: S.muted }} />
             <input
               type="text"
               placeholder="Search projects…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full pl-7 pr-3 py-1.5 bg-[#F7F3EA]/70 border border-[#D8CBBB]
-                         rounded-lg text-[12px] text-[#211914] placeholder:text-[#A89C91]
-                         focus:outline-none focus:ring-1 focus:ring-[#B86F50]/30
-                         focus:border-[#B86F50]/40 transition-all"
+              className="w-full pl-7 pr-3 py-1.5 rounded-lg text-[12px] focus:outline-none transition-all"
+              style={{
+                background: "#FAFAFA",
+                border: `1px solid ${S.inputBorder}`,
+                color: S.text,
+              }}
             />
           </div>
         </div>
 
         {/* Project list */}
         <div className="flex-1 overflow-y-auto px-2 pb-2">
+          {/* Projects section header */}
+          <div className="flex items-center justify-between px-1 mb-1">
+            <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: S.muted }}>Projects</span>
+            <Tooltip text="New project">
+              <button
+                onClick={() => setCreatingProject(true)}
+                className="w-5 h-5 flex items-center justify-center rounded-md transition-colors"
+                style={{ color: S.muted }}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = S.hover; e.currentTarget.style.color = S.text; }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = S.muted; }}
+              >
+                <Plus size={12} />
+              </button>
+            </Tooltip>
+          </div>
+
+          {/* Flat list for base-project chats (no folder) */}
+          <BaseChatList
+            baseProject={baseProject}
+            activeChatId={activeChatId}
+            onSelectChat={onSelectChat}
+          />
+
           {creatingProject && (
             <NewProjectForm
               onSave={handleCreateProject}
@@ -444,16 +503,17 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
 
           {loadingProjects && projects.length === 0 && (
             <div className="flex items-center justify-center py-8">
-              <LoadingSpinner size={18} className="text-[#B86F50]" />
+              <LoadingSpinner size={18} style={{ color: S.brand }} />
             </div>
           )}
 
           {!loadingProjects && filteredProjects.length === 0 && !creatingProject && (
             <div className="px-3 py-8 text-center">
-              <div className="text-[#A89C91] text-[12px]">No projects yet</div>
+              <div className="text-[12px]" style={{ color: S.muted }}>No projects yet</div>
               <button
                 onClick={() => setCreatingProject(true)}
-                className="mt-2 text-[12px] text-[#B86F50] hover:underline"
+                className="mt-2 text-[12px] hover:underline"
+                style={{ color: S.brand }}
               >
                 Create your first project
               </button>
@@ -472,35 +532,49 @@ export function Sidebar({ activeChatId, activeProjectId, onOpenProject, onSelect
               onSelectChat={(chatId, projId) => onSelectChat(chatId, projId)}
               onDelete={handleDeleteProject}
               onRename={handleRenameProject}
+              onCreateChat={onCreateChat}
             />
           ))}
         </div>
 
-        {/* Bottom nav */}
-        <div className="border-t border-[#D8CBBB] p-2 space-y-0.5">
-          <button
-            onClick={() => setShowSettings(true)}
-            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg
-                       text-[12px] text-[#776B60] hover:bg-[#E7DDCF]
-                       hover:text-[#4A4038] transition-colors"
+        {/* Bottom — user + actions */}
+        <div style={{ borderTop: `1px solid ${S.border}` }} className="p-2">
+          <div
+            className="flex items-center gap-2 px-1.5 py-1.5 rounded-xl group transition-colors cursor-default"
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = S.hover}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
           >
-            <Settings size={13} /> Settings
-          </button>
-          <div className="flex items-center gap-2.5 px-2.5 py-2 mt-0.5 rounded-lg group">
-            <div className="w-6 h-6 rounded-full bg-[#776B60] flex items-center
-                            justify-center flex-shrink-0">
+            <div
+              className="w-[26px] h-[26px] rounded-full flex items-center justify-center flex-shrink-0 ring-2"
+              style={{ background: "#7A7A7A", ringColor: S.border }}
+            >
               <span className="text-white text-[10px] font-semibold">
                 {(user?.name || user?.email || "U")[0].toUpperCase()}
               </span>
             </div>
-            <span className="text-[12px] text-[#4A4038] truncate flex-1">
+            <span className="text-[11.5px] truncate flex-1" style={{ color: S.text }}>
               {user?.email || "user@example.com"}
             </span>
+            <Tooltip text="Settings">
+              <button
+                onClick={() => setShowSettings(true)}
+                className="opacity-0 group-hover:opacity-100 w-6 h-6 flex items-center
+                           justify-center rounded-md transition-all flex-shrink-0"
+                style={{ color: S.muted }}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = S.active; e.currentTarget.style.color = S.text; }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = S.muted; }}
+              >
+                <Settings size={12} />
+              </button>
+            </Tooltip>
             <Tooltip text="Sign out">
               <button
                 onClick={logout}
-                className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center
-                           justify-center rounded text-[#A89C91] hover:text-red-400 transition-all"
+                className="opacity-0 group-hover:opacity-100 w-6 h-6 flex items-center
+                           justify-center rounded-md transition-all flex-shrink-0"
+                style={{ color: S.muted }}
+                onMouseEnter={e => { e.currentTarget.style.color = "#E53E3E"; e.currentTarget.style.backgroundColor = "#FFF5F5"; }}
+                onMouseLeave={e => { e.currentTarget.style.color = S.muted; e.currentTarget.style.backgroundColor = "transparent"; }}
               >
                 <LogOut size={12} />
               </button>

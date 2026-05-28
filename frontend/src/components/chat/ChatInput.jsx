@@ -47,14 +47,14 @@ function ModelDropdown({ label, value, onChange, icon, open, onToggle }) {
 
   return (
     <div className="relative space-y-2">
-      <div className="flex items-center gap-2 text-[11px] font-medium text-[#776B60]">
+      <div className="flex items-center gap-2 text-[11px] font-medium text-[#6B6B6B]">
         {createElement(icon, { size: 13 })}
         <span>{label}</span>
       </div>
       <button
         type="button"
         onClick={onToggle}
-        className="flex h-8 w-full items-center justify-between gap-2 rounded-full bg-[#FFFDF8] px-3 text-[12px] text-[#211914] shadow-sm ring-1 ring-[#E2D6C5] transition-colors hover:bg-[#F7F1E8]"
+        className="flex h-8 w-full items-center justify-between gap-2 rounded-full bg-[#FFFFFF] px-3 text-[12px] text-[#1A1A1A] shadow-sm ring-1 ring-[#E5E5E5] transition-colors hover:bg-[#F5F5F5]"
         aria-expanded={open}
       >
         <span className="truncate">{selectedLabel}</span>
@@ -66,7 +66,7 @@ function ModelDropdown({ label, value, onChange, icon, open, onToggle }) {
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-xl border border-[#E2D6C5] bg-[#FFFDF8] p-1.5 shadow-[0_10px_24px_rgba(49,38,27,0.14)]">
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-xl border border-[#E5E5E5] bg-[#FFFFFF] p-1.5 shadow-[0_10px_24px_rgba(49,38,27,0.14)]">
           {options.map((option) => {
             const selected = option.value === value;
             return (
@@ -79,8 +79,8 @@ function ModelDropdown({ label, value, onChange, icon, open, onToggle }) {
                 }}
                 className={`flex h-8 w-full items-center justify-between rounded-lg px-2.5 text-left text-[12px] transition-colors ${
                   selected
-                    ? "bg-[#F0E7D8] text-[#211914]"
-                    : "text-[#5B5048] hover:bg-[#F7F1E8]"
+                    ? "bg-[#F0F0F0] text-[#1A1A1A]"
+                    : "text-[#505050] hover:bg-[#F5F5F5]"
                 }`}
               >
                 <span className="truncate">{option.label}</span>
@@ -97,11 +97,11 @@ function ModelDropdown({ label, value, onChange, icon, open, onToggle }) {
 function VisionModeControl({ value, onChange }) {
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 text-[11px] font-medium text-[#776B60]">
+      <div className="flex items-center gap-2 text-[11px] font-medium text-[#6B6B6B]">
         <BrainCircuit size={13} />
         <span>Visionary</span>
       </div>
-      <div className="inline-grid h-8 grid-cols-2 rounded-full bg-[#ECE3D6] p-0.5">
+      <div className="inline-grid h-8 grid-cols-2 rounded-full bg-[#EFEFEF] p-0.5">
         {VISION_MODE_OPTIONS.map((option) => (
           <button
             type="button"
@@ -109,8 +109,8 @@ function VisionModeControl({ value, onChange }) {
             onClick={() => onChange(option.value)}
             className={`rounded-full px-3 text-[11.5px] font-medium transition-all ${
               value === option.value
-                ? "bg-[#FFFDF8] text-[#211914] shadow-sm"
-                : "text-[#776B60] hover:text-[#211914]"
+                ? "bg-[#FFFFFF] text-[#1A1A1A] shadow-sm"
+                : "text-[#6B6B6B] hover:text-[#1A1A1A]"
             }`}
           >
             {option.label}
@@ -128,12 +128,12 @@ function TurnControl({ value, onChange }) {
 
   return (
     <div className="space-y-2">
-      <div className="text-[11px] font-medium text-[#776B60]">Interview turns</div>
-      <div className="inline-flex h-8 items-center overflow-hidden rounded-full bg-[#ECE3D6] p-0.5">
+      <div className="text-[11px] font-medium text-[#6B6B6B]">Interview turns</div>
+      <div className="inline-flex h-8 items-center overflow-hidden rounded-full bg-[#EFEFEF] p-0.5">
         <button
           type="button"
           onClick={() => update(value - 1)}
-          className="flex h-7 w-7 items-center justify-center rounded-full text-[#776B60] hover:bg-[#FFFDF8] hover:text-[#211914]"
+          className="flex h-7 w-7 items-center justify-center rounded-full text-[#6B6B6B] hover:bg-[#FFFFFF] hover:text-[#1A1A1A]"
         >
           <Minus size={13} />
         </button>
@@ -144,12 +144,12 @@ function TurnControl({ value, onChange }) {
           step={1}
           value={value}
           onChange={(event) => update(event.target.value)}
-          className="turns-number-input h-7 w-14 bg-transparent text-center text-[12px] font-medium text-[#211914] outline-none"
+          className="turns-number-input h-7 w-14 bg-transparent text-center text-[12px] font-medium text-[#1A1A1A] outline-none"
         />
         <button
           type="button"
           onClick={() => update(value + 1)}
-          className="flex h-7 w-7 items-center justify-center rounded-full text-[#776B60] hover:bg-[#FFFDF8] hover:text-[#211914]"
+          className="flex h-7 w-7 items-center justify-center rounded-full text-[#6B6B6B] hover:bg-[#FFFFFF] hover:text-[#1A1A1A]"
         >
           <Plus size={13} />
         </button>
@@ -167,7 +167,7 @@ function ProcessSettingsPanel({ config, onChange }) {
   };
 
   return (
-    <div className="mb-3 rounded-xl border border-[#E2D6C5] bg-[#FCF8F1] px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+    <div className="mb-3 rounded-xl border border-[#E5E5E5] bg-[#F8F8F8] px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
       <div className="grid gap-4 md:grid-cols-2">
         <ModelDropdown
           label="General model"
@@ -211,7 +211,7 @@ function ProcessConfigToggle({ config, locked, expanded, onToggle }) {
   if (locked) {
     return (
       <div className="flex min-w-0 max-w-full items-center rounded-full px-2.5 py-1.5">
-        <span className="min-w-0 truncate text-[12.5px] font-medium leading-none text-[#776B60] sm:text-[13px]">
+        <span className="min-w-0 truncate text-[12.5px] font-medium leading-none text-[#6B6B6B] sm:text-[13px]">
           {summary}
         </span>
       </div>
@@ -222,15 +222,15 @@ function ProcessConfigToggle({ config, locked, expanded, onToggle }) {
     <button
       type="button"
       onClick={onToggle}
-      className="group flex min-w-0 max-w-full items-center gap-2 rounded-full px-2.5 py-1.5 text-left text-[#211914] transition-colors hover:bg-[#F3EBDD]"
+      className="group flex min-w-0 max-w-full items-center gap-2 rounded-full px-2.5 py-1.5 text-left text-[#1A1A1A] transition-colors hover:bg-[#F0F0F0]"
       aria-expanded={expanded}
     >
-      <span className="min-w-0 truncate text-[12.5px] font-medium leading-none text-[#776B60] sm:text-[13px]">
+      <span className="min-w-0 truncate text-[12.5px] font-medium leading-none text-[#6B6B6B] sm:text-[13px]">
         {summary}
       </span>
       {expanded
-        ? <ChevronUp size={15} className="flex-shrink-0 text-[#95887C] group-hover:text-[#4A4038]" />
-        : <ChevronDown size={15} className="flex-shrink-0 text-[#95887C] group-hover:text-[#4A4038]" />}
+        ? <ChevronUp size={15} className="flex-shrink-0 text-[#95887C] group-hover:text-[#3A3A3A]" />
+        : <ChevronDown size={15} className="flex-shrink-0 text-[#95887C] group-hover:text-[#3A3A3A]" />}
     </button>
   );
 }
@@ -280,7 +280,7 @@ export function ChatInput({
     <div className="px-4 pb-5 pt-2 flex-shrink-0">
       <div className="max-w-[720px] mx-auto">
         <div
-          className="bg-[#FFFDF8] rounded-2xl border border-[#E2D6C5]
+          className="bg-[#FFFFFF] rounded-2xl border border-[#E5E5E5]
                         shadow-[0_2px_8px_rgba(0,0,0,0.06)]
                         focus-within:border-[#B86F50]/50
                         focus-within:shadow-[0_0_0_3px_rgba(184,111,80,0.12),0_2px_8px_rgba(0,0,0,0.06)]
@@ -295,14 +295,14 @@ export function ChatInput({
             onKeyDown={handleKeyDown}
             disabled={inputDisabled}
             className="w-full px-4 pt-3.5 pb-2 bg-transparent text-[14px]
-                       text-[#211914] leading-relaxed
-                       placeholder:text-[#A89C91]
+                       text-[#1A1A1A] leading-relaxed
+                       placeholder:text-[#A0A0A0]
                        focus:outline-none resize-none
                        max-h-[220px] overflow-y-auto
                        disabled:opacity-60"
           />
 
-          <div className="border-t border-[#EFE6DA] px-3 py-3">
+          <div className="border-t border-[#E8E8E8] px-3 py-3">
             {effectiveConfigOpen && (
               <ProcessSettingsPanel
                 config={currentProcessConfig}
@@ -326,7 +326,7 @@ export function ChatInput({
                   <button
                     onClick={onCancel}
                     className="w-8 h-8 flex items-center justify-center rounded-full
-                               bg-[#211914] hover:bg-[#4A4038]
+                               bg-[#1A1A1A] hover:bg-[#3A3A3A]
                                text-white transition-colors shadow-sm"
                   >
                     <Square size={12} fill="currentColor" />
@@ -341,7 +341,7 @@ export function ChatInput({
                                 transition-all duration-150 ${
                                   text.trim() && !inputDisabled
                                     ? "bg-[#B86F50] hover:bg-[#A76145] text-white shadow-sm"
-                                    : "bg-[#ECE3D6] text-[#B0A49A] cursor-not-allowed"
+                                    : "bg-[#EFEFEF] text-[#A8A8A8] cursor-not-allowed"
                                 }`}
                   >
                     <ArrowUp size={15} strokeWidth={2.5} />
@@ -353,7 +353,7 @@ export function ChatInput({
         </div>
 
         {/* Disclaimer */}
-        <p className="text-center text-[11px] text-[#B0A49A] mt-2.5">
+        <p className="text-center text-[11px] text-[#A8A8A8] mt-2.5">
           CARA can make mistakes. Please check important information.
         </p>
       </div>

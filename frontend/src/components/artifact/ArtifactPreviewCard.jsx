@@ -6,29 +6,46 @@ import {
   Globe,
   FileText,
   ImageIcon,
-  File,
+  BookOpen,
+  Lightbulb,
+  List,
+  ClipboardList,
+  ListChecks,
+  LayoutList,
+  CheckSquare,
+  Sparkles,
   ChevronRight,
   Check,
 } from "lucide-react";
 import { getArtifactDisplayName } from "./ArtifactPanel";
 
 const TYPE_ICONS = {
+  // Code/web artifact types
   react: Code2,
   html: Globe,
   code: Code2,
   markdown: FileText,
   svg: ImageIcon,
+  // CARA artifact types
+  interview_record: BookOpen,
+  product_vision: Lightbulb,
+  elicitation_agenda: List,
+  requirement_list: ClipboardList,
+  user_story_draft: ListChecks,
+  product_backlog: LayoutList,
+  validated_product_backlog: CheckSquare,
+  analyst_estimation: Sparkles,
 };
 
 export function ArtifactPreviewCard({ artifact, onOpen }) {
-  const Icon = TYPE_ICONS[artifact.type] ?? File;
+  const Icon = TYPE_ICONS[artifact.type] ?? FileText;
 
   return (
     <button
       onClick={onOpen}
       className="flex items-center gap-3 pl-3 pr-2.5 py-2.5
-                 bg-[#FFFDF8] border border-[#E2D6C5] rounded-xl
-                 hover:border-[#CEC0AE] hover:bg-[#FCF8F1]
+                 bg-[#FFFFFF] border border-[#E5E5E5] rounded-xl
+                 hover:border-[#C5C5C5] hover:bg-[#F8F8F8]
                  shadow-[0_1px_3px_rgba(0,0,0,0.05)]
                  hover:shadow-[0_2px_6px_rgba(0,0,0,0.07)]
                  transition-all duration-150 text-left w-full max-w-[320px] group"
@@ -39,7 +56,7 @@ export function ArtifactPreviewCard({ artifact, onOpen }) {
                        border ${
                          artifact.accepted
                            ? "bg-green-50 border-green-200"
-                           : "bg-[#F4E4D9] border-[#E6CABB]"
+                           : "bg-[#FEF0E8] border-[#FFD0B0]"
                        }`}
       >
         {artifact.accepted ? (
@@ -52,11 +69,11 @@ export function ArtifactPreviewCard({ artifact, onOpen }) {
       {/* Text */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[13px] font-semibold text-[#211914] truncate leading-snug">
+          <span className="text-[13px] font-semibold text-[#1A1A1A] truncate leading-snug">
             {getArtifactDisplayName(artifact.type)}
           </span>
           {artifact.iteration && (
-            <span className="text-[10px] text-[#A89C91] flex-shrink-0">
+            <span className="text-[10px] text-[#A0A0A0] flex-shrink-0">
               v{artifact.iteration}
             </span>
           )}
@@ -69,7 +86,7 @@ export function ArtifactPreviewCard({ artifact, onOpen }) {
               Awaiting your review
             </span>
           ) : (
-            <span className="text-[#776B60] capitalize">
+            <span className="text-[#6B6B6B] capitalize">
               {artifact.type} · Click to open
             </span>
           )}
@@ -78,7 +95,7 @@ export function ArtifactPreviewCard({ artifact, onOpen }) {
 
       <ChevronRight
         size={14}
-        className="text-[#B0A49A] group-hover:text-[#776B60]
+        className="text-[#A8A8A8] group-hover:text-[#6B6B6B]
                                           group-hover:translate-x-0.5 transition-all flex-shrink-0"
       />
     </button>

@@ -9,7 +9,7 @@
 
 export function MainLayout({ children }) {
   return (
-    <div className="flex h-screen overflow-hidden bg-[#F7F3EA]">
+    <div className="flex h-screen overflow-hidden bg-white">
       {children}
     </div>
   )

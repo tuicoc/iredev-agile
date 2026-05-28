@@ -124,7 +124,7 @@ export class WebSocketService {
   }
 
   sendChatMessage(chatId, messageId, content, subChat) {
-    this.send({ type: "chat_message", chatId, messageId, content, subChat });
+    this.send({ type: "chat_message", chatId, messageId, content, subChat: subChat ?? 0 });
   }
 
   stopStream(chatId) {

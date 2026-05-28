@@ -49,7 +49,7 @@ export function ProjectHomeScreen({ project, onOpenChat, onCreateChat }) {
   };
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto bg-[#F7F3EA]">
+    <div className="flex flex-col h-full overflow-y-auto bg-white">
       <div className="max-w-[680px] w-full mx-auto px-6 py-10">
 
         {/* Project header */}
@@ -60,11 +60,11 @@ export function ProjectHomeScreen({ project, onOpenChat, onCreateChat }) {
               <FolderOpen size={22} className="text-[#B86F50]" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-[22px] font-semibold text-[#211914] leading-tight truncate">
+              <h1 className="text-[22px] font-semibold text-[#1A1A1A] leading-tight truncate">
                 {project.name}
               </h1>
               {project.description && (
-                <p className="text-[13px] text-[#776B60] mt-1 leading-relaxed">
+                <p className="text-[13px] text-[#6B6B6B] mt-1 leading-relaxed">
                   {project.description}
                 </p>
               )}
@@ -96,8 +96,8 @@ export function ProjectHomeScreen({ project, onOpenChat, onCreateChat }) {
             </div>
           ) : chats.length === 0 ? (
             <div className="text-center py-12">
-              <div className="text-[#B0A49A] text-[13px]">No processes yet</div>
-              <div className="text-[#B0A49A] text-[12px] mt-1">
+              <div className="text-[#A8A8A8] text-[13px]">No processes yet</div>
+              <div className="text-[#A8A8A8] text-[12px] mt-1">
                 Create a new chat to start a requirements process
               </div>
             </div>
@@ -108,26 +108,26 @@ export function ProjectHomeScreen({ project, onOpenChat, onCreateChat }) {
                   key={chat.id}
                   onClick={() => onOpenChat(chat.id, project.id)}
                   className="flex items-center gap-4 px-4 py-3.5
-                             bg-[#FFFDF8] border border-[#E2D6C5] rounded-xl
-                             hover:border-[#CEC0AE] hover:bg-[#FCF8F1]
+                             bg-[#FFFFFF] border border-[#E5E5E5] rounded-xl
+                             hover:border-[#C5C5C5] hover:bg-[#F8F8F8]
                              hover:shadow-[0_2px_8px_rgba(0,0,0,0.05)]
                              cursor-pointer transition-all duration-150 group"
                 >
                   {/* Index circle */}
-                  <div className="w-8 h-8 rounded-full bg-[#ECE3D6] flex items-center
+                  <div className="w-8 h-8 rounded-full bg-[#EFEFEF] flex items-center
                                   justify-center flex-shrink-0 text-[12px] font-semibold
-                                  text-[#776B60] group-hover:bg-[#D8CBBB]">
+                                  text-[#6B6B6B] group-hover:bg-[#DEDEDE]">
                     {chats.length - idx}
                   </div>
 
                   {/* Title + date */}
                   <div className="flex-1 min-w-0">
-                    <div className="text-[13.5px] font-medium text-[#211914] truncate leading-snug">
+                    <div className="text-[13.5px] font-medium text-[#1A1A1A] truncate leading-snug">
                       {chat.title}
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <Clock size={10} className="text-[#B0A49A] flex-shrink-0" />
-                      <span className="text-[11px] text-[#A89C91]">
+                      <Clock size={10} className="text-[#A8A8A8] flex-shrink-0" />
+                      <span className="text-[11px] text-[#A0A0A0]">
                         {formatDate(chat.createdAt)}
                       </span>
                     </div>
@@ -137,7 +137,7 @@ export function ProjectHomeScreen({ project, onOpenChat, onCreateChat }) {
                   <button
                     onClick={(e) => handleDelete(e, chat.id)}
                     className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg
-                               text-[#B0A49A] hover:text-red-400 hover:bg-red-50
+                               text-[#A8A8A8] hover:text-red-400 hover:bg-red-50
                                transition-all flex-shrink-0"
                   >
                     <Trash2 size={13} />
