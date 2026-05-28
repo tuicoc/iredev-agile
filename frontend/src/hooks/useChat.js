@@ -22,6 +22,12 @@ import {
   createProjectChat,
 } from "../services/chatService";
 import { uid }     from "../utils/helpers";
+import {
+  loadChatProcessConfig,
+  normalizeProcessConfig,
+  processConfigToStartPayload,
+  saveChatProcessConfig,
+} from "../utils/processConfig";
 import { useAuth } from "../context/AuthContext";
 import { AGENT_MOCK_MODE, AGENT_MOCK_STAGE } from "../config/env";
 import {
@@ -31,12 +37,6 @@ import {
   MOCK_PROJECT_DESCRIPTION,
   MOCK_PROJECT_ID,
 } from "../data/agentMockData";
-
-const getRequirementMaxTurns = () => {
-  const value = Number(localStorage.getItem("requirement_max_turns"));
-  if (!Number.isFinite(value) || value <= 0) return 150;
-  return Math.min(Math.max(Math.round(value), 5), 200);
-};
 
 const agentNameFromStatus = (status) => {
   if (!status) return "CARA";
@@ -178,6 +178,9 @@ export function useChat() {
   const [wsConnected,     setWsConnected]     = useState(false);
   const [workflowRunning, setWorkflowRunning] = useState(false);
   const [workflowStatus,  setWorkflowStatus]  = useState(null);
+  const [activeProcessConfig, setActiveProcessConfig] = useState(() =>
+    normalizeProcessConfig(),
+  );
 
   const { authVersion } = useAuth();
 
@@ -256,6 +259,7 @@ export function useChat() {
       setStreaming(false);
       setWorkflowRunning(false);
       setWorkflowStatus(null);
+      setActiveProcessConfig(normalizeProcessConfig());
     }
   }, [authVersion]);
 
@@ -485,7 +489,9 @@ export function useChat() {
 
     try {
       await apiSaveAssistantMessage(chatId, CORRUPTED_RUN_MESSAGE, subChatId);
-    } catch {}
+    } catch {
+      // Best-effort persistence only.
+    }
   }, [
     activeChatId,
     rawPlaceHolderMessage,
@@ -509,6 +515,7 @@ export function useChat() {
         setWorkflowRunning(false);
         setWorkflowStatus(null);
         setLoadingMessages(false);
+        setActiveProcessConfig(normalizeProcessConfig());
         return;
       }
       if (id === activeChatId && subChat === newSubChat) return;
@@ -524,6 +531,7 @@ export function useChat() {
       setStreaming(false);
       setWorkflowRunning(false);
       setWorkflowStatus(null);
+      setActiveProcessConfig(loadChatProcessConfig(id));
       setLoadingMessages(true);
       try {
         const msgs = await apiFetchMessages(id, newSubChat);
@@ -566,6 +574,7 @@ export function useChat() {
     setStreaming(false);
     setWorkflowRunning(false);
     setWorkflowStatus(null);
+    setActiveProcessConfig(normalizeProcessConfig());
   }, [activeChatId, corruptActiveRun]);
 
   const deleteChat = useCallback(
@@ -580,10 +589,13 @@ export function useChat() {
         setStreaming(false);
         setWorkflowRunning(false);
         setWorkflowStatus(null);
+        setActiveProcessConfig(normalizeProcessConfig());
       }
       try {
         await apiDeleteChat(id);
-      } catch {}
+      } catch {
+        // The UI already moved on from the deleted chat.
+      }
     },
     [activeChatId, corruptActiveRun]
   );
@@ -604,6 +616,7 @@ export function useChat() {
     setStreaming(false);
     setWorkflowRunning(false);
     setWorkflowStatus(null);
+    setActiveProcessConfig(normalizeProcessConfig());
 
     try {
       const serverChat = projectId
@@ -686,10 +699,13 @@ export function useChat() {
   );
 
   const sendMessage = useCallback(
-    async (text) => {
+    async (text, processConfigOverride = null) => {
       if (!text.trim() || streaming) return;
       setError(null);
       const trimmed = text.trim();
+      const processConfig = normalizeProcessConfig(
+        processConfigOverride || activeProcessConfig,
+      );
       let chatId = activeChatId;
       const hasRequirementUserTurn = messages.some((m) => m.role === "user");
       const startsRequirementProcess =
@@ -719,16 +735,20 @@ export function useChat() {
       setStreaming(true);
       setWorkflowRunning(startsRequirementProcess);
       setWorkflowStatus(null);
+      if (startsRequirementProcess) {
+        setActiveProcessConfig(processConfig);
+      }
 
       try {
         const saved = await apiSendMessage(chatId, trimmed, subChat);
         setMessages((prev) => prev.map((m) => (m.id === localId ? saved : m)));
         if (startsRequirementProcess) {
+          saveChatProcessConfig(chatId, processConfig);
           await startReq(
             {
               projectName: trimmed.slice(0, 50),
               projectDescription: trimmed,
-              maxIterations: getRequirementMaxTurns(),
+              ...processConfigToStartPayload(processConfig),
             },
             chatId,
           );
@@ -743,12 +763,13 @@ export function useChat() {
         setError("Failed to send. Please try again.");
       }
     },
-    [activeChatId, activeProjectId, messages, streaming, subChat]
+    [activeChatId, activeProjectId, activeProcessConfig, messages, streaming, subChat]
   );
 
   /** Start a requirement process inside a project chat */
   const handleStartProcess = useCallback(
     async (config, projectId) => {
+      const processConfig = normalizeProcessConfig(config);
       const title  = `Requirements — ${config.projectName || "New Process"}`;
       const tempId = `temp_${uid()}`;
       setActiveChatId(tempId);
@@ -757,6 +778,7 @@ export function useChat() {
       setMessages([]);
       setWorkflowRunning(true);
       setWorkflowStatus(null);
+      setActiveProcessConfig(processConfig);
 
       let chatId = tempId;
       try {
@@ -782,10 +804,11 @@ export function useChat() {
 
       setStreaming(true);
       try {
+        saveChatProcessConfig(chatId, processConfig);
         await startReq(
           {
             ...config,
-            maxIterations: config.maxIterations ?? getRequirementMaxTurns(),
+            ...processConfigToStartPayload(processConfig),
           },
           chatId,
         );
@@ -849,6 +872,8 @@ export function useChat() {
     loadingMessages,
     error,
     wsConnected,
+    activeProcessConfig,
+    setActiveProcessConfig,
     setOpenArtifact,
     setError,
     setSubChat,

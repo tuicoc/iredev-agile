@@ -118,6 +118,73 @@ class LLMConfigContractTest(unittest.TestCase):
             "legacy-model",
         )
 
+    def test_runtime_llm_overrides_preserve_profile_routing(self) -> None:
+        config = {
+            "llm": {
+                "default": {
+                    "type": "openai",
+                    "api_key": "token",
+                    "model": "general-model",
+                    "base_url": "https://example.test/v1",
+                },
+                "interview": {
+                    "model": "interview-model",
+                },
+                "agents": {
+                    "interviewer": "interview",
+                    "enduser": "interview",
+                },
+            },
+            "iredev": {"agents": {}},
+        }
+
+        patched = BaseAgent._apply_runtime_llm_overrides(
+            config,
+            {
+                "default": {"model": "chat-general"},
+                "interview": {"model": "chat-interview"},
+            },
+        )
+
+        self.assertEqual(config["llm"]["default"]["model"], "general-model")
+        self.assertEqual(
+            BaseAgent._resolve_llm_config(patched, "visionary")["model"],
+            "chat-general",
+        )
+        self.assertEqual(
+            BaseAgent._resolve_llm_config(patched, "interviewer")["model"],
+            "chat-interview",
+        )
+        self.assertEqual(
+            BaseAgent._resolve_llm_config(patched, "enduser")["model"],
+            "chat-interview",
+        )
+        self.assertEqual(
+            BaseAgent._resolve_llm_config(patched, "visionary")["base_url"],
+            "https://example.test/v1",
+        )
+
+    def test_runtime_default_override_supports_legacy_flat_llm_config(self) -> None:
+        config = {
+            "llm": {
+                "type": "openai",
+                "api_key": "token",
+                "model": "legacy-model",
+                "base_url": "https://example.test/v1",
+            },
+            "iredev": {"agents": {}},
+        }
+
+        patched = BaseAgent._apply_runtime_llm_overrides(
+            config,
+            {"default": {"model": "chat-model"}},
+        )
+
+        resolved = BaseAgent._resolve_llm_config(patched, "agenda")
+        self.assertEqual(resolved["model"], "chat-model")
+        self.assertEqual(resolved["type"], "openai")
+        self.assertEqual(resolved["api_key"], "token")
+
 
 class ProductVisionContractTest(unittest.TestCase):
     def test_product_vision_accepts_focus_driven_shape(self) -> None:

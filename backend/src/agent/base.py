@@ -1,14 +1,32 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, Iterator, List, Optional, Type
 
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+_RUNTIME_LLM_OVERRIDES: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "iredev_runtime_llm_overrides",
+    default=None,
+)
+
+
+@contextmanager
+def runtime_llm_overrides(overrides: Optional[Dict[str, Any]]) -> Iterator[None]:
+    """Temporarily apply per-run LLM overrides while constructing agents."""
+    token = _RUNTIME_LLM_OVERRIDES.set(overrides if isinstance(overrides, dict) else None)
+    try:
+        yield
+    finally:
+        _RUNTIME_LLM_OVERRIDES.reset(token)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -90,6 +108,60 @@ class BaseAgent(ABC):
             if value is not None:
                 merged[key] = value
         return merged
+
+    @classmethod
+    def _apply_runtime_llm_overrides(
+        cls,
+        raw_config: Dict[str, Any],
+        llm_overrides: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Apply per-run model/profile overrides without mutating YAML config.
+
+        The server UI sends overrides in the same profile shape as
+        ``config/agent_config.yaml``:
+
+            {"default": {"model": "..."}, "interview": {"model": "..."}}
+
+        ``default`` continues to serve every agent unless routed elsewhere, and
+        ``interview`` continues to serve interviewer/enduser through the
+        existing ``llm.agents`` routing.
+        """
+        if not isinstance(llm_overrides, dict) or not llm_overrides:
+            return raw_config
+
+        patched = deepcopy(raw_config)
+        llm_root = patched.setdefault("llm", {})
+        if not isinstance(llm_root, dict):
+            patched["llm"] = {}
+            llm_root = patched["llm"]
+
+        reserved = {"default", "profiles", "agents", "routing", "interview"}
+
+        for profile_name in ("default", "interview"):
+            override = llm_overrides.get(profile_name)
+            if not isinstance(override, dict):
+                continue
+            current = llm_root.get(profile_name)
+            if not isinstance(current, dict):
+                current = (
+                    {
+                        key: value
+                        for key, value in llm_root.items()
+                        if key not in reserved
+                    }
+                    if profile_name == "default"
+                    else {}
+                )
+            llm_root[profile_name] = cls._merge_llm_config(current, override)
+
+        agents = llm_overrides.get("agents")
+        if isinstance(agents, dict):
+            current_agents = llm_root.get("agents")
+            if not isinstance(current_agents, dict):
+                current_agents = {}
+            llm_root["agents"] = cls._merge_llm_config(current_agents, agents)
+
+        return patched
 
     @classmethod
     def _resolve_llm_config(cls, raw_config: Dict[str, Any], name: str) -> Dict[str, Any]:
@@ -176,7 +248,10 @@ class BaseAgent(ABC):
 
         # ── Config ──────────────────────────────────────────────────────
         from ..config.config_manager import get_config
-        raw_config       = get_config()
+        raw_config       = self._apply_runtime_llm_overrides(
+            get_config(),
+            _RUNTIME_LLM_OVERRIDES.get(),
+        )
         self._raw_config = raw_config
 
         agent_section = raw_config.get("iredev", {}).get("agents", {}).get(name, {})

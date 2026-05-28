@@ -48,6 +48,17 @@
     font-family: "Fira Code", "Cascadia Code", Menlo, Consolas, monospace;
     border: 1px solid #D8CBBB;
   }
+
+  .turns-number-input {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+
+  .turns-number-input::-webkit-outer-spin-button,
+  .turns-number-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
 }
 
 /* ─── ANIMATIONS ─────────────────────────────────────────────────────── */

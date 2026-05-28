@@ -234,6 +234,48 @@ _store_override: Optional[BaseStore] = None
 _inmemory_store_singleton: Optional[InMemoryStore] = None
 
 
+def _normalise_llm_overrides(raw: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return {}
+
+    normalised: Dict[str, Dict[str, Any]] = {}
+    allowed_fields = {
+        "model",
+        "temperature",
+        "max_output_tokens",
+        "max_input_tokens",
+    }
+    for profile_name in ("default", "interview"):
+        profile = raw.get(profile_name)
+        if not isinstance(profile, dict):
+            continue
+        cleaned = {
+            key: value
+            for key, value in profile.items()
+            if key in allowed_fields and value not in (None, "")
+        }
+        if cleaned:
+            normalised[profile_name] = cleaned
+    return normalised
+
+
+def _llm_cache_key(state: WorkflowState) -> str:
+    overrides = _normalise_llm_overrides(state.get("llm_overrides"))
+    return json.dumps(overrides, sort_keys=True, separators=(",", ":"))
+
+
+def _agent_with_overrides(agent_cls, llm_cache_key: str):
+    from ..agent.base import runtime_llm_overrides
+
+    try:
+        overrides = json.loads(llm_cache_key) if llm_cache_key else {}
+    except json.JSONDecodeError:
+        overrides = {}
+
+    with runtime_llm_overrides(overrides):
+        return agent_cls()
+
+
 def configure_default_store(store: BaseStore) -> None:
     """Install a process-wide store used by _sync_artifacts_to_store +
     get_artifact_from_store. Server boot calls this with a PostgresStore so
@@ -252,45 +294,46 @@ def _default_store() -> BaseStore:
     return _inmemory_store_singleton
 
 
-@lru_cache(maxsize=1)
-def _get_interviewer():
+@lru_cache(maxsize=16)
+def _get_interviewer(llm_cache_key: str):
     from ..agent.interviewer import InterviewerAgent
-    return InterviewerAgent()
+    return _agent_with_overrides(InterviewerAgent, llm_cache_key)
 
 
-@lru_cache(maxsize=1)
-def _get_agenda():
+@lru_cache(maxsize=16)
+def _get_agenda(llm_cache_key: str):
     from ..agent.agenda import AgendaAgent
-    return AgendaAgent()
+    return _agent_with_overrides(AgendaAgent, llm_cache_key)
 
 
-@lru_cache(maxsize=1)
-def _get_enduser():
+@lru_cache(maxsize=16)
+def _get_enduser(llm_cache_key: str):
     from ..agent.enduser import EndUserAgent
-    return EndUserAgent()
+    return _agent_with_overrides(EndUserAgent, llm_cache_key)
 
 
-@lru_cache(maxsize=1)
-def _get_sprint_agent():
+@lru_cache(maxsize=16)
+def _get_sprint_agent(llm_cache_key: str):
     from ..agent.sprint import SprintAgent
-    return SprintAgent()
+    return _agent_with_overrides(SprintAgent, llm_cache_key)
 
 
-@lru_cache(maxsize=1)
-def _get_analyst():
+@lru_cache(maxsize=16)
+def _get_analyst(llm_cache_key: str):
     from ..agent.analyst import AnalystAgent
-    return AnalystAgent()
+    return _agent_with_overrides(AnalystAgent, llm_cache_key)
 
 
-@lru_cache(maxsize=1)
-def _get_visionary():
+@lru_cache(maxsize=16)
+def _get_visionary(llm_cache_key: str):
     from ..agent.visionary import VisionaryAgent
-    return VisionaryAgent()
+    return _agent_with_overrides(VisionaryAgent, llm_cache_key)
 
-@lru_cache(maxsize=1)
-def _get_distiller():
+
+@lru_cache(maxsize=16)
+def _get_distiller(llm_cache_key: str):
     from ..agent.distiller import DistillerAgent
-    return DistillerAgent()
+    return _agent_with_overrides(DistillerAgent, llm_cache_key)
 # ─────────────────────────────────────────────────────────────────────────────
 # Node functions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -306,7 +349,7 @@ def visionary_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     supervisor, which then fires review_product_vision_turn (HITL step 2).
     Also called after HITL rejection when product_vision_feedback is present.
     """
-    updates = _get_visionary().process(state)
+    updates = _get_visionary(_llm_cache_key(state)).process(state)
     logger.debug(
         "visionary_turn updates: %s | vision=%s",
         list(updates.keys()),
@@ -320,7 +363,7 @@ def interviewer_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     old_agenda = state.get("elicitation_agenda") or {}
     old_index = old_agenda.get("current_index", -1)
 
-    updates = _get_interviewer().process(state)
+    updates = _get_interviewer(_llm_cache_key(state)).process(state)
 
     logger.debug(
         "interviewer_turn updates: %s | vision=%s | agenda=%s | question=%r",
@@ -350,7 +393,7 @@ def agenda_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     Produces elicitation_agenda_artifact and state["elicitation_agenda"] from
     the reviewed assumption-centered Product Vision.
     """
-    updates = _get_agenda().process(state)
+    updates = _get_agenda(_llm_cache_key(state)).process(state)
     artifacts_out = updates.get("artifacts") or {}
     logger.debug(
         "agenda_turn updates: %s | agenda_artifact=%s | runtime=%s",
@@ -367,7 +410,7 @@ def distiller_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     Produces artifacts["requirement_list"] and sets interview_complete=True.
     Always routes to supervisor afterwards.
     """
-    updates = _get_distiller().process(state)
+    updates = _get_distiller(_llm_cache_key(state)).process(state)
     logger.debug("distiller_turn updates: %s", list(updates.keys()))
     _sync_artifacts_to_store(state, updates)
     return updates
@@ -454,7 +497,7 @@ def enduser_turn_fn(state: WorkflowState) -> Dict[str, Any]:
                 "Do not generate plain text — use the tool."
             )
 
-        updates = _get_enduser().process(augmented_state)
+        updates = _get_enduser(_llm_cache_key(state)).process(augmented_state)
         logger.debug(
             "enduser_turn attempt %d/%d — role=%r — updates: %s",
             attempt, _ENDUSER_MAX_ATTEMPTS, resolved_role, list(updates.keys()),
@@ -497,7 +540,7 @@ def sprint_agent_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     happen inside the single 9a and 9c passes, so there is no sprint↔analyst
     cycle and no split_round.
     """
-    agent      = _get_sprint_agent()
+    agent      = _get_sprint_agent(_llm_cache_key(state))
     artifacts  = state.get("artifacts") or {}
 
     has_draft      = "user_story_draft"   in artifacts
@@ -526,7 +569,7 @@ def sprint_agent_turn_fn(state: WorkflowState) -> Dict[str, Any]:
 def analyst_estimation_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     """Run AnalystAgent.process_estimation() — Step 9c: size, INVEST-assess,
     and reshape stories in one pass → analyst_estimation."""
-    updates = _get_analyst().process_estimation(state)
+    updates = _get_analyst(_llm_cache_key(state)).process_estimation(state)
     logger.debug("analyst_estimation_turn updates: %s", list(updates.keys()))
     _sync_artifacts_to_store(state, updates)
     return updates
@@ -536,7 +579,7 @@ def analyst_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     """Run AnalystAgent.process() — Phase 2: deterministically assemble
     validated_product_backlog by attaching the acceptance criteria the Analyst
     already wrote in step 9c. No LLM call."""
-    updates = _get_analyst().process(state)
+    updates = _get_analyst(_llm_cache_key(state)).process(state)
     logger.debug("analyst_turn updates: %s", list(updates.keys()))
     _sync_artifacts_to_store(state, updates)
     return updates

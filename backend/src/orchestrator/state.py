@@ -102,6 +102,11 @@ class WorkflowState(TypedDict, total=False):
     # Default is "fidelity"; chosen at session start (CLI / UI).
     vision_mode: Literal["fidelity", "coverage"]
 
+    # Per-chat runtime model overrides. Same shape as agent_config.yaml's
+    # profiled llm block, normally {"default": {...}, "interview": {...}}.
+    # The graph uses this to pick/cache agent instances for the chat.
+    llm_overrides: Dict[str, Any]
+
     # ── Artifact store ─────────────────────────────────────────────────────
     artifacts:    Dict[str, Any]
     artifact_ids: Dict[str, str]
