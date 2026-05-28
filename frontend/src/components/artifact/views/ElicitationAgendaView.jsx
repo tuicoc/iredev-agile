@@ -1,7 +1,5 @@
 import {
   ClipboardList,
-  FileText,
-  GitBranch,
   MessageSquareText,
 } from "lucide-react";
 import {
@@ -9,7 +7,6 @@ import {
   EmptyState,
   MetaPill,
   Section,
-  Tag,
   text,
 } from "./viewUtils";
 
@@ -53,10 +50,13 @@ function NumberedList({ items, emptyLabel }) {
 }
 
 function AgendaItemCard({ item, index }) {
-  const refs = asArray(item.vision_refs);
-  const coveragePoints = asArray(item.coverage_points);
+  const frictions = asArray(item.frictions_to_probe || item.coverage_points);
   const perspective = item.perspective || item.role || "Stakeholder";
-  const title = item.decision_target || item.elicitation_goal || "Evidence job";
+  const title = item.scene || item.context || item.elicitation_goal || "Evidence scene";
+  const question =
+    item.critical_incident_prompt ||
+    item.seed_question ||
+    item.probe;
   const status = item.status && item.status !== "planned" ? item.status : null;
 
   return (
@@ -66,8 +66,14 @@ function AgendaItemCard({ item, index }) {
           <span className="font-mono text-[10px] text-[#B86F50]">
             {item.id || item.item_id || `IT-${index + 1}`}
           </span>
-          <Tag tone="warm">{perspective}</Tag>
-          {status && <Tag>{status}</Tag>}
+          <span className="rounded border border-[#E6CABB] bg-[#F4E4D9] px-1.5 py-0.5 text-[9.5px] font-medium text-[#B86F50]">
+            {perspective}
+          </span>
+          {status && (
+            <span className="rounded border border-[#D8CBBB] bg-[#F6F1E8] px-1.5 py-0.5 text-[9.5px] font-medium text-[#776B60]">
+              {status}
+            </span>
+          )}
         </div>
         <p className="mt-1.5 text-[12px] font-semibold leading-relaxed text-[#211914]">
           {title}
@@ -76,65 +82,27 @@ function AgendaItemCard({ item, index }) {
 
       <div className="space-y-2.5 px-3 py-2.5">
         <dl className="space-y-2">
-          <InfoRow label="Context" value={item.context || item.scene || item.baseline} />
-          <InfoRow label="Question" value={item.seed_question || item.probe} />
+          <InfoRow label="Question" value={question} />
           <InfoRow label="Close" value={item.close_when || item.close} />
-          <InfoRow label="Merge" value={item.merge_anchor} />
         </dl>
-
-        {refs.length > 0 && (
-          <p className="text-[10px] leading-relaxed text-[#776B60]">
-            <span className="font-semibold text-[#4A4038]">Refs: </span>
-            {refs.join(", ")}
-          </p>
-        )}
 
         <div>
           <div className="mb-1.5 text-[10.5px] font-semibold text-[#776B60]">
-            Coverage
+            Frictions to probe
           </div>
-          <NumberedList items={coveragePoints} emptyLabel="No coverage points found." />
+          <NumberedList items={frictions} emptyLabel="No frictions found." />
         </div>
-
-        {item.notes && (
-          <p className="text-[10.5px] leading-relaxed text-[#776B60]">
-            <span className="font-semibold text-[#4A4038]">Notes: </span>
-            {item.notes}
-          </p>
-        )}
       </div>
     </article>
-  );
-}
-
-function AgendaAudit({ notes }) {
-  const [audit, commentary] = String(notes).split("--- Reviewer commentary ---");
-  return (
-    <div className="space-y-3">
-      <pre
-        className="whitespace-pre-wrap rounded-lg border border-[#E2D6C5] bg-[#F6F1E8]
-                   p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
-      >
-        {audit.trim()}
-      </pre>
-      {commentary && (
-        <pre
-          className="whitespace-pre-wrap rounded-lg border border-[#E2D6C5] bg-[#FFFDF8]
-                     p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
-        >
-          {commentary.trim()}
-        </pre>
-      )}
-    </div>
   );
 }
 
 export function ElicitationAgendaView({ data }) {
   const items = asArray(data?.items || data?.agenda_items || data?.elicitation_items);
   const byPerspective = countBy(items, (item) => item.perspective || item.role);
-  const visionRefCount = new Set(items.flatMap((item) => asArray(item.vision_refs))).size;
-  const coverageCount = items.reduce(
-    (total, item) => total + asArray(item.coverage_points).length,
+  const frictionCount = items.reduce(
+    (total, item) =>
+      total + asArray(item.frictions_to_probe || item.coverage_points).length,
     0,
   );
 
@@ -154,23 +122,10 @@ export function ElicitationAgendaView({ data }) {
           <div className="mt-3 flex flex-wrap gap-1.5">
             <MetaPill label="Items" value={data?.total_items ?? items.length} />
             <MetaPill label="Perspectives" value={Object.keys(byPerspective).length} />
-            <MetaPill label="Vision refs" value={visionRefCount} />
-            <MetaPill label="Coverage points" value={coverageCount} />
+            <MetaPill label="Frictions" value={frictionCount} />
           </div>
         </div>
       </div>
-
-      <Section title="Perspective Coverage" icon={GitBranch}>
-        {Object.keys(byPerspective).length ? (
-          <div className="flex flex-wrap gap-1.5">
-            {Object.entries(byPerspective).map(([perspective, count]) => (
-              <MetaPill key={perspective} label={perspective} value={count} />
-            ))}
-          </div>
-        ) : (
-          <EmptyState label="No perspectives found." />
-        )}
-      </Section>
 
       <Section title="Interview Items" icon={MessageSquareText}>
         {items.length ? (
@@ -183,12 +138,6 @@ export function ElicitationAgendaView({ data }) {
           <EmptyState label="No elicitation agenda items found." />
         )}
       </Section>
-
-      {data?.notes && (
-        <Section title="Notes" icon={FileText}>
-          <AgendaAudit notes={data.notes} />
-        </Section>
-      )}
     </div>
   );
 }

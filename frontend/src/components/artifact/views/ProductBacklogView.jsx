@@ -1,4 +1,4 @@
-import { ClipboardList, FileText, Gauge, ListChecks, ShieldCheck } from "lucide-react";
+import { ClipboardList, ListChecks, ShieldCheck } from "lucide-react";
 import {
   asArray,
   EmptyState,
@@ -124,9 +124,6 @@ function ScoreRail({ item }) {
           {String(status || "-").replace(/_/g, " ")}
         </span>
       </span>
-      <span><span className="font-semibold text-[#4A4038]">Business value:</span> {prioritization.business_value ?? "-"}</span>
-      <span><span className="font-semibold text-[#4A4038]">Time criticality:</span> {prioritization.time_criticality ?? "-"}</span>
-      <span><span className="font-semibold text-[#4A4038]">Risk reduction:</span> {prioritization.risk_reduction ?? "-"}</span>
     </div>
   );
 }
@@ -134,9 +131,6 @@ function ScoreRail({ item }) {
 function PbiCard({ item, index }) {
   const { dependencies, planning, analysis, trace } = pbiParts(item);
   const itemId = item.id || item.pbi_id || `PBI-${index + 1}`;
-  const traceTopic = [trace.requirement_id, trace.entity, trace.step, trace.aspect]
-    .filter(Boolean)
-    .join(" / ");
 
   return (
     <article className="rounded-xl border border-[#E2D6C5] bg-[#FFFDF8]">
@@ -162,12 +156,6 @@ function PbiCard({ item, index }) {
 
       <div className="px-3 py-2.5 space-y-2">
         <InvestScore item={item} />
-        {traceTopic && (
-          <p className="text-[10.5px] leading-relaxed text-[#776B60]">
-            <span className="font-semibold text-[#4A4038]">Trace: </span>
-            {traceTopic}
-          </p>
-        )}
         {(asArray(dependencies.blocked_by).length > 0 || asArray(dependencies.blocks).length > 0) && (
           <p className="text-[10.5px] leading-relaxed text-[#776B60]">
             <span className="font-semibold text-[#4A4038]">Dependencies: </span>
@@ -265,37 +253,7 @@ export function ProductBacklogView({ data }) {
         )}
       </Section>
 
-      {(data?.methodology || asArray(data?.source_artifacts).length > 0) && (
-        <Section title="Methodology" icon={Gauge}>
-          <div className="rounded-xl border border-[#E2D6C5] bg-[#FFFDF8] p-3 text-[10.5px] leading-relaxed text-[#776B60]">
-            {Object.entries(data?.methodology || {}).map(([key, value]) => (
-              <p key={key}>
-                <span className="font-semibold text-[#4A4038]">{key.replace(/_/g, " ")}: </span>
-                {value}
-              </p>
-            ))}
-            {asArray(data?.source_artifacts).length > 0 && (
-              <p>
-                <span className="font-semibold text-[#4A4038]">Source artifacts: </span>
-                {asArray(data.source_artifacts).join(", ")}
-              </p>
-            )}
-          </div>
-        </Section>
-      )}
-
       <QualityWarnings warnings={data?.quality_warnings} />
-
-      {data?.notes && (
-        <Section title="Notes" icon={FileText}>
-          <pre
-            className="whitespace-pre-wrap rounded-xl border border-[#E2D6C5] bg-[#F6F1E8]
-                       p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
-          >
-            {data.notes}
-          </pre>
-        </Section>
-      )}
     </div>
   );
 }

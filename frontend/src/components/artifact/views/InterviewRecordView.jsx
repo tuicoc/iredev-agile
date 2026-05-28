@@ -1,8 +1,6 @@
 import {
   ClipboardList,
   FileCheck2,
-  FileText,
-  GitBranch,
   MessageSquareText,
   ShieldAlert,
   Target,
@@ -30,13 +28,6 @@ function statusTone(status) {
   }
   if (["excluded", "skipped", "gap", "weakens"].includes(status)) return "amber";
   if (["unclear", "partial", "qualifies"].includes(status)) return "blue";
-  return "default";
-}
-
-function verdictTone(verdict) {
-  if (verdict === "requirement_seed") return "green";
-  if (verdict === "supporting_evidence") return "blue";
-  if (verdict === "non_product") return "amber";
   return "default";
 }
 
@@ -68,36 +59,6 @@ function requirementTypeCounts(requirements) {
   }, {});
 }
 
-function traceRefMeaning(ref) {
-  const value = String(ref || "");
-  let match = value.match(/^(EL-\d+)-S(\d+)$/i);
-  if (match) return `${match[1]} signal evidence ${match[2]}`;
-
-  match = value.match(/^(EL-\d+)-T(\d+)$/i);
-  if (match) return `${match[1]} talk turn ${match[2]}`;
-
-  match = value.match(/^(EL-\d+)-ASM(\d+)$/i);
-  if (match) return `${match[1]} assumption evidence ${match[2]}`;
-
-  if (/^ASM-\d+$/i.test(value)) return "product vision assumption";
-  if (/^CONCERN-\d+$/i.test(value)) return "product vision concern";
-  if (/^OOS-\d+$/i.test(value)) return "product vision scope boundary";
-  if (/ProductVision\.scope/i.test(value)) return "product vision scope";
-  return "trace source";
-}
-
-function traceRefLabel(ref) {
-  const value = String(ref || "");
-  if (/^EL-\d+-S\d+$/i.test(value)) return `${value}: signal`;
-  if (/^EL-\d+-T\d+$/i.test(value)) return `${value}: talk`;
-  if (/^EL-\d+-ASM\d+$/i.test(value)) return `${value}: assumption`;
-  if (/^ASM-\d+$/i.test(value)) return `${value}: vision assumption`;
-  if (/^CONCERN-\d+$/i.test(value)) return `${value}: vision concern`;
-  if (/^OOS-\d+$/i.test(value)) return `${value}: scope`;
-  if (/ProductVision\.scope/i.test(value)) return `${value}: scope`;
-  return value;
-}
-
 function DetailLine({ label, value }) {
   if (!value) return null;
 
@@ -105,21 +66,6 @@ function DetailLine({ label, value }) {
     <div className="grid gap-0.5 sm:grid-cols-[74px_1fr]">
       <dt className="text-[10px] font-semibold text-[#A89C91]">{label}</dt>
       <dd className="text-[10.5px] leading-relaxed text-[#4A4038]">{value}</dd>
-    </div>
-  );
-}
-
-function TraceRefTags({ refs }) {
-  const rows = asArray(refs);
-  if (!rows.length) return null;
-
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {rows.map((ref) => (
-        <Tag key={ref} tone="blue" title={traceRefMeaning(ref)}>
-          {traceRefLabel(ref)}
-        </Tag>
-      ))}
     </div>
   );
 }
@@ -216,47 +162,11 @@ function CoverageList({ coverage, planned }) {
   );
 }
 
-function AssumptionEvidenceList({ evidence }) {
-  const rows = asArray(evidence);
-  if (!rows.length) return null;
-
-  return (
-    <details className="border-t border-[#E9DFD1] px-3 py-2 text-[10.5px] text-[#776B60]">
-      <summary className="cursor-pointer font-semibold text-[#4A4038]">
-        Assumption Evidence ({rows.length})
-      </summary>
-      <div className="mt-2 space-y-2">
-        {rows.map((entry, index) => (
-          <div key={index} className="rounded-lg border border-[#E9DFD1] bg-[#FFFDF8] px-2.5 py-2">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="font-mono text-[10px] text-[#B86F50]">
-                {entry.vision_ref}
-              </span>
-              <Tag tone={statusTone(entry.stance)}>{entry.stance}</Tag>
-            </div>
-            {entry.evidence && (
-              <p className="mt-1 text-[10.5px] leading-relaxed text-[#4A4038]">
-                {entry.evidence}
-              </p>
-            )}
-            {entry.implication && (
-              <p className="mt-1 text-[10px] leading-relaxed text-[#776B60]">
-                Implication: {entry.implication}
-              </p>
-            )}
-          </div>
-        ))}
-      </div>
-    </details>
-  );
-}
-
 function InterviewItem({ item, index }) {
   const turns = asArray(item.talk);
-  const refs = asArray(item.vision_refs);
-  const coveragePoints = asArray(item.coverage_points);
+  const coveragePoints = asArray(item.frictions_to_probe || item.coverage_points);
   const stakeholder = item.perspective || item.role || item.stakeholder || "Stakeholder";
-  const topic = item.decision_target || item.item || `EL-${index + 1}`;
+  const topic = item.scene || item.context || item.decision_target || item.item || `EL-${index + 1}`;
   const closeRule = item.close_when || item.close || item.rule;
 
   return (
@@ -269,9 +179,6 @@ function InterviewItem({ item, index }) {
           {item.item && <Tag>{item.item}</Tag>}
           <Tag tone="warm">{stakeholder}</Tag>
           <Tag tone={statusTone(item.status)}>{item.status}</Tag>
-          {refs.map((ref) => (
-            <Tag key={ref} tone="blue">{ref}</Tag>
-          ))}
         </div>
         <p className="mt-1.5 text-[12px] font-semibold leading-relaxed text-[#211914]">
           {topic}
@@ -284,39 +191,46 @@ function InterviewItem({ item, index }) {
       </div>
 
       <div className="space-y-3 px-3 py-3">
-        {turns.length > 0 ? (
-          turns.map((turn, turnIndex) => (
-            <div key={turnIndex} className="space-y-2">
-              <ChatBubble
-                side="left"
-                speaker="Interviewer Agent"
-                topic={topic}
-                closeRule={closeRule}
-                content={turn.question}
-              />
-              <ChatBubble
-                side="right"
-                speaker={`${stakeholder} (EndUser Agent)`}
-                topic={topic}
-                closeRule={closeRule}
-                content={turn.answer}
-              />
-            </div>
-          ))
-        ) : item.answer ? (
-          <pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-[#4A4038] font-sans">
-            {item.answer}
-          </pre>
-        ) : (
-          <EmptyState label="No dialogue captured for this agenda item." />
-        )}
-
         {item.rule && (
           <p className="rounded-lg border border-[#E9DFD1] bg-[#F6F1E8] px-3 py-2
                         text-[10.5px] leading-relaxed text-[#4A4038]">
-            <span className="font-semibold">Closure rule: </span>
             {item.rule}
           </p>
+        )}
+
+        {item.answer && !turns.length && (
+          <p className="rounded-lg border border-[#E9DFD1] bg-[#F6F1E8] px-3 py-2
+                        text-[10.5px] leading-relaxed text-[#4A4038]">
+            {item.answer}
+          </p>
+        )}
+
+        {turns.length > 0 && (
+          <details className="rounded-lg border border-[#E9DFD1] bg-[#FBF7F0] px-3 py-2 text-[10.5px] text-[#776B60]">
+            <summary className="cursor-pointer font-semibold text-[#4A4038]">
+              Dialogue ({turns.length})
+            </summary>
+            <div className="mt-3 space-y-3">
+              {turns.map((turn, turnIndex) => (
+                <div key={turnIndex} className="space-y-2">
+                  <ChatBubble
+                    side="left"
+                    speaker="Interviewer Agent"
+                    topic={topic}
+                    closeRule={closeRule}
+                    content={turn.question}
+                  />
+                  <ChatBubble
+                    side="right"
+                    speaker={`${stakeholder} (EndUser Agent)`}
+                    topic={topic}
+                    closeRule={closeRule}
+                    content={turn.answer}
+                  />
+                </div>
+              ))}
+            </div>
+          </details>
         )}
       </div>
 
@@ -348,14 +262,12 @@ function InterviewItem({ item, index }) {
         </details>
       )}
 
-      <AssumptionEvidenceList evidence={item.assumption_evidence} />
     </article>
   );
 }
 
 function RequirementCard({ requirement, index }) {
   const acceptanceCriteria = asArray(requirement.acceptance_criteria);
-  const traceRefs = asArray(requirement.trace_refs);
   const reqType = requirement.type || requirement.req_type;
   const reqId = requirement.id || requirement.req_id || `REQ-${index + 1}`;
   const status = String(requirement.status || "").trim();
@@ -387,8 +299,6 @@ function RequirementCard({ requirement, index }) {
       </div>
 
       <div className="space-y-3 px-3 py-2.5">
-        <TraceRefTags refs={traceRefs} />
-
         {details.length > 0 && (
           <dl className="space-y-1.5">
             {details.map(([label, value]) => (
@@ -452,44 +362,6 @@ function ConflictList({ conflicts }) {
                 Paths: {asArray(conflict.paths).join("; ")}
               </p>
             )}
-          </article>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-function ExtractionWalks({ walks }) {
-  const entries = Object.entries(walks || {});
-  if (!entries.length) return null;
-
-  return (
-    <Section title="Extraction Walks" icon={GitBranch}>
-      <div className="space-y-3">
-        {entries.map(([recordId, rows]) => (
-          <article key={recordId} className="rounded-lg border border-[#E2D6C5] bg-[#FFFDF8]">
-            <div className="border-b border-[#E9DFD1] bg-[#FCF8F1] px-3 py-2 text-[11px] font-semibold text-[#211914]">
-              {recordId}
-            </div>
-            <div className="divide-y divide-[#E9DFD1]">
-              {asArray(rows).map((entry, index) => (
-                <div key={`${recordId}-${entry.signal_id || index}`} className="px-3 py-2">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="font-mono text-[10px] text-[#B86F50]">
-                      {entry.signal_id}
-                    </span>
-                    <Tag tone={verdictTone(entry.verdict)}>
-                      {String(entry.verdict || "").replace(/_/g, " ")}
-                    </Tag>
-                  </div>
-                  {entry.reason && (
-                    <p className="mt-1 text-[10.5px] leading-relaxed text-[#776B60]">
-                      {entry.reason}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
           </article>
         ))}
       </div>
@@ -591,18 +463,6 @@ export function RequirementsView({ data }) {
         </Section>
       )}
 
-      <ExtractionWalks walks={data?.extraction_walks} />
-
-      {data?.notes && (
-        <Section title="Notes" icon={FileText}>
-          <pre
-            className="whitespace-pre-wrap rounded-lg border border-[#E2D6C5] bg-[#F6F1E8]
-                       p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
-          >
-            {data.notes}
-          </pre>
-        </Section>
-      )}
     </div>
   );
 }
@@ -641,17 +501,6 @@ export function InterviewRecordRequirementsView({ data }) {
           <EmptyState label="No interview records found." />
         )}
       </Section>
-
-      {data?.notes && (
-        <Section title="Notes" icon={FileText}>
-          <pre
-            className="whitespace-pre-wrap rounded-lg border border-[#E2D6C5] bg-[#F6F1E8]
-                       p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
-          >
-            {data.notes}
-          </pre>
-        </Section>
-      )}
     </div>
   );
 }
