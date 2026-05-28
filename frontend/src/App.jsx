@@ -97,6 +97,8 @@ function ChatLayout() {
     openArtifact,
     loadingMessages,
     error,
+    activeProcessConfig,
+    setActiveProcessConfig,
     setOpenArtifact,
     setError,
     setSubChat,
@@ -140,7 +142,6 @@ function ChatLayout() {
   // ── Decide what to show in the center area ──────────────────────────────
   const showProjectHome = activeProject && !activeChatId;
   const showMessages    = !!activeChatId;
-  const showGlobalHome  = !activeProject && !activeChatId;
   const showStopButton  = streaming || (workflowRunning && !!placeHolderMessage);
   const requirementProcessStarted =
     subChat === 0 && messages.some((msg) => msg.role === "user");
@@ -240,6 +241,10 @@ function ChatLayout() {
               disabled={streaming || (subChat === 0 && requirementProcessStarted)}
               isStreaming={showStopButton}
               onCancel={cancelStream}
+              processConfig={activeProcessConfig}
+              onProcessConfigChange={setActiveProcessConfig}
+              configLocked={requirementProcessStarted}
+              showProcessControls={subChat === 0}
             />
           )}
         </div>

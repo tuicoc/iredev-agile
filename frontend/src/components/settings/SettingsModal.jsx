@@ -1,6 +1,6 @@
 // src/components/settings/SettingsModal.jsx
 // ─────────────────────────────────────────────────────────────────────────────
-// Settings dialog with three tabs: Profile, Appearance, API.
+// Settings dialog.
 // Opens when the user clicks "Settings" in the sidebar.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState }    from 'react'
@@ -8,7 +8,7 @@ import { Modal }       from '../ui/Modal'
 import { useAuth }     from '../../context/AuthContext'
 import { LoadingSpinner } from '../ui/LoadingSpinner'
 
-const TABS = ['Profile', 'Process', 'API']
+const TABS = ['Profile']
 
 export function SettingsModal({ open, onClose }) {
   const [activeTab, setActiveTab] = useState('Profile')
@@ -33,9 +33,7 @@ export function SettingsModal({ open, onClose }) {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'Profile'    && <ProfileTab />}
-      {activeTab === 'Process'    && <ProcessTab />}
-      {activeTab === 'API'        && <ApiTab />}
+      {activeTab === 'Profile' && <ProfileTab />}
     </Modal>
   )
 }
@@ -94,99 +92,6 @@ function ProfileTab() {
         </div>
       </form>
     </div>
-  )
-}
-
-// ── Process tab ──────────────────────────────────────────────────────────────
-function ProcessTab() {
-  const [maxTurns, setMaxTurns] = useState(() => {
-    const saved = Number(localStorage.getItem('requirement_max_turns'))
-    return Number.isFinite(saved) && saved > 0
-      ? Math.min(Math.max(Math.round(saved), 5), 200)
-      : 150
-  })
-  const [saved, setSaved] = useState(false)
-
-  function handleSave(e) {
-    e.preventDefault()
-    localStorage.setItem('requirement_max_turns', String(maxTurns))
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  return (
-    <form onSubmit={handleSave} className="space-y-4">
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <label className="text-[12px] font-medium text-[#4A4038]">
-            Interview turns
-          </label>
-          <span className="text-[12px] font-mono text-[#776B60]">{maxTurns}</span>
-        </div>
-        <input
-          type="range"
-          min={5}
-          max={200}
-          step={1}
-          value={maxTurns}
-          onChange={e => setMaxTurns(Number(e.target.value))}
-          className="w-full accent-[#B86F50]"
-        />
-        <div className="flex justify-between text-[10px] text-[#B0A49A] mt-0.5">
-          <span>5</span><span>200</span>
-        </div>
-      </div>
-
-      <button
-        type="submit"
-        className="h-8 px-4 bg-[#B86F50] hover:bg-[#A76145] text-white
-                   text-[12px] font-semibold rounded-lg transition-colors"
-      >
-        {saved ? '✓ Saved' : 'Save process settings'}
-      </button>
-    </form>
-  )
-}
-
-// ── API tab ───────────────────────────────────────────────────────────────────
-function ApiTab() {
-  const [model,    setModel]    = useState('claude-sonnet-4-5')
-  const [saved,    setSaved]    = useState(false)
-
-  function handleSave(e) {
-    e.preventDefault()
-    // Persist to backend or localStorage
-    localStorage.setItem('api_settings', JSON.stringify({ model }))
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  return (
-    <form onSubmit={handleSave} className="space-y-4">
-
-      {/* Model selector */}
-      <div>
-        <label className="block text-[12px] font-medium text-[#4A4038] mb-1.5">Model</label>
-        <select
-          value={model}
-          onChange={e => setModel(e.target.value)}
-          className={settingsInputClass}
-        >
-          <option value="claude-opus-4-5">Claude Opus 4.5</option>
-          <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
-          <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
-        </select>
-      </div>
-
-
-      <button
-        type="submit"
-        className="h-8 px-4 bg-[#B86F50] hover:bg-[#A76145] text-white
-                   text-[12px] font-semibold rounded-lg transition-colors"
-      >
-        {saved ? '✓ Saved' : 'Save settings'}
-      </button>
-    </form>
   )
 }
 

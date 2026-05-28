@@ -105,123 +105,47 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
     # Sent inside review_elicitation_agenda_turn interrupt — alongside the artifact.
     "elicitation_agenda": (
         "## Elicitation Agenda Ready for Review\n\n"
-        "AgendaAgent has turned the approved Product Vision into evidence jobs. "
-        "Each item is **assumption-backed, concern-led**: a concern opens the "
-        "lived gate so the role can answer from today's experience, and one or "
-        "more assumptions name the design forks whose evidence the interview "
-        "should turn into product features.\n\n"
-        "**What's inside (per item):**\n"
-        "- **concern_ref** — the user-perceptible quality (clarity, trust, "
-        "timeliness, …) that opens the lived gate for the question\n"
-        "- **assumption_refs** — the design fork(s) the evidence will move "
-        "toward a feature choice (at least one per item)\n"
-        "- **scope_refs** — optional boundary edges the scene touches at runtime\n"
-        "- **perspective** — the role that will answer from lived use or impact\n"
-        "- **context** — the operating moment the EndUser will step into\n"
-        "- **decision_target** — the fork(s) the dialogue should move toward a feature\n"
-        "- **seed_question** — the opening interview probe\n"
-        "- **coverage_points** and **close_when** — what evidence must be settled before moving on\n\n"
-        "**Your action:** Review the agenda below. "
-        "If coverage and item quality look correct, click **Accept** "
-        "to start the interview. If roles are missing, assumptions are unbacked, "
-        "or coverage is thin, click **Request Changes** — the agenda will be "
-        "rebuilt with your feedback."
+        "Review the interview scenes, opening questions, and frictions to probe. "
+        "Accept if the scenes are the right ones to elicit product evidence; "
+        "request changes if a role, scene, or key friction is missing."
     ),
 
     # Sent inside review_product_vision_turn interrupt — alongside the artifact.
     "product_vision": (
         "## Product Vision Ready for Review\n\n"
-        "VisionaryAgent has read the project intent in three passes:\n"
-        "1. **STATED + IMPLIED reading** (always) — direction and role inventory "
-        "drawn from what the input names or forces.\n"
-        "2. **STATED + IMPLIED forks** (always) — assumptions, concerns, and "
-        "scope boundaries the input states or implies.\n"
-        "3. **INFERRED expansion** (only in Coverage mode) — items the input "
-        "did not name but generic product knowledge says a product of this "
-        "shape typically owes.\n\n"
-        "Items carry a **lens** (stated / implied / inferred) describing how "
-        "they were reached and an **anchor** justifying that lens — Pass 1+2 "
-        "items cite the input phrase or claim; Pass 3 items name the specific "
-        "generic principle.\n\n"
-        "**What's inside:**\n"
-        "- **Intent and outcome** — what the input is asking for and what should improve\n"
-        "- **Known signals** — concrete facts the input gave about today's situation\n"
-        "- **Roles** — product users and affected roles, including meaningful subgroups when the input separates them\n"
-        "- **Assumptions** — first-release design forks (each with lens + anchor)\n"
-        "- **Concerns** — user-perceptible quality topics to carry into elicitation (each with lens + anchor)\n"
-        "- **Scope** — responsibilities the product should not take on (each with lens + anchor)\n\n"
-        "**Your action:** Review the vision below. "
-        "If everything reads truthfully, click **Accept** to proceed to the elicitation agenda. "
-        "If the direction is wrong, an item's lens/anchor is off, a role is missing, or scope is incomplete, "
-        "click **Request Changes** — the vision will be regenerated with your feedback."
+        "Review the intent, target outcome, roles, assumptions, concerns, and scope. "
+        "Accept if this is the right product framing; request changes if the direction, "
+        "roles, or boundaries are off."
     ),
 
     # Sent inside review_interview_record_turn interrupt — alongside the artifact.
     "interview_record": (
         "## Requirements Interview Complete\n\n"
-        "InterviewerAgent has driven each agenda item with the EndUser role and compiled "
-        "the resulting dialogue into an **Interview Record**.\n\n"
-        "**What's inside:**\n"
-        "- The question/answer turns for each agenda item\n"
-        "- Coverage verdicts for the planned evidence points\n"
-        "- Signals, gaps, and assumption evidence captured during the interview\n"
-        "- The stakeholder role, context, and close rule for each item\n\n"
-        "**Your action:** Review the interview record below. "
-        "If everything looks correct, click **Accept** to proceed to the Requirement List. "
-        "This gate is view-only; requirement-level feedback belongs at the next review."
+        "Review the closed interview scenes, coverage, and any gaps. "
+        "Accept to continue to requirement synthesis. Requirement-level edits belong at the next gate."
     ),
 
     # Sent inside review_requirement_list_turn interrupt — alongside the artifact.
     "requirement_list": (
         "## Requirement List Ready for Review\n\n"
-        "DistillerAgent has translated interview evidence and the approved Product Vision "
-        "into product-side obligations the team can build from.\n\n"
-        "**What's inside:**\n"
-        "- **FR / NFR / SYS / OOS** items, with OOS preserved from reviewed vision scope\n"
-        "- **confidence** (`confirmed` or `inferred`) so reviewers can see where synthesis translated evidence\n"
-        "- **trace_refs** back to signals, talk turns, assumption evidence, and Product Vision refs\n"
-        "- **Implementation parity axes**: trigger, product object, observable outcome, condition, and participation structure\n"
-        "- **Acceptance criteria**, gaps, and conflicts when the evidence requires reviewer resolution\n\n"
-        "**Your action:** Review the requirement list below. "
-        "If conflicts are present, provide resolutions in your feedback — synthesis will re-run. "
-        "Once conflict-free, click **Accept** to hand it to the Sprint Agent. "
-        "Click **Request Changes** for gaps, misclassifications, or quality issues."
+        "Review the buildable obligations, conflicts, gaps, and acceptance checks. "
+        "Accept if the list is complete enough for backlog shaping; request changes for missing, duplicate, "
+        "misclassified, or low-quality requirements."
     ),
 
     # Sent inside review_product_backlog_turn interrupt — alongside the artifact.
     "product_backlog": (
         "## Initial Product Backlog Ready\n\n"
-        "SprintAgent and AnalystAgent have built the first reviewable backlog from the "
-        "approved Requirement List.\n\n"
-        "**What's inside:**\n"
-        "- User stories shaped from the approved requirements\n"
-        "- **Shaping report** (in notes) — every merge, split, rewrite, added, and dropped "
-        "requirement, since these change the approved set and need your sign-off\n"
-        "- Fibonacci story points reasoned by the Analyst, plus INVEST checks, risks, and dependencies\n"
-        "- WSJF priority scores and dependency-aware ordering\n"
-        "- `needs_human_input` flags on stories no automated reshape could make INVEST-clean\n\n"
-        "**Your action:** Review the backlog and the shaping report below. "
-        "Click **Accept** to hand it to the Analyst for Acceptance Criteria generation. "
-        "Click **Request Changes** to send it back for revision — describe what "
-        "story points, priorities, shaping, or story descriptions need adjustment. "
-        "A rejection will trigger a full rebuild: shaping → estimation → assembly."
+        "Review story titles, descriptions, estimates, readiness, priority order, INVEST status, "
+        "and dependencies. Accept to add acceptance criteria; request changes for shaping, sizing, "
+        "priority, or dependency issues."
     ),
 
     # Sent inside review_validated_product_backlog_turn interrupt — alongside the artifact.
     "validated_product_backlog": (
         "## Validated Product Backlog Ready\n\n"
-        "Every approved PBI now carries the acceptance criteria the Analyst wrote "
-        "during estimation (step 9c); this view attaches them and marks readiness.\n\n"
-        "**What was done:**\n"
-        "- **Acceptance Criteria** — Given-When-Then criteria, sourced from each story's requirement trace\n"
-        "- **Readiness update** — PBIs with usable criteria are marked ready\n"
-        "- **Preserved planning data** — estimates, dependencies, WSJF ordering, and INVEST results carry over unchanged from the Product Backlog\n\n"
-        "This is the **post-Analyst** artifact — compare it against the **post-Sprint** "
-        "Product Backlog (same items, without AC) to see exactly what the Analyst added.\n\n"
-        "**Your action:** Review the validated backlog below. "
-        "Click **Accept** to mark all `ready` stories available for Sprint planning. "
-        "Click **Request Changes** to send it back — the Analyst re-assesses and rewrites "
-        "the criteria (describe any AC quality issues or missing coverage)."
+        "Review each PBI's Given-When-Then acceptance criteria and readiness. "
+        "Accept if criteria are clear and sufficient; request changes for missing coverage or weak checks."
     ),
 }
 
@@ -232,6 +156,48 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
 
 _store_override: Optional[BaseStore] = None
 _inmemory_store_singleton: Optional[InMemoryStore] = None
+
+
+def _normalise_llm_overrides(raw: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return {}
+
+    normalised: Dict[str, Dict[str, Any]] = {}
+    allowed_fields = {
+        "model",
+        "temperature",
+        "max_output_tokens",
+        "max_input_tokens",
+    }
+    for profile_name in ("default", "interview"):
+        profile = raw.get(profile_name)
+        if not isinstance(profile, dict):
+            continue
+        cleaned = {
+            key: value
+            for key, value in profile.items()
+            if key in allowed_fields and value not in (None, "")
+        }
+        if cleaned:
+            normalised[profile_name] = cleaned
+    return normalised
+
+
+def _llm_cache_key(state: WorkflowState) -> str:
+    overrides = _normalise_llm_overrides(state.get("llm_overrides"))
+    return json.dumps(overrides, sort_keys=True, separators=(",", ":"))
+
+
+def _agent_with_overrides(agent_cls, llm_cache_key: str):
+    from ..agent.base import runtime_llm_overrides
+
+    try:
+        overrides = json.loads(llm_cache_key) if llm_cache_key else {}
+    except json.JSONDecodeError:
+        overrides = {}
+
+    with runtime_llm_overrides(overrides):
+        return agent_cls()
 
 
 def configure_default_store(store: BaseStore) -> None:
@@ -252,45 +218,46 @@ def _default_store() -> BaseStore:
     return _inmemory_store_singleton
 
 
-@lru_cache(maxsize=1)
-def _get_interviewer():
+@lru_cache(maxsize=16)
+def _get_interviewer(llm_cache_key: str):
     from ..agent.interviewer import InterviewerAgent
-    return InterviewerAgent()
+    return _agent_with_overrides(InterviewerAgent, llm_cache_key)
 
 
-@lru_cache(maxsize=1)
-def _get_agenda():
+@lru_cache(maxsize=16)
+def _get_agenda(llm_cache_key: str):
     from ..agent.agenda import AgendaAgent
-    return AgendaAgent()
+    return _agent_with_overrides(AgendaAgent, llm_cache_key)
 
 
-@lru_cache(maxsize=1)
-def _get_enduser():
+@lru_cache(maxsize=16)
+def _get_enduser(llm_cache_key: str):
     from ..agent.enduser import EndUserAgent
-    return EndUserAgent()
+    return _agent_with_overrides(EndUserAgent, llm_cache_key)
 
 
-@lru_cache(maxsize=1)
-def _get_sprint_agent():
+@lru_cache(maxsize=16)
+def _get_sprint_agent(llm_cache_key: str):
     from ..agent.sprint import SprintAgent
-    return SprintAgent()
+    return _agent_with_overrides(SprintAgent, llm_cache_key)
 
 
-@lru_cache(maxsize=1)
-def _get_analyst():
+@lru_cache(maxsize=16)
+def _get_analyst(llm_cache_key: str):
     from ..agent.analyst import AnalystAgent
-    return AnalystAgent()
+    return _agent_with_overrides(AnalystAgent, llm_cache_key)
 
 
-@lru_cache(maxsize=1)
-def _get_visionary():
+@lru_cache(maxsize=16)
+def _get_visionary(llm_cache_key: str):
     from ..agent.visionary import VisionaryAgent
-    return VisionaryAgent()
+    return _agent_with_overrides(VisionaryAgent, llm_cache_key)
 
-@lru_cache(maxsize=1)
-def _get_distiller():
+
+@lru_cache(maxsize=16)
+def _get_distiller(llm_cache_key: str):
     from ..agent.distiller import DistillerAgent
-    return DistillerAgent()
+    return _agent_with_overrides(DistillerAgent, llm_cache_key)
 # ─────────────────────────────────────────────────────────────────────────────
 # Node functions
 # ─────────────────────────────────────────────────────────────────────────────
@@ -306,7 +273,7 @@ def visionary_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     supervisor, which then fires review_product_vision_turn (HITL step 2).
     Also called after HITL rejection when product_vision_feedback is present.
     """
-    updates = _get_visionary().process(state)
+    updates = _get_visionary(_llm_cache_key(state)).process(state)
     logger.debug(
         "visionary_turn updates: %s | vision=%s",
         list(updates.keys()),
@@ -320,7 +287,7 @@ def interviewer_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     old_agenda = state.get("elicitation_agenda") or {}
     old_index = old_agenda.get("current_index", -1)
 
-    updates = _get_interviewer().process(state)
+    updates = _get_interviewer(_llm_cache_key(state)).process(state)
 
     logger.debug(
         "interviewer_turn updates: %s | vision=%s | agenda=%s | question=%r",
@@ -350,7 +317,7 @@ def agenda_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     Produces elicitation_agenda_artifact and state["elicitation_agenda"] from
     the reviewed assumption-centered Product Vision.
     """
-    updates = _get_agenda().process(state)
+    updates = _get_agenda(_llm_cache_key(state)).process(state)
     artifacts_out = updates.get("artifacts") or {}
     logger.debug(
         "agenda_turn updates: %s | agenda_artifact=%s | runtime=%s",
@@ -367,7 +334,7 @@ def distiller_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     Produces artifacts["requirement_list"] and sets interview_complete=True.
     Always routes to supervisor afterwards.
     """
-    updates = _get_distiller().process(state)
+    updates = _get_distiller(_llm_cache_key(state)).process(state)
     logger.debug("distiller_turn updates: %s", list(updates.keys()))
     _sync_artifacts_to_store(state, updates)
     return updates
@@ -454,7 +421,7 @@ def enduser_turn_fn(state: WorkflowState) -> Dict[str, Any]:
                 "Do not generate plain text — use the tool."
             )
 
-        updates = _get_enduser().process(augmented_state)
+        updates = _get_enduser(_llm_cache_key(state)).process(augmented_state)
         logger.debug(
             "enduser_turn attempt %d/%d — role=%r — updates: %s",
             attempt, _ENDUSER_MAX_ATTEMPTS, resolved_role, list(updates.keys()),
@@ -497,7 +464,7 @@ def sprint_agent_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     happen inside the single 9a and 9c passes, so there is no sprint↔analyst
     cycle and no split_round.
     """
-    agent      = _get_sprint_agent()
+    agent      = _get_sprint_agent(_llm_cache_key(state))
     artifacts  = state.get("artifacts") or {}
 
     has_draft      = "user_story_draft"   in artifacts
@@ -526,7 +493,7 @@ def sprint_agent_turn_fn(state: WorkflowState) -> Dict[str, Any]:
 def analyst_estimation_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     """Run AnalystAgent.process_estimation() — Step 9c: size, INVEST-assess,
     and reshape stories in one pass → analyst_estimation."""
-    updates = _get_analyst().process_estimation(state)
+    updates = _get_analyst(_llm_cache_key(state)).process_estimation(state)
     logger.debug("analyst_estimation_turn updates: %s", list(updates.keys()))
     _sync_artifacts_to_store(state, updates)
     return updates
@@ -536,7 +503,7 @@ def analyst_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     """Run AnalystAgent.process() — Phase 2: deterministically assemble
     validated_product_backlog by attaching the acceptance criteria the Analyst
     already wrote in step 9c. No LLM call."""
-    updates = _get_analyst().process(state)
+    updates = _get_analyst(_llm_cache_key(state)).process(state)
     logger.debug("analyst_turn updates: %s", list(updates.keys()))
     _sync_artifacts_to_store(state, updates)
     return updates

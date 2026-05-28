@@ -1,4 +1,4 @@
-import { ClipboardCheck, FileText, ListChecks, ShieldCheck, TestTube2 } from "lucide-react";
+import { ClipboardCheck, ListChecks, ShieldCheck, TestTube2 } from "lucide-react";
 import {
   asArray,
   EmptyState,
@@ -124,9 +124,6 @@ function ScoreRail({ item }) {
           {String(status || "-").replace(/_/g, " ")}
         </span>
       </span>
-      <span><span className="font-semibold text-[#4A4038]">Business value:</span> {prioritization.business_value ?? "-"}</span>
-      <span><span className="font-semibold text-[#4A4038]">Time criticality:</span> {prioritization.time_criticality ?? "-"}</span>
-      <span><span className="font-semibold text-[#4A4038]">Risk reduction:</span> {prioritization.risk_reduction ?? "-"}</span>
     </div>
   );
 }
@@ -286,17 +283,6 @@ export function ValidatedBacklogView({ data }) {
                 </div>
               ))}
           </div>
-        </Section>
-      )}
-
-      {data?.notes && (
-        <Section title="Notes" icon={FileText}>
-          <pre
-            className="whitespace-pre-wrap rounded-xl border border-[#E2D6C5] bg-[#F6F1E8]
-                       p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans"
-          >
-            {data.notes}
-          </pre>
         </Section>
       )}
     </div>

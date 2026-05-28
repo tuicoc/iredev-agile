@@ -11,6 +11,7 @@
 # =============================================================================
 
 import uuid
+import re
 from flask import Blueprint, request, jsonify
 from ..data import database
 from ..auth.auth_utils import require_auth
@@ -25,6 +26,59 @@ executor = ThreadPoolExecutor()
 pending_taks = {}
 
 chat_bp = Blueprint("chat", __name__)
+
+_MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9._:/+\-]+$")
+_MAX_INTERVIEW_TURNS = 1000
+
+
+def _parse_max_turns(value) -> int:
+    try:
+        max_turns = int(value or 150)
+    except (TypeError, ValueError):
+        max_turns = 150
+    return min(max(max_turns, 5), _MAX_INTERVIEW_TURNS)
+
+
+def _parse_vision_mode(value) -> str:
+    raw = str(value or "fidelity").strip().lower()
+    if raw in {"coverage", "infer", "inferred", "reasoning"}:
+        return "coverage"
+    if raw in {"fidelity", "extract", "normal", "standard"}:
+        return "fidelity"
+    return "fidelity"
+
+
+def _clean_model_name(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    model = value.strip()
+    if not model or len(model) > 120:
+        return None
+    if not _MODEL_NAME_RE.match(model):
+        return None
+    return model
+
+
+def _normalise_llm_overrides(data: dict) -> dict:
+    raw = data.get("llmOverrides") or data.get("llm_overrides") or {}
+    if not isinstance(raw, dict):
+        raw = {}
+
+    default_model = _clean_model_name(
+        ((raw.get("default") or {}).get("model") if isinstance(raw.get("default"), dict) else None)
+        or data.get("defaultModel")
+    )
+    interview_model = _clean_model_name(
+        ((raw.get("interview") or {}).get("model") if isinstance(raw.get("interview"), dict) else None)
+        or data.get("interviewModel")
+    )
+
+    overrides = {}
+    if default_model:
+        overrides["default"] = {"model": default_model}
+    if interview_model:
+        overrides["interview"] = {"model": interview_model}
+    return overrides
 
 
 # =============================================================================
@@ -125,17 +179,21 @@ def save_message(current_user, chat_id, sub_chat_id):
 @chat_bp.route("/process/start/<chat_id>", methods=["POST"])
 @require_auth
 def start(current_user, chat_id):
+    chat = database.get_chat(chat_id)
+    if not chat:
+        return jsonify({"error": "Not found", "message": f"Chat '{chat_id}' does not exist."}), 404
+    if chat["userId"] != current_user["id"]:
+        return jsonify({"error": "Forbidden", "message": "You don't own this chat."}), 403
+
     req_id = str(uuid.uuid4())
     data = request.get_json(silent=True) or {}
     projDescr = data.get("projectDescription", "").strip()
     if not projDescr:
         return jsonify({"error": "Validation error", "message": "Project Description is required."}), 400
 
-    try:
-        max_turns = int(data.get("maxIterations", 150) or 150)
-    except (TypeError, ValueError):
-        max_turns = 150
-    max_turns = min(max(max_turns, 5), 200)
+    max_turns = _parse_max_turns(data.get("maxIterations", 150))
+    vision_mode = _parse_vision_mode(data.get("visionMode") or data.get("vision_mode"))
+    llm_overrides = _normalise_llm_overrides(data)
 
     from src.config.intake_hint import INTAKE_HINT, VISIONARY_CONTRACT
     input_guidance = INTAKE_HINT
@@ -147,6 +205,8 @@ def start(current_user, chat_id):
         "project_description": projDescr,
         "input_guidance": input_guidance,
         "visionary_contract": visionary_contract,
+        "vision_mode": vision_mode,
+        "llm_overrides": llm_overrides,
         # ── Phase ─────────────────────────────────────────────────────────
         "system_phase": "sprint_zero_planning",
         # ── Artifacts ─────────────────────────────────────────────────────
@@ -168,10 +228,24 @@ def start(current_user, chat_id):
         "_needs_srs_synthesis": False,
         "_workflow_started_message": False,
     }
-    print(initial_state)
+    logger.info(
+        "Starting requirement process chat=%s request=%s vision_mode=%s max_turns=%s llm=%s",
+        chat_id,
+        req_id,
+        vision_mode,
+        max_turns,
+        llm_overrides,
+    )
 
     task = executor.submit(
         ws_handler.run_iredev_workflow, initial_state, current_user["id"], chat_id
     )
     pending_taks[req_id] = task
-    return {"request_id": data}
+    return {
+        "request_id": req_id,
+        "process_config": {
+            "visionMode": vision_mode,
+            "maxIterations": max_turns,
+            "llmOverrides": llm_overrides,
+        },
+    }

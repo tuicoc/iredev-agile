@@ -1,6 +1,5 @@
 import {
   Ban,
-  CalendarClock,
   FileText,
   HelpCircle,
   Lightbulb,
@@ -68,12 +67,6 @@ function RoleCard({ role, index }) {
             {role.need}
           </p>
         )}
-        {role.anchor && (
-          <p className="text-[10px] leading-relaxed text-[#776B60]">
-            <span className="font-semibold text-[#4A4038]">Anchor: </span>
-            {role.anchor}
-          </p>
-        )}
       </div>
     </article>
   );
@@ -94,11 +87,6 @@ function AssumptionCard({ item, index }) {
       {item.why_it_matters && (
         <p className="mt-1.5 text-[10.5px] leading-relaxed text-[#776B60]">
           {item.why_it_matters}
-        </p>
-      )}
-      {item.anchor && (
-        <p className="mt-1.5 text-[10px] leading-relaxed text-[#A89C91]">
-          Anchor: {item.anchor}
         </p>
       )}
     </article>
@@ -127,11 +115,6 @@ function ConcernCard({ concern, index }) {
           {concern.rationale}
         </p>
       )}
-      {concern.anchor && (
-        <p className="mt-1.5 text-[10px] leading-relaxed text-[#A89C91]">
-          Anchor: {concern.anchor}
-        </p>
-      )}
     </article>
   );
 }
@@ -152,11 +135,6 @@ function ScopeCard({ item, index }) {
       {item.reason && (
         <p className="mt-1.5 text-[10.5px] leading-relaxed text-[#776B60]">
           {item.reason}
-        </p>
-      )}
-      {item.anchor && (
-        <p className="mt-1.5 text-[10px] leading-relaxed text-[#A89C91]">
-          Anchor: {item.anchor}
         </p>
       )}
     </article>
@@ -253,15 +231,6 @@ export default function ProductVisionView({ data }) {
           <EmptyState label="No scope boundaries found." />
         )}
       </Section>
-
-      {data?.notes && (
-        <Section title="Notes" icon={CalendarClock}>
-          <pre className="whitespace-pre-wrap rounded-lg border border-[#E2D6C5] bg-[#F6F1E8]
-                          p-3 text-[10.5px] leading-relaxed text-[#776B60] font-sans">
-            {data.notes}
-          </pre>
-        </Section>
-      )}
     </div>
   );
 }
