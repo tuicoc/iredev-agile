@@ -418,6 +418,47 @@ Produce `coverages` — one entry per drafted item, identified by
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Feedback re-run (only attached when reviewer feedback is present)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FEEDBACK_PREAMBLE = """\
+FEEDBACK RE-RUN — REVIEWER REJECTED THE PREVIOUS OUTPUT.
+
+The user message includes the reviewer feedback verbatim. Treat
+each feedback point as a non-negotiable instruction that overrides
+your default reasoning when the two conflict — if a point tells
+you to keep / drop / rewrite / split / merge / re-tag a specific
+element, comply exactly even when your own judgment would have
+chosen differently. The "MUST address every point" contract is
+absolute: a point left untouched is a failed run, not a judgment
+call.
+
+For any aspect the feedback is silent on, produce output the same
+way you normally would — feedback narrows your choices on the
+points it names; it does not loosen any other guarantee the pass
+already owes.
+"""
+
+
+_FEEDBACK_USER_BODY = """\
+
+REVIEWER FEEDBACK — YOU MUST ADDRESS EVERY POINT BELOW:
+{feedback}
+
+Apply each point at the right slot of the agenda item it names:
+  perspective · scene · frictions_to_probe ·
+  critical_incident_prompt · close_when · notes.
+
+When a point asks to drop an item, do not redistribute its scene
+or frictions to a different item just to keep role-coverage
+numbers — honor the drop and let the audit reflect it. When a
+point asks to add or split items, regenerate them through the
+same role-coverage and friction-saturation discipline this pass
+already owes; do not shortcut.
+"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Agent
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -442,14 +483,12 @@ class AgendaAgent(BaseAgent):
     def _user_prompt(feedback: Optional[str]) -> str:
         text = "Build the elicitation agenda following the system prompt instructions."
         if feedback:
-            text += (
-                "\n\nReviewer feedback to address before regenerating the artifact:\n"
-                f"{feedback}"
-            )
+            text += _FEEDBACK_USER_BODY.format(feedback=feedback)
         return text
 
-    def _system(self, body: str) -> str:
-        return f"{self.profile.prompt}\n\n{body}"
+    def _system(self, body: str, feedback_mode: bool = False) -> str:
+        preamble = f"{_FEEDBACK_PREAMBLE}\n\n" if feedback_mode else ""
+        return f"{preamble}{self.profile.prompt}\n\n{body}"
 
     def _pass1(self, vision: Dict[str, Any], feedback: Optional[str]) -> DraftPass:
         body = _DRAFT_BODY.format(
@@ -457,7 +496,7 @@ class AgendaAgent(BaseAgent):
         )
         return self.extract_structured(
             schema=DraftPass,
-            system_prompt=self._system(body),
+            system_prompt=self._system(body, feedback_mode=bool(feedback)),
             user_prompt=self._user_prompt(feedback),
             include_memory=False,
         )
@@ -484,7 +523,7 @@ class AgendaAgent(BaseAgent):
         )
         return self.extract_structured(
             schema=CoveragePass,
-            system_prompt=self._system(body),
+            system_prompt=self._system(body, feedback_mode=bool(feedback)),
             user_prompt=self._user_prompt(feedback),
             include_memory=False,
         )

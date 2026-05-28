@@ -12,9 +12,10 @@ Phase 1 — Sprint Zero (sprint_zero_planning):
   Step 6  – review_interview_record        → reviewed_interview_record    (HITL — approve-only)
   Step 7  – synthesise_requirement_list    → requirement_list             (DistillerAgent)
   Step 8  – review_requirement_list        → requirement_list_approved    (HITL)
-  Step 9a – create_user_stories            → user_story_draft
-  Step 9c – estimate_and_validate_stories  → analyst_estimation
-  Step 9b – build_product_backlog          → product_backlog
+  Step 9a – create_user_stories            → user_story_draft             (SprintAgent shape)
+  Step 9a' – review_user_story_draft       → user_story_draft_approved    (HITL)
+  Step 9c – estimate_and_validate_stories  → analyst_estimation           (AnalystAgent)
+  Step 9b – build_product_backlog          → product_backlog              (SprintAgent prioritise)
   Step 10 – review_product_backlog         → product_backlog_approved     (HITL)
 
 Phase 2 — Backlog Refinement (backlog_refinement):
@@ -27,16 +28,24 @@ Phase 3 — Sprint Execution (sprint_execution):
 Phase 4 — Sprint Review (sprint_review):
   Placeholder.
 
-Backlog creation (Steps 9a → 9c → 9b) — linear, no refinement loop
-───────────────────────────────────────────────────────────────────
+Backlog creation (Steps 9a → 9a' → 9c → 9b) — linear, no refinement loop
+─────────────────────────────────────────────────────────────────────────
 The product backlog is built in three single-pass steps between
-SprintAgent (Product Owner) and AnalystAgent (Technical Lead):
+SprintAgent (Product Owner) and AnalystAgent (Technical Lead), with a
+HITL gate sitting between shaping and sizing:
 
   Step 9a — Shaping (sprint_agent_turn):
     SprintAgent shapes requirement_list_approved into an INVEST-clean story
     set — carrying 1:1, folding near-duplicates, splitting bundles, rewriting,
     adding implied stories, or dropping with a reason. Every change is
-    reported for the backlog gate. Output: user_story_draft.
+    reported for the 9a' HITL gate. Output: user_story_draft.
+
+  Step 9a' — Review user_story_draft (review_user_story_draft_turn):
+    PO reviews the shaped stories BEFORE sizing — cheap gate to correct
+    shaping decisions before the analyst burns a sizing pass on the wrong
+    set. On approve → user_story_draft_approved sentinel; on reject →
+    user_story_draft is removed, user_story_draft_feedback is injected, 9a
+    re-runs.
 
   Step 9c — Size + INVEST-assess + reshape (analyst_estimation_turn):
     AnalystAgent reasons feasibility, the six INVEST qualities, dependencies,
@@ -247,35 +256,56 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                     "so that <benefit>.'). One pass: it may carry a requirement through 1:1, "
                     "fold near-duplicate requirements into one story (keeping all source ids), "
                     "split a bundled requirement, rewrite raw wording, add an implied story, or "
-                    "drop a requirement with a reason. Every change is reported for the backlog "
-                    "HITL gate. No estimation here — sizing is AnalystAgent's. Any "
-                    "product_backlog_feedback from a prior PO rejection is injected."
+                    "drop a requirement with a reason. Every change is reported for the "
+                    "user-story HITL gate (step 9a'). No estimation here — sizing is "
+                    "AnalystAgent's. Any user_story_draft_feedback from the 9a' rejection is "
+                    "injected; product_backlog_feedback from a later PO rejection (step 10) "
+                    "also re-runs this step."
+                ),
+            ),
+            # 9a'. Human reviews the user_story_draft (Node: review_user_story_draft_turn)
+            ArtifactStep(
+                step_name="review_user_story_draft",
+                node_name="review_user_story_draft_turn",
+                requires_artifacts=["user_story_draft"],
+                produces_artifact="user_story_draft_approved",
+                agent_name="human_reviewer",
+                description=(
+                    "Product Owner reviews the user_story_draft BEFORE sizing — story titles, "
+                    "descriptions, source_requirement_ids, reshape ops (carry/merge/split/"
+                    "rewrite/add), dropped reasons. This is the cheap gate that lets the PO "
+                    "correct shaping decisions before the analyst spends a sizing pass on the "
+                    "wrong set. "
+                    "• Approved → user_story_draft_approved sentinel written; flow advances to "
+                    "  analyst_estimation_turn (step 9c). "
+                    "• Rejected → user_story_draft removed, user_story_draft_feedback injected; "
+                    "  SprintAgent re-runs step 9a with the feedback."
                 ),
             ),
             # 9c. AnalystAgent sizes, INVEST-assesses, and reshapes (Node: analyst_estimation_turn)
             ArtifactStep(
                 step_name="estimate_and_validate_stories",
                 node_name="analyst_estimation_turn",
-                requires_artifacts=["user_story_draft"],
+                requires_artifacts=["user_story_draft_approved"],
                 produces_artifact="analyst_estimation",
                 agent_name="analyst",
                 description=(
-                    "AnalystAgent (Technical Lead) reads user_story_draft and, in one pass, "
-                    "reasons per story: feasibility, the six INVEST qualities, dependencies, "
-                    "technical risk, and a Fibonacci story-point size stated DIRECTLY from its "
-                    "reasoning (no complexity/effort/uncertainty formula, no Python snap of the "
-                    "estimate). When a story misses an INVEST quality it fixes it in place — "
-                    "rewriting the sentence or splitting into sized child stories; a story no "
-                    "honest reshape can save is marked needs_human_input. The resulting "
-                    "analyst_estimation.stories is the authoritative post-reshape set the next "
-                    "step consumes. No refinement loop — reshaping is in-pass."
+                    "AnalystAgent (Technical Lead) reads user_story_draft_approved and, in one "
+                    "pass, reasons per story: feasibility, the six INVEST qualities, "
+                    "dependencies, technical risk, and a Fibonacci story-point size stated "
+                    "DIRECTLY from its reasoning (no complexity/effort/uncertainty formula, no "
+                    "Python snap of the estimate). When a story misses an INVEST quality it "
+                    "fixes it in place — rewriting the sentence or splitting into sized child "
+                    "stories; a story no honest reshape can save is marked needs_human_input. "
+                    "The resulting analyst_estimation.stories is the authoritative post-reshape "
+                    "set the next step consumes. No refinement loop — reshaping is in-pass."
                 ),
             ),
             # 9b. SprintAgent prioritises + assembles the backlog (Node: sprint_agent_turn)
             ArtifactStep(
                 step_name="build_product_backlog",
                 node_name="sprint_agent_turn",
-                requires_artifacts=["user_story_draft", "analyst_estimation"],
+                requires_artifacts=["user_story_draft_approved", "analyst_estimation"],
                 produces_artifact="product_backlog",
                 agent_name="sprint_agent",
                 description=(

@@ -60,6 +60,7 @@ REVIEW_TYPES = {
     "elicitation_agenda":        "reviewed_elicitation_agenda",
     "interview_record":          "reviewed_interview_record",
     "requirement_list":          "requirement_list_approved",
+    "user_story_draft":          "user_story_draft_approved",
     "product_backlog":           "product_backlog_approved",
     "validated_product_backlog": "validated_product_backlog_approved",
 }
@@ -71,6 +72,7 @@ _REVIEW_NODE_NAMES = {
     "review_elicitation_agenda_turn",
     "review_interview_record_turn",
     "review_requirement_list_turn",
+    "review_user_story_draft_turn",
     "review_product_backlog_turn",
     "review_validated_product_backlog_turn",
 }
@@ -89,6 +91,7 @@ REVIEW_AGENT_NAMES = {
     "elicitation_agenda": "Agenda Agent",
     "interview_record": "Interviewer Agent",
     "requirement_list": "Distiller Agent",
+    "user_story_draft": "Sprint Agent",
     "product_backlog": "Sprint Agent",
     "validated_product_backlog": "Analyst Agent",
 }
@@ -98,6 +101,7 @@ ARTIFACT_TITLES = {
     "elicitation_agenda": "Elicitation Agenda",
     "interview_record": "Interview Record",
     "requirement_list": "Requirement List",
+    "user_story_draft": "User Story Draft",
     "product_backlog": "Product Backlog",
     "validated_product_backlog": "Validated Product Backlog",
 }

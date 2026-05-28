@@ -167,6 +167,7 @@ class WorkflowState(TypedDict, total=False):
     product_vision_feedback:      Optional[str]
     elicitation_agenda_feedback:  Optional[str]
     requirement_list_feedback:    Optional[str]
+    user_story_draft_feedback:    Optional[str]
     product_backlog_feedback:     Optional[str]
 
     # ── Phase 2: Backlog Refinement ────────────────────────────────────────
