@@ -302,6 +302,36 @@ class ThinkModule:
         )
         return result
 
+    # ── Public API: async structured extraction ───────────────────────────
+
+    async def arun_structured(
+        self,
+        schema:          Type[BaseModel],
+        system_prompt:   str,
+        user_prompt:     str,
+        memory_messages: Optional[List[BaseMessage]] = None,
+    ) -> BaseModel:
+        """Async counterpart of ``run_structured``.
+
+        Uses ``ainvoke`` on the structured-output chain so multiple
+        extraction calls can be driven concurrently with ``asyncio.gather``
+        without spawning OS threads.
+        """
+        structured_llm = self._llm.with_structured_output(schema)
+
+        recent: List[BaseMessage] = (memory_messages or [])[-20:]
+        messages: List[BaseMessage] = (
+            [SystemMessage(content=system_prompt)]
+            + recent
+            + [HumanMessage(content=user_prompt)]
+        )
+
+        result = await structured_llm.ainvoke(messages)
+        logger.debug(
+            "[ThinkModule] arun_structured finished — schema=%s", schema.__name__
+        )
+        return result
+
     # ── ReAct graph construction ───────────────────────────────────────────
 
     def _compile_react_graph(

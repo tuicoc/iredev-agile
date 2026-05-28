@@ -347,6 +347,43 @@ class BaseAgent(ABC):
             memory_messages=memory_messages,
         )
 
+    # ── Async structured extraction entry point ───────────────────────────
+
+    async def aextract_structured(
+        self,
+        schema:          Type[BaseModel],
+        system_prompt:   str,
+        user_prompt:     str,
+        include_memory:  bool = False,
+    ) -> BaseModel:
+        """Async counterpart of ``extract_structured``.
+
+        Use this from inside an ``asyncio`` driver (e.g. ``asyncio.gather``)
+        to run several structured-output calls concurrently without spawning
+        OS threads. The semantics are identical to ``extract_structured``;
+        only the call mechanism (``ainvoke`` instead of ``invoke``) changes.
+        """
+        if self.think is None:
+            raise RuntimeError(
+                f"Agent '{self.name}': ThinkModule unavailable — "
+                "cannot run aextract_structured()."
+            )
+
+        memory_messages: Optional[List[BaseMessage]] = None
+        if include_memory:
+            _memory_result = self.memory.take()
+            if isinstance(_memory_result, tuple):
+                _memory_result = _memory_result[0]
+            if isinstance(_memory_result, dict):
+                memory_messages = _memory_result.get("messages", [])
+
+        return await self.think.arun_structured(
+            schema=schema,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            memory_messages=memory_messages,
+        )
+
     # ── abstract interface ────────────────────────────────────────────────
 
     @abstractmethod
