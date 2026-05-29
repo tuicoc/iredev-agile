@@ -526,10 +526,15 @@ losing alternative dialogue could surface) → fold into
 description / intent_summary, do not fabricate an ASM for it.
 Inferred boundaries (a generic principle says the product should
 leave a responsibility to another authority, even if the input
-did not state it) belong in Pass 3. Empty list is correct only
-when the input has no boundary phrase the active scan would
-catch; skipping a clearly stated system-scope boundary is a
-defect. `id`: leave empty (Python assigns OOS-NN).
+did not state it) belong in Pass 3. Beyond explicit phrases, walk
+the product's neighbours: every system, authority, data source, or
+process the input shows the product operating BESIDE but not owning
+implies a boundary the first release must keep visible — a product
+almost never owns everything in its space, so surface each handoff
+the input lets you name rather than stopping at the first. Empty
+list is correct only when the input has no boundary phrase the
+active scan would catch; skipping a clearly stated system-scope
+boundary is a defect. `id`: leave empty (Python assigns OOS-NN).
 
 
 WRITING notes. One reviewer-facing paragraph: stated-vs-implied
@@ -649,9 +654,13 @@ is what the role notices at runtime when a quality slips; merge
 same theme across multiple roles into one concern with the union
 of `affected_roles`. A boundary names a responsibility the
 product will not own, surfaced when the shape places that
-responsibility with another authority, system, or party. Each
-inferred concern / boundary carries the specific structural
-reason in its anchor; vague glue drops it.
+responsibility with another authority, system, or party. Walk the
+systems, authorities, data, and processes the product leans on but
+does not control; each is a boundary candidate when the structural
+shape hands that responsibility outside the product, and most
+products of any shape hand off more than one. Each inferred concern
+/ boundary carries the specific structural reason in its anchor;
+vague glue drops it.
 
 
 CHAINING IS ALLOWED. An inferred item may build on Pass 1 +

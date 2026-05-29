@@ -305,6 +305,17 @@ does not raise. The vision (after its own coverage walks) is the
 breadth menu; the agenda serves that breadth.
 
 
+ASSUMPTIONS ARE FORKS WORTH A SCENE. An assumption is a first-
+release decision the team must make. When the role lives a moment
+where that decision already bites today — they choose, work
+around it, or fall back on something — that moment earns a scene,
+so the interview gathers evidence that informs the fork instead
+of leaving it for the reviewer to decide blind. Reserve the
+notes-only "strategic-HITL" routing for forks no lived moment can
+reach; do not send a fork there just because no scene drafted yet
+happens to touch it.
+
+
 FRICTION DIVERSITY ACROSS SCENES. A role's life around the
 product surfaces friction in genuinely different kinds of moment
 — what they try and what breaks, what they cannot see or know,

@@ -342,7 +342,10 @@ class VisionAndAdjudication(BaseModel):
     ))
     final_gaps: List[str] = Field(default_factory=list, description=(
         "Gaps adjudicated across all the evidence. Format: '<source-id>: <missing "
-        "product decision>'. Merge two gaps when the same answer would close both."
+        "product decision>'. Merge two gaps when the same answer would close both. "
+        "A fork the vision leans a defensible way on is NOT a final gap — settle it "
+        "as an inferred obligation instead; keep here only forks the vision leaves "
+        "genuinely balanced."
     ))
     final_conflicts: List[Conflict] = Field(default_factory=list, description=(
         "True conflicts only — two obligations that cannot both hold in the "
@@ -557,7 +560,14 @@ candidates to weigh are few.
 
 For the gaps, deliver the reader one clean list: fold gaps the same
 answer would close into the best-worded one, and drop any a current
-obligation already settles. For the conflicts, keep only true clashes
+obligation already settles. When a gap is a first-release decision the
+vision's own assumptions already lean a defensible way on, settle it by
+emitting the obligation that takes that lean — anchored to and grounded in
+that assumption, tagged inferred — instead of leaving it open: the interview
+raised the decision and the vision points a direction, so committing to it
+is grounding, not invention. Keep as a final gap only a fork the vision
+leaves genuinely balanced, where choosing a side is the reviewer's call and
+not yours. For the conflicts, keep only true clashes
 — two obligations that cannot both hold in the same situation. A
 difference in condition that an obligation's own criteria absorb is
 not a clash, and two items that were just merged are not in conflict.

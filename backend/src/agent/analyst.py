@@ -9,10 +9,14 @@ no hint→action routing, no refinement loop:
     the six INVEST qualities, dependencies, technical risk, and a size
     the agent states DIRECTLY as a Fibonacci story-point number (no
     complexity/effort/uncertainty formula). When a story misses an INVEST
-    quality the agent reshapes it in place — rewriting the sentence or
-    splitting it into child stories it sizes itself — so the set it
-    returns is INVEST-clean. A story no honest reshape can save is left
-    for human review (status=needs_human_input). The returned
+    quality the agent has full authority over the wording to fix it —
+    rewrite the sentence, split it into child stories it sizes itself, or
+    write the finer story an obligation implies — so that every story it
+    returns clears all six INVEST qualities and serves exactly one
+    stakeholder. Each story and each split child reports the INVEST read of
+    the form as it is left, and Python gates ready on all six passing: a
+    reshape is no longer an automatic pass. A story no honest reshape can
+    save is left for human review (status=needs_human_input). The returned
     analyst_estimation.stories is the authoritative post-reshape set.
 
   ACCEPTANCE CRITERIA (Backlog Refinement, step 1): product_backlog_approved
@@ -35,7 +39,7 @@ import logging
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Literal, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Literal, Optional, TypeVar, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -84,15 +88,38 @@ A trace marked confidence=inferred was synthesised upstream from
 friction rather than stated outright; carry more estimation uncertainty
 on it and say so in your reasoning.
 
-INVEST IS THE BAR EVERY STORY MUST CLEAR. A story is ready only when it
-is independent (a self-contained unit of value — an ordinary ordering
-dependency recorded in blocked_by is fine, only tight coupling breaks
-this), negotiable (leaves implementation open), valuable (its outcome is
-a real benefit to its audience), estimable (the team can size it), small
-(it fits inside one sprint), and testable (a product-observable check can
-confirm it). These are qualities to weigh per story, not boxes to tick —
-and when a story misses one, the usual cure is to split it finer, not to
-flag it or fold it away.
+INVEST IS THE BAR EVERY STORY MUST CLEAR — and it is the bar on what you
+RETURN, not just what you read: every story you leave standing, and every
+child you split out, clears all six. A story is ready only when it is
+independent (a self-contained unit of value for ONE stakeholder — an
+ordinary ordering dependency recorded in blocked_by is fine, only tight
+coupling breaks this), negotiable (the sentence states the capability and
+its outcome and leaves the HOW open — exact fields, values, states, and
+screen mechanics live in the acceptance criteria, not the story sentence),
+valuable (its outcome is a real benefit to that audience), estimable (the team can
+size it), small (it fits inside one sprint), and testable (you understand
+the obligation well enough that you could write a test for it). These are
+qualities to weigh per story, not boxes to tick — and when a story misses
+one, the usual cure is to split it finer, not to flag it or fold it away.
+
+ONE STORY, ONE STAKEHOLDER. Each story serves the single stakeholder the
+obligation matters to most — the one whose outcome the system most depends
+on. When an obligation is lived by several, give it to that primary
+stakeholder, or split so each owns an independently valuable slice; never
+address two audiences with one "A or B" story, which is neither
+independent nor cleanly testable.
+
+TESTABLE STARTS IN THE CARD, LANDS IN THE CRITERIA. The story sentence
+carries an implicit promise: you understand the obligation well enough that
+you could write a test for it. So the capability it names must be concrete
+enough to admit a check — a state, an action with a result, or an output
+someone could confirm by inspecting the product. A sentence whose only
+payoff is that something works well, with nothing a test could point at,
+breaks that promise; name the checkable behaviour instead. The acceptance
+criteria are where that check is actually written — they complete the
+story, they do not decorate it. If you cannot write a concrete criterion,
+the obligation is not yet understood well enough: leave testable false
+rather than writing one that only restates a vague card.
 
 DOMAIN NEUTRALITY. Use the vocabulary of the trace in front of you. Do
 not import role names, product categories, or domain examples from
@@ -112,20 +139,20 @@ structural complexity, implementation surface, and the uncertainty an
 inferred trace leaves open. A story you would not dare size is not
 estimable.
 
-When a story misses an INVEST quality, fix it in place rather than
-passing the problem downstream — and splitting into finer stories is the
-usual fix, since most INVEST gaps come from a story still carrying more
-than one capability:
-  - if it is too large, bundles more than one capability, or is hard to
-    estimate, split it into child stories that each deliver value alone,
-    and size each child;
-  - if its wording hides the obligation, leaves it untestable, or carries
-    noise that belongs elsewhere, rewrite the sentence from the trace
-    evidence so the obligation is clear and a product-observable check
-    can confirm it.
-A reshaped story, and every split child, must itself clear INVEST.
-Reshaping should not lose obligations or collapse distinct ones; prefer
-more, finer stories over fewer coarse ones.
+You have full authority over the wording of the set so that every story
+clears INVEST: rewrite a sentence from its trace evidence, split a story
+into as many child stories as the obligation needs, or write the finer or
+supporting story an obligation plainly implies. Use whatever of these the
+story needs — splitting is the usual fix, since most INVEST gaps come from
+a story still carrying more than one capability. The one thing you may not
+do is lose or merge away a distinct obligation; prefer more, finer stories
+over fewer coarse ones.
+
+The six INVEST qualities you report describe each story AS YOU LEAVE IT —
+after any rewrite — and every story you return, parent or split child,
+must have all six true. A reshape is not a free pass: if your own rewrite
+or split still cannot make all six honestly true, do not report a pass —
+that is exactly the story to leave for human review.
 
 A story that simply needs another story shipped first is NOT an
 independence failure — that is an ordinary dependency, so record it in
@@ -135,22 +162,32 @@ its evidence is missing or contradictory, or the call genuinely belongs
 to a human.
 
 For each story (and each split child), also write a small set of
-Given-When-Then acceptance criteria — the same evidence that makes a
-story testable is what the team checks it against, so write it now while
-you hold the trace. Source the Given from the operating condition, the
-When from the trigger, and the Then from the observable outcome on the
-product object; an invariant has no trigger, so leave its When empty.
-Keep it lean: one or two criteria covering the happy path, plus an edge
-or error case only when the trace evidence clearly supports it. Each
-criterion is checkable by inspecting the product, never by asking a user
-what they think or feel. If the evidence cannot ground a checkable
-criterion, leave testable false rather than inventing a vague one.
+Given-When-Then acceptance criteria — the story's confirmation, written
+from the same trace while you hold it. Being able to write a concrete one
+IS the test of testability: if you can, the story is testable; if you
+cannot, it is not yet, and testable stays false. Source the Given from the
+operating condition, the When from the trigger, and the Then from the
+observable outcome on the product object; an invariant has no trigger, so
+leave its When empty. Keep it lean: one or two criteria covering the happy
+path, plus an edge or error case only when the trace evidence clearly
+supports it. Each criterion is checkable by inspecting the product, never
+by asking a user what they think or feel.
 
-You guarantee: every story carries a Fibonacci estimate, an honest read
-of each INVEST quality, and at least one product-observable acceptance
-criterion (unless it is unsalvageable); dependencies reference real story
-ids; a reshape leaves the backlog cleaner and never buries two
-obligations under one heading.
+NEGOTIABLE IS A REWRITE TARGET, NOT A RUBBER STAMP. A story whose sentence
+pins the implementation — enumerated fields, fixed values or states, a
+particular screen — is not negotiable even when every other quality passes:
+it reads as a frozen spec and leaves the team nothing to shape. The cure is
+in your hands and costs nothing: state the capability and its outcome in the
+sentence, and carry the concrete specifics in the acceptance criteria, where
+a checkable detail belongs. Whenever your own sentence pins the HOW, mark
+negotiable false and rewrite it to capability grain.
+
+You guarantee: every story you return clears all six INVEST qualities and
+serves exactly one stakeholder, carries a Fibonacci estimate and at least
+one product-observable acceptance criterion — or is honestly left for
+human review; the INVEST read you report is the read of the story as you
+leave it; dependencies reference real story ids; a reshape leaves the
+backlog cleaner and never buries two obligations under one heading.
 """
 
 
@@ -222,15 +259,40 @@ class _AcEmit(BaseModel):
 
 
 class _ChildStory(BaseModel):
-    """One child produced when a story is split to clear INVEST."""
+    """One child the analyst writes when it splits a story to clear INVEST.
+    A child is a new, independently shippable story; it must itself clear
+    all six INVEST qualities, which it reports as it leaves them."""
     title: str = Field(description="Short noun-phrase title for the child obligation.")
     description: str = Field(description=(
         "User-story sentence for the child — 'As a <role>, I can <capability>, "
-        "so that <benefit>.' Each child delivers value on its own."
+        "so that <benefit>.' One stakeholder only — the one this slice matters "
+        "to most, never a compound 'A or B' audience. <capability> is a concrete "
+        "product behaviour you could write a test for (something you can see, do, "
+        "or inspect), not only an assurance that something works. Delivers value "
+        "on its own."
     ))
     story_points: int = Field(description=(
         "Fibonacci size for this child (1, 2, 3, 5, 8, 13, 21), stated from "
         "your reasoning about it."
+    ))
+    independent: bool = Field(description="Self-contained unit of value (an ordering dependency in blocked_by is fine).")
+    negotiable: bool = Field(description=(
+        "True only when the sentence states the capability and its outcome and "
+        "leaves the HOW open. False when it pins the implementation — enumerated "
+        "fields, specific values or states, a fixed UI — which belongs in the "
+        "acceptance criteria, not the story sentence. Read your own wording as a "
+        "sceptical reviewer would before marking it true."
+    ))
+    valuable: bool = Field(description="Outcome is a real benefit to its one audience.")
+    estimable: bool = Field(description="The team can size it.")
+    small: bool = Field(description="Fits inside one sprint.")
+    testable: bool = Field(description=(
+        "You understand the obligation well enough to write a test for it: the "
+        "capability the description names is concrete enough to confirm by "
+        "inspecting the product. False when you could not write that check."
+    ))
+    invest_notes: str = Field(default="", description=(
+        "Reasoning for any INVEST quality still false (empty when all six pass)."
     ))
     acceptance_criteria: List[_AcEmit] = Field(default_factory=list, description=(
         "1-2 Given-When-Then criteria for this child (happy path; add an edge/error "
@@ -243,15 +305,17 @@ class _Reshape(BaseModel):
     """Present only when a story must change to clear INVEST."""
     kind: Literal["rewrite", "split"] = Field(description=(
         "rewrite when one clearer sentence fixes it; split when it must become "
-        "two or more child stories."
+        "two or more child stories — including any finer or supporting story the "
+        "obligation implies."
     ))
     rewritten_description: str = Field(default="", description=(
-        "For kind=rewrite: the clearer story sentence sourced from the trace. "
-        "Empty for split."
+        "For kind=rewrite: the clearer story sentence sourced from the trace, "
+        "serving one stakeholder. Empty for split."
     ))
     children: List[_ChildStory] = Field(default_factory=list, description=(
         "For kind=split: two or more child stories that together cover the "
-        "original obligation, each sized. Empty for rewrite."
+        "original obligation without losing any of it, each sized, each serving "
+        "one stakeholder and clearing all six INVEST. Empty for rewrite."
     ))
     reason: str = Field(description="Which INVEST quality this reshape restores, and how.")
 
@@ -269,12 +333,25 @@ class _StoryAssessment(BaseModel):
         "it is so coupled to another story that neither can be delivered "
         "separately."
     ))
-    negotiable: bool = Field(description="Leaves implementation choices open.")
+    negotiable: bool = Field(description=(
+        "True only when the sentence states the capability and its outcome and "
+        "leaves the HOW open. False when it pins the implementation — enumerated "
+        "fields, specific values or states, a fixed UI — which belongs in the "
+        "acceptance criteria, not the story sentence. Read your own wording as a "
+        "sceptical reviewer would before marking it true."
+    ))
     valuable: bool = Field(description="Outcome is a real benefit to its audience.")
     estimable: bool = Field(description="The team can size it.")
     small: bool = Field(description="Fits inside one sprint.")
-    testable: bool = Field(description="A product-observable check can confirm it.")
-    invest_notes: str = Field(description="Reasoning for any INVEST quality you marked false.")
+    testable: bool = Field(description=(
+        "You understand the obligation well enough to write a test for it: the "
+        "capability the description names is concrete enough to confirm by "
+        "inspecting the product. False when you could not write that check."
+    ))
+    invest_notes: str = Field(description=(
+        "Reasoning for any INVEST quality still false after your reshape "
+        "(empty when all six pass)."
+    ))
     is_feasible: bool = Field(description=(
         "False only when required information is missing or contradictory and "
         "the gap blocks any safe start; uncertain detail alone is still feasible."
@@ -450,13 +527,19 @@ class AnalystAgent(BaseAgent):
 
             reshape = fa.reshape
             if reshape and reshape.kind == "split" and len(reshape.children) >= 2:
-                # Replace the parent with its sized children — each clears INVEST.
+                # Replace the parent with its children. Each child reports its own
+                # six-INVEST read and is gated on it — a child that cannot clear all
+                # six surfaces for review, never stamped ready by default.
                 reshape_report.append(
                     f"SPLIT {sid} → {len(reshape.children)} children ({reshape.reason})"
                 )
                 for idx, child in enumerate(reshape.children):
                     sp = _nearest_fibonacci(child.story_points)
                     child_id = f"{sid}.{idx + 1}"
+                    child_flags = self._invest_flags(child)
+                    child_ready = not child_flags and fa.is_feasible
+                    if not child_ready:
+                        human_input.append(child_id)
                     assembled.append({
                         **base,
                         "source_story_id": child_id,
@@ -464,12 +547,14 @@ class AnalystAgent(BaseAgent):
                         "title": child.title.strip() or base["title"],
                         "description": child.description.strip(),
                         "story_points": sp,
-                        "invest": self._invest_block([], f"split child of {sid}"),
+                        "invest": self._invest_block(
+                            child_flags, child.invest_notes or f"split child of {sid}", child
+                        ),
                         "feasibility": {"is_feasible": fa.is_feasible,
                                         "feasibility_notes": fa.feasibility_notes},
                         "dependencies": {"blocked_by": list(fa.blocked_by), "blocks": list(fa.blocks)},
                         "risks": [r.model_dump() for r in fa.risks],
-                        "status": "ready",
+                        "status": "ready" if child_ready else "needs_human_input",
                         "estimation_reasoning": child.thought.strip(),
                         "reshape_op": "split_child",
                         "acceptance_criteria": [ac.model_dump() for ac in child.acceptance_criteria],
@@ -486,9 +571,10 @@ class AnalystAgent(BaseAgent):
                 reshape_op = "rewrite"
                 reshape_report.append(f"REWRITE {sid} ({reshape.reason})")
 
+            # The bools describe the story as the analyst leaves it (post-rewrite),
+            # so the gate is the read itself — not the mere presence of a reshape.
             flags = self._invest_flags(fa)
-            # A reshape is the analyst's claim that the issue is fixed.
-            invest_pass = (not flags) or reshape_op != "none"
+            invest_pass = not flags
             status = "ready" if (invest_pass and fa.is_feasible) else "needs_human_input"
             if status == "needs_human_input":
                 human_input.append(sid)
@@ -498,7 +584,7 @@ class AnalystAgent(BaseAgent):
                 **base,
                 "description": description,
                 "story_points": sp,
-                "invest": self._invest_block(flags if not invest_pass else [], fa.invest_notes, fa),
+                "invest": self._invest_block(flags, fa.invest_notes, fa),
                 "feasibility": {"is_feasible": fa.is_feasible, "feasibility_notes": fa.feasibility_notes},
                 "dependencies": {"blocked_by": list(fa.blocked_by), "blocks": list(fa.blocks)},
                 "risks": [r.model_dump() for r in fa.risks],
@@ -671,7 +757,7 @@ class AnalystAgent(BaseAgent):
         return "ready"
 
     @staticmethod
-    def _invest_flags(fa: _StoryAssessment) -> List[str]:
+    def _invest_flags(fa: Union[_StoryAssessment, _ChildStory]) -> List[str]:
         pairs = (
             ("independent", fa.independent), ("negotiable", fa.negotiable),
             ("valuable", fa.valuable), ("estimable", fa.estimable),
@@ -680,7 +766,8 @@ class AnalystAgent(BaseAgent):
         return [name for name, ok in pairs if not ok]
 
     @staticmethod
-    def _invest_block(flags: List[str], notes: str, fa: Optional[_StoryAssessment] = None) -> Dict[str, Any]:
+    def _invest_block(flags: List[str], notes: str,
+                      fa: Optional[Union[_StoryAssessment, _ChildStory]] = None) -> Dict[str, Any]:
         criteria = {
             "independent": fa.independent if fa else True,
             "negotiable": fa.negotiable if fa else True,

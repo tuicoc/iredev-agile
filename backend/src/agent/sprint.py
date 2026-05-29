@@ -73,6 +73,13 @@ from. Shaping it into clean stories is your work, and the backlog is
 judged on INVEST — each story independent, negotiable, valuable,
 estimable, small, and testable.
 
+A story card is a promise you understand the obligation well enough to
+write a test for it, so name a capability concrete enough to admit one — a
+state, an action with a result, or an output someone could confirm in the
+product — not just an assurance that something works. The detailed checks
+and dependencies are pinned down later; the card only has to be clear
+enough to make them writable.
+
 A long backlog earns its length from the range of distinct obligations
 in it, never from the same obligation restated. Quantity comes from
 coverage, not repetition.
@@ -113,9 +120,10 @@ its source ids, an add names what implied it, a drop carries its reason.
 The human reviews every change at the backlog gate.
 
 You guarantee: every story reads as one sprint-small, INVEST-clean
-obligation; the set covers every approved obligation that should ship,
-with reductions coming only from folding genuine duplicates, never from
-bundling distinct capabilities together.
+obligation phrased as a concrete capability you could write a test for;
+the set covers every approved obligation that should ship, with reductions
+coming only from folding genuine duplicates, never from bundling distinct
+capabilities together.
 """
 
 _PASS_WSJF = """\
@@ -214,7 +222,9 @@ class _StoryShape(BaseModel):
     ))
     title: str = Field(description="Short backlog-card title — a noun phrase naming the obligation.")
     description: str = Field(description=(
-        "The story sentence: 'As a <role>, I can <capability>, so that <benefit>.'"
+        "The story sentence: 'As a <role>, I can <capability>, so that <benefit>.' "
+        "<capability> is a concrete product behaviour you could write a test for "
+        "(something you can see, do, or inspect), not just an assurance it works."
     ))
     thought: str = Field(description="One line: why this shaping is right; name any inference made.")
 
@@ -532,6 +542,7 @@ class SprintAgent(BaseAgent):
         items: List[Dict[str, Any]] = []
         invest_warnings: List[str] = []
         seq = 1
+        ac_seq = 1  # global AC numbering, mirrors AnalystAgent Phase 2 (AC-NNN)
         for sid in ordered_ids:
             est = est_lookup.get(sid)
             score = wsjf_lookup.get(sid)
@@ -551,6 +562,21 @@ class SprintAgent(BaseAgent):
             pbi_id = f"PBI-{seq:03d}"
             seq += 1
             trace = est.get("requirement_trace") or {}
+            # Carry the acceptance criteria the Analyst already wrote in step 9c
+            # onto the PBI (same AC-NNN shape Phase 2 uses), so the backlog the PO
+            # reviews at step 10 — and any external INVEST judge — sees a complete,
+            # testable, estimable story instead of an AC-less one. Phase 2
+            # re-attaches/renumbers them idempotently for validated_product_backlog.
+            ac_list: List[Dict[str, Any]] = []
+            for ac in (est.get("acceptance_criteria") or []):
+                ac_list.append({
+                    "id": f"AC-{ac_seq:03d}",
+                    "given": ac.get("given", ""),
+                    "when": ac.get("when", ""),
+                    "then": ac.get("then", ""),
+                    "type": ac.get("type", "happy_path"),
+                })
+                ac_seq += 1
             items.append({
                 "id": pbi_id,
                 "source_story_id": sid,
@@ -573,7 +599,7 @@ class SprintAgent(BaseAgent):
                 "quality": {
                     "invest_pass": invest_pass,
                     "invest_flags": invest_flags,
-                    "acceptance_criteria": [],
+                    "acceptance_criteria": ac_list,
                 },
                 "analysis": {
                     "is_feasible": (est.get("feasibility") or {}).get("is_feasible", True),
@@ -618,6 +644,7 @@ class SprintAgent(BaseAgent):
             )
 
         total_points = sum(i["estimation"]["story_points"] for i in items)
+        total_ac = sum(len((i.get("quality") or {}).get("acceptance_criteria") or []) for i in items)
         ready_count = sum(1 for i in items if i["planning"]["status"] == "ready")
         human_count = sum(1 for i in items if i["planning"]["status"] == "needs_human_input")
         artifacts = dict(state.get("artifacts") or {})
@@ -631,6 +658,7 @@ class SprintAgent(BaseAgent):
             "status": "draft",
             "total_items": len(items),
             "total_story_points": total_points,
+            "total_ac": total_ac,
             "ready_count": ready_count,
             "needs_human_input_count": human_count,
             "items": items,
