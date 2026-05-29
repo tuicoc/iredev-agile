@@ -4,6 +4,8 @@ graph.py – LangGraph orchestration.
 Graph topology
 ──────────────
   supervisor
+    ├─► visionary_intake_turn → supervisor           (Sprint Zero step 0a — Pass 0 clarify+expand questions)
+    ├─► review_intake_questions_turn → supervisor    (Sprint Zero step 0b — HITL questionnaire, auto-skips when empty)
     ├─► visionary_turn → supervisor                  (Sprint Zero step 1)
     ├─► agenda_turn → supervisor                     (Sprint Zero step 3)
     ├─► interviewer_turn ◄──► enduser_turn           (Sprint Zero step 5)
@@ -107,6 +109,15 @@ ARTIFACT_SUMMARIES: Dict[str, str] = {
 
     # Opening text for the workflow when a no-artifact intro is needed.
     "workflow_started": VISIONARY_CONTRACT,
+
+    # Streamed inside review_intake_questions_turn interrupt (interaction=questionnaire),
+    # just before the inline AskUserQuestion-style card.
+    "vision_intake_questions": (
+        "## A Few Questions Before We Start\n\n"
+        "Visionary has a few questions to sharpen and widen your intent before it drafts "
+        "the product vision. Pick the options that fit, add your own, or skip any that "
+        "don't — your answers become part of the intent the vision is built from."
+    ),
 
     # Sent inside review_elicitation_agenda_turn interrupt — alongside the artifact.
     "elicitation_agenda": (
@@ -279,6 +290,18 @@ def _get_distiller(llm_cache_key: str):
 
 def supervisor_node_fn(state: WorkflowState) -> Dict[str, Any]:
     return supervisor_node(state)
+
+
+def visionary_intake_turn_fn(state: WorkflowState) -> Dict[str, Any]:
+    """Run VisionaryAgent Pass 0 — Sprint Zero step 0a (generate_intake_questions).
+
+    Produces artifacts["vision_intake_questions"] (0–4 clarify+expand questions) and
+    routes to supervisor, which fires review_intake_questions_turn (step 0b).
+    """
+    updates = _get_visionary(_llm_cache_key(state)).generate_intake_questions(state)
+    logger.debug("visionary_intake_turn updates: %s", list(updates.keys()))
+    _sync_artifacts_to_store(state, updates)
+    return updates
 
 
 def visionary_turn_fn(state: WorkflowState) -> Dict[str, Any]:
@@ -534,6 +557,67 @@ def analyst_turn_fn(state: WorkflowState) -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 # HITL review nodes
 # ─────────────────────────────────────────────────────────────────────────────
+
+def review_intake_questions_turn_fn(state: WorkflowState) -> Dict[str, Any]:
+    """HITL gate — human answers the Visionary's intake questions (step 0b).
+
+    Unlike the accept/reject review gates, this one collects ANSWERS. The
+    interrupt payload carries ``interaction="questionnaire"`` so ws_handler
+    renders an inline AskUserQuestion-style card instead of an artifact-panel
+    review.
+
+    Interrupt payload (consumed by ws_handler):
+    {
+        "review_type":   "vision_intake_questions",
+        "interaction":   "questionnaire",
+        "artifact_data": <vision_intake_questions dict: {questions, notes}>,
+        "ui_summary":    ARTIFACT_SUMMARIES["vision_intake_questions"],
+    }
+    Resume value: {"answers": [ {header, question, multi_select, selected:[...],
+                                 custom_text, skipped}, ... ]}.
+
+    When there are no questions, this writes empty answers WITHOUT interrupting
+    (auto-skip), so the flow proceeds straight to visionary_turn.
+    """
+    from ..agent.visionary import VisionaryAgent
+
+    artifacts = dict(state.get("artifacts") or {})
+    questions_artifact = artifacts.get("vision_intake_questions") or {}
+    questions = questions_artifact.get("questions") or []
+
+    if not questions:
+        logger.info("[ReviewIntakeQuestions] No questions — auto-skip (no interrupt).")
+        answers: list = []
+        summary = ""
+    else:
+        interrupt_value = {
+            "review_type":   "vision_intake_questions",
+            "interaction":   "questionnaire",
+            "artifact_data": questions_artifact,
+            "ui_summary":    ARTIFACT_SUMMARIES["vision_intake_questions"],
+        }
+        reviewer_response: Dict[str, Any] = interrupt(interrupt_value)
+        answers = reviewer_response.get("answers") or []
+        summary = VisionaryAgent.format_intake_summary(answers)
+        logger.info(
+            "[ReviewIntakeQuestions] %d question(s); intake summary %s.",
+            len(questions), "built" if summary else "empty",
+        )
+
+    artifacts["vision_intake_answers"] = {
+        "answers":     answers,
+        "summary":     summary,
+        "answered_at": datetime.now().isoformat(),
+        "status":      "answered",
+    }
+    _sync_artifacts_to_store(
+        state, {"artifacts": {"vision_intake_answers": artifacts["vision_intake_answers"]}}
+    )
+    return {
+        "artifacts":             artifacts,
+        "vision_intake_summary": summary,
+    }
+
 
 def review_product_vision_turn_fn(state: WorkflowState) -> Dict[str, Any]:
     """HITL gate — human reviews the product_vision artifact.
@@ -1546,6 +1630,8 @@ def build_graph(store=None, checkpointer=None):
     g = StateGraph(WorkflowState)
 
     g.add_node("supervisor",                             supervisor_node_fn)
+    g.add_node("visionary_intake_turn",                  visionary_intake_turn_fn)
+    g.add_node("review_intake_questions_turn",           review_intake_questions_turn_fn)
     g.add_node("visionary_turn",                         visionary_turn_fn)
     g.add_node("agenda_turn",                            agenda_turn_fn)
     g.add_node("distiller_turn",                         distiller_turn_fn)
@@ -1568,6 +1654,8 @@ def build_graph(store=None, checkpointer=None):
         "supervisor",
         supervisor_router,
         {
+            "visionary_intake_turn":                 "visionary_intake_turn",
+            "review_intake_questions_turn":          "review_intake_questions_turn",
             "visionary_turn":                        "visionary_turn",
             "agenda_turn":                           "agenda_turn",
             "distiller_turn":                        "distiller_turn",
@@ -1596,6 +1684,8 @@ def build_graph(store=None, checkpointer=None):
     )
 
     g.add_edge("enduser_turn",                           "interviewer_turn")
+    g.add_edge("visionary_intake_turn",                  "supervisor")
+    g.add_edge("review_intake_questions_turn",           "supervisor")
     g.add_edge("visionary_turn",                         "supervisor")
     g.add_edge("agenda_turn",                            "supervisor")
     g.add_edge("distiller_turn",                         "supervisor")

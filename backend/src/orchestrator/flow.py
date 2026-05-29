@@ -4,6 +4,8 @@ flow.py – Workflow phase and step definitions.
 Artifact chain
 ──────────────
 Phase 1 — Sprint Zero (sprint_zero_planning):
+  Step 0a – generate_intake_questions      → vision_intake_questions      (VisionaryAgent Pass 0)
+  Step 0b – answer_intake_questions        → vision_intake_answers        (HITL — clarify+expand intent; auto-skips when empty)
   Step 1  – extract_product_vision         → product_vision               (VisionaryAgent)
   Step 2  – review_product_vision          → reviewed_product_vision      (HITL)
   Step 3  – build_elicitation_agenda       → elicitation_agenda_artifact  (AgendaAgent focus pass)
@@ -111,11 +113,41 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
             "Product Backlog of user stories ready for Product Owner sign-off."
         ),
         steps=[
+            # 0a. Generate intake questions (Node: visionary_intake_turn)
+            ArtifactStep(
+                step_name="generate_intake_questions",
+                node_name="visionary_intake_turn",
+                requires_artifacts=[],
+                produces_artifact="vision_intake_questions",
+                agent_name="visionary",
+                description=(
+                    "VisionaryAgent.generate_intake_questions authors 0–4 questions that "
+                    "both clarify the project intent and expand it with candidate features / "
+                    "directions. Each question carries 2–4 options plus a free-text answer. "
+                    "An empty set means nothing the answer would change — the next gate "
+                    "auto-skips so the flow proceeds straight to the vision."
+                ),
+            ),
+            # 0b. Human answers the intake questions (Node: review_intake_questions_turn)
+            ArtifactStep(
+                step_name="answer_intake_questions",
+                node_name="review_intake_questions_turn",
+                requires_artifacts=["vision_intake_questions"],
+                produces_artifact="vision_intake_answers",
+                agent_name="human_reviewer",
+                description=(
+                    "Human answers the intake questions in an AskUserQuestion-style gate "
+                    "(select / multi-select / free-text / skip). Answers are folded into "
+                    "vision_intake_summary and read by the vision passes as stated input, so "
+                    "the vision is built on a richer, user-confirmed intent. When there are "
+                    "no questions, this step writes empty answers without interrupting."
+                ),
+            ),
             # 1. Extract the initial vision (Node: visionary_turn)
             ArtifactStep(
                 step_name="extract_product_vision",
                 node_name="visionary_turn",
-                requires_artifacts=[],
+                requires_artifacts=["vision_intake_answers"],
                 produces_artifact="product_vision",
                 agent_name="visionary",
                 description=(

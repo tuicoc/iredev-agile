@@ -25,6 +25,7 @@ export function useWebSocket({
   onArtifact,
   onArtifactAccepted,
   onWorkflowStatus,
+  onQuestionRequest,
   onConnected,
   onDisconnected,
 }) {
@@ -35,6 +36,7 @@ export function useWebSocket({
     onArtifact:         useRef(onArtifact),
     onArtifactAccepted: useRef(onArtifactAccepted),
     onWorkflowStatus:   useRef(onWorkflowStatus),
+    onQuestionRequest:  useRef(onQuestionRequest),
     onConnected:        useRef(onConnected),
     onDisconnected:     useRef(onDisconnected),
   }
@@ -43,6 +45,7 @@ export function useWebSocket({
   Object.entries({
     onToken, onDone, onError,
     onArtifact, onArtifactAccepted, onWorkflowStatus,
+    onQuestionRequest,
     onConnected, onDisconnected,
   }).forEach(([k, v]) => { refs[k].current = v })
 
@@ -54,6 +57,7 @@ export function useWebSocket({
       wsService.on('artifact',          (m) => refs.onArtifact.current?.(m)),
       wsService.on('artifact_accepted', (m) => refs.onArtifactAccepted.current?.(m)),
       wsService.on('workflow_status',   (m) => refs.onWorkflowStatus.current?.(m)),
+      wsService.on('question_request',  (m) => refs.onQuestionRequest.current?.(m)),
       wsService.on('connected',         (m) => refs.onConnected.current?.(m)),
       wsService.on('_connected',        (m) => refs.onConnected.current?.(m)),
       wsService.on('_disconnected',     (m) => refs.onDisconnected.current?.(m)),

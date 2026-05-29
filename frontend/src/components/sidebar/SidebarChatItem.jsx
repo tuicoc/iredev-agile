@@ -16,7 +16,7 @@ export function SidebarChatItem({ chat, isActive, onSelect, onDelete }) {
       onMouseLeave={() => setHovered(false)}
       className={`
         group flex items-center gap-2 px-2.5 py-[7px] rounded-lg
-        cursor-pointer text-[13px] transition-colors duration-100
+        cursor-pointer text-[14px] transition-colors duration-100
         ${isActive
           ? 'bg-[#E5D9C9] text-[#1A1A1A]'
           : 'text-[#3A3A3A] hover:bg-[#E7DDCF]'}
@@ -30,7 +30,7 @@ export function SidebarChatItem({ chat, isActive, onSelect, onDelete }) {
           onClick={e => { e.stopPropagation(); onDelete() }}
           className="p-0.5 rounded text-[#A0A0A0] hover:text-[#B86F50] transition-colors flex-shrink-0"
         >
-          <Trash2 size={12} />
+          <Trash2 size={13} />
         </button>
       )}
     </div>
