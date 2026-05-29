@@ -13,6 +13,7 @@
 //   { type: "chat_message", chatId, messageId, content }
 //   { type: "stop_stream",  chatId }
 //   { type: "retry_workflow", chatId }
+//   { type: "question_answers", chatId, messageId, answers }
 //
 // Server → Client frames:
 //   { type: "connected",  userId }
@@ -20,6 +21,7 @@
 //   { type: "token",      chatId, messageId, token }
 //   { type: "done",       chatId, messageId }
 //   { type: "artifact",   chatId, messageId, artifact }
+//   { type: "question_request", chatId, messageId, questions, notes }
 //   { type: "error",      chatId?, messageId?, error }
 // =============================================================================
 
@@ -133,6 +135,10 @@ export class WebSocketService {
 
   retryWorkflow(chatId) {
     this.send({ type: "retry_workflow", chatId });
+  }
+
+  sendQuestionAnswers(chatId, messageId, answers) {
+    this.send({ type: "question_answers", chatId, messageId, answers: answers ?? [] });
   }
 
   ping() {

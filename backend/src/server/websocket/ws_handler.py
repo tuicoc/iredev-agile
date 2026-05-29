@@ -87,6 +87,7 @@ _AGENT_NODE_NAMES = {
 }
 
 REVIEW_AGENT_NAMES = {
+    "vision_intake_questions": "Visionary Agent",
     "product_vision": "Visionary Agent",
     "elicitation_agenda": "Agenda Agent",
     "interview_record": "Interviewer Agent",
@@ -379,6 +380,23 @@ class WSHandler:
             log.info("[WS] workflow stopped during review summary chat=%s", chat_id)
             return
         add_message(chat_id, role="assistant", content=ui_summary, messID=text_mess_id)
+
+        # ── 1b. Questionnaire interaction → inline AskUserQuestion card ─────
+        # The Visionary intake gate collects ANSWERS, not an accept/reject. It
+        # is delivered as a dedicated frame the frontend renders above the chat
+        # composer; there is no artifact card and no awaitingFeedback bar.
+        if payloads.get("interaction") == "questionnaire":
+            q_mess_id = str(uuid.uuid4())
+            self._send(ws, lock, {
+                "type": "question_request",
+                "chatId": chat_id,
+                "messageId": q_mess_id,
+                "questions": (record_content or {}).get("questions") or [],
+                "notes": (record_content or {}).get("notes", ""),
+            })
+            # Leave _pending_interrupts set: the graph resumes when the user
+            # submits question_answers (or via retry_workflow re-emitting this).
+            return
 
         # ── 2. Emit artifact card ──────────────────────────────────────────
         artifact_mess_id = str(uuid.uuid4())
@@ -844,6 +862,9 @@ class WSHandler:
         elif ftype == "artifact_feedback":
             self._on_artifact_feedback(ws, lock, user_id, frame)
 
+        elif ftype == "question_answers":
+            self._on_question_answers(ws, lock, user_id, frame)
+
         else:
             log.debug("[WS] Unknown frame type='%s'", ftype)
 
@@ -878,6 +899,35 @@ class WSHandler:
                  action, chat_id, artifact_id)
 
         # Run in background thread — never block the receive loop
+        t = threading.Thread(
+            target=self.run_iredev_workflow,
+            args=(resume_cmd, user_id, chat_id),
+            daemon=True,
+        )
+        t.start()
+
+    def _on_question_answers(self, ws, lock, user_id: str, frame: dict):
+        """Resume the graph with the human's intake answers (questionnaire gate).
+
+        Mirrors _on_artifact_feedback: validates the frame, builds a
+        Command(resume={"answers": [...]}), and runs the workflow on a
+        background thread so the receive loop never blocks.
+        """
+        chat_id = frame.get("chatId", "").strip()
+        answers = frame.get("answers")
+
+        if not chat_id or not isinstance(answers, list):
+            self._send(ws, lock, {
+                "type": "error",
+                "error": "question_answers requires chatId and an answers list",
+            })
+            return
+
+        from langgraph.types import Command
+        resume_cmd = Command(resume={"answers": answers})
+
+        log.info("[WS] question_answers chat=%s answers=%d", chat_id, len(answers))
+
         t = threading.Thread(
             target=self.run_iredev_workflow,
             args=(resume_cmd, user_id, chat_id),

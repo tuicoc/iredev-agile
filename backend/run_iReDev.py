@@ -48,6 +48,12 @@ logging.getLogger("openai").setLevel(logging.WARNING)
 # Each entry: (state_key, file_prefix, is_sentinel)
 # Sentinel artifacts are optional (missing file -> {}), non-sentinel are required.
 # ---------------------------------------------------------------------------
+def _manifest_for_vision_intake_questions():
+    return []
+
+def _manifest_for_vision_intake_answers():
+    return [("vision_intake_questions", "vision_intake_questions", False)]
+
 def _manifest_for_product_vision():
     return []
 
@@ -204,6 +210,8 @@ def _manifest_for_validated_product_backlog_approved():
     ]
 
 DEBUG_MANIFESTS: Dict[str, callable] = {
+    "vision_intake_questions":           _manifest_for_vision_intake_questions,
+    "vision_intake_answers":             _manifest_for_vision_intake_answers,
     "product_vision":                    _manifest_for_product_vision,
     "reviewed_product_vision":           _manifest_for_reviewed_product_vision,
     "elicitation_agenda_artifact":       _manifest_for_elicitation_agenda_artifact,
@@ -356,7 +364,18 @@ def build_artifacts(
     artifact_dir: Path,
 ) -> Dict[str, Any]:
     manifest_fn = DEBUG_MANIFESTS[target]
-    manifest = manifest_fn()
+    manifest = list(manifest_fn())
+
+    # Pass 0 (intake) runs before the vision. Any debug-start at or past the
+    # vision must have the intake artifacts present (optional sentinels → {} when
+    # no file exists) so the supervisor does not route back into the intake gate.
+    # The two intake targets themselves are excluded — they ARE those steps.
+    if target not in ("vision_intake_questions", "vision_intake_answers"):
+        manifest = [
+            ("vision_intake_questions", "vision_intake_questions", True),
+            ("vision_intake_answers", "vision_intake_answers", True),
+        ] + manifest
+
     artifacts: Dict[str, Any] = {}
     missing_required: List[str] = []
 
@@ -511,7 +530,73 @@ def display_validated_product_backlog(artifact: dict) -> None:
 # ---------------------------------------------------------------------------
 # HITL interactive / auto-approve handler
 # ---------------------------------------------------------------------------
+def _collect_intake_answers(payload: Dict[str, Any], auto_approve: bool) -> Dict[str, Any]:
+    """CLI handler for the Vision intake questionnaire gate.
+
+    Resume shape is {"answers": [...]} (NOT {approved, feedback}). Under
+    --auto-approve (or when there are no questions) it skips with empty answers;
+    interactively it prints each question and reads option number(s), a free-text
+    answer, or a blank line to skip.
+    """
+    artifact = payload.get("artifact_data") or {}
+    questions = artifact.get("questions") or []
+    print(f"\n{'─'*70}")
+    print("  INTAKE QUESTIONS — clarify + expand the intent")
+    print(f"{'─'*70}")
+
+    if auto_approve or not questions:
+        reason = "no questions" if not questions else "auto-approve"
+        print(f"  [{reason}] Proceeding with no intake answers.")
+        return {"answers": []}
+
+    answers: List[Dict[str, Any]] = []
+    for idx, q in enumerate(questions, 1):
+        header  = q.get("header") or ""
+        text    = q.get("question") or ""
+        options = q.get("options") or []
+        multi   = bool(q.get("multi_select"))
+        print(f"\n  Q{idx} [{header}] {text}")
+        for oi, opt in enumerate(options, 1):
+            print(f"    {oi}. {opt.get('label','')}  — {opt.get('description','')}")
+        hint = "option number(s), comma-separated" if multi else "an option number"
+        print(f"    (enter {hint}, or type your own answer, or blank to skip)")
+        raw = input("  > ").strip()
+
+        if not raw:
+            answers.append({
+                "header": header, "question": text, "multi_select": multi,
+                "selected": [], "custom_text": "", "skipped": True,
+            })
+            continue
+
+        tokens = [t.strip() for t in raw.split(",")] if multi else [raw]
+        selected: List[str] = []
+        custom = ""
+        if tokens and all(t.isdigit() for t in tokens):
+            for t in tokens:
+                i = int(t)
+                if 1 <= i <= len(options):
+                    selected.append(options[i - 1].get("label", ""))
+        else:
+            custom = raw
+        answers.append({
+            "header": header, "question": text, "multi_select": multi,
+            "selected": selected, "custom_text": custom, "skipped": False,
+        })
+    return {"answers": answers}
+
+
 def collect_review_decision(updates: tuple, auto_approve: bool) -> Dict[str, Any]:
+    # The Vision intake gate resumes with {"answers": [...]}, not the
+    # {approved, feedback} shape every other gate uses — handle it first.
+    for interrupt_obj in updates:
+        payload = interrupt_obj.value if hasattr(interrupt_obj, "value") else interrupt_obj
+        if isinstance(payload, dict) and (
+            payload.get("interaction") == "questionnaire"
+            or payload.get("review_type") == "vision_intake_questions"
+        ):
+            return _collect_intake_answers(payload, auto_approve)
+
     conflict_payload: Optional[Dict[str, Any]] = None
     for interrupt_obj in updates:
         payload = interrupt_obj.value if hasattr(interrupt_obj, "value") else interrupt_obj

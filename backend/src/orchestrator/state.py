@@ -6,6 +6,8 @@ WorkflowState — single source of truth flowing through the LangGraph graph.
 Artifact chain (v10 — Lean Assumption-Centered Elicitation)
 ────────────────────────────────────────
 Phase 1 (sprint_zero_planning):
+  vision_intake_questions        ← produced by VisionaryAgent Pass 0 (0–4 clarify+expand questions)
+  vision_intake_answers          ← HITL answers (folded into vision_intake_summary; auto-skips when no questions)
   product_vision                 ← produced by VisionaryAgent (intent/outcome + roles + known_signals + curated assumptions + concerns + scope)
   reviewed_product_vision        ← HITL approval
   elicitation_agenda_artifact    ← produced by AgendaAgent (assumption-centered items: perspective + scene + decision_target + seed_question + coverage_points), approved by HITL
@@ -101,6 +103,15 @@ class WorkflowState(TypedDict, total=False):
     #               concerns, scope edges the project intent did not name)
     # Default is "fidelity"; chosen at session start (CLI / UI).
     vision_mode: Literal["fidelity", "coverage"]
+
+    # ── Vision intake (Pass 0) ─────────────────────────────────────────────
+    # Folded, human-readable block of the user's answers to the Visionary's
+    # intake questions (clarify + expand). Written by the intake gate
+    # (review_intake_questions_turn) and read by every VisionaryAgent pass as
+    # stated input, so the downstream vision is built on a richer,
+    # user-confirmed intent. The raw questions/answers live in artifacts
+    # (vision_intake_questions / vision_intake_answers).
+    vision_intake_summary: str
 
     # Per-chat runtime model overrides. Same shape as agent_config.yaml's
     # profiled llm block, normally {"default": {...}, "interview": {...}}.

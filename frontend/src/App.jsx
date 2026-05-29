@@ -25,6 +25,7 @@ import { HomeScreen }          from "./components/chat/HomeScreen";
 import { ProjectHomeScreen }   from "./components/chat/ProjectHomeScreen";
 import { MessageBubble }       from "./components/chat/MessageBubble";
 import { ChatInput }           from "./components/chat/ChatInput";
+import { IntakeQuestions }     from "./components/chat/IntakeQuestions";
 import { ArtifactPanel }       from "./components/artifact/ArtifactPanel";
 import { BASE_PROJECT_NAME }  from "./services/chatService";
 import { LoadingSpinner }      from "./components/ui/LoadingSpinner";
@@ -111,6 +112,8 @@ function ChatLayout() {
     cancelStream,
     sendArtifactFeedback,
     placeHolderMessage,
+    pendingQuestions,
+    submitQuestionAnswers,
   } = useChat();
 
   // Active project — set when user clicks a project folder name in sidebar.
@@ -232,6 +235,12 @@ function ChatLayout() {
                   </div>
                 )}
               </div>
+              {pendingQuestions && (
+                <IntakeQuestions
+                  questions={pendingQuestions.questions}
+                  onSubmit={submitQuestionAnswers}
+                />
+              )}
               <ChatInput
                 onSend={sendMessage}
                 disabled={streaming || (subChat === 0 && requirementProcessStarted)}

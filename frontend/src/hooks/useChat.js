@@ -71,6 +71,21 @@ const caraPromptMessage = () => ({
   isSystemPrompt: true,
 });
 
+// Compact, human-readable record of the user's intake answers — appended to the
+// thread after the questionnaire is submitted so the conversation keeps context.
+function formatAnswerSummary(answers) {
+  const lines = (answers || [])
+    .filter((a) => a && !a.skipped)
+    .map((a) => {
+      const parts = [...(a.selected || [])];
+      if (a.custom_text) parts.push(a.custom_text);
+      if (!parts.length) return null;
+      return `- **${a.header || a.question || ""}** — ${parts.join("; ")}`;
+    })
+    .filter(Boolean);
+  return lines.length ? `**Your answers**\n\n${lines.join("\n")}` : "";
+}
+
 const CORRUPTED_RUN_MESSAGE =
   "Generation was interrupted because you left this chat. The active run was stopped to prevent background execution.";
 
@@ -179,6 +194,7 @@ export function useChat() {
   const [wsConnected,     setWsConnected]     = useState(false);
   const [workflowRunning, setWorkflowRunning] = useState(false);
   const [workflowStatus,  setWorkflowStatus]  = useState(null);
+  const [pendingQuestions, setPendingQuestions] = useState(null);
   const [activeProcessConfig, setActiveProcessConfig] = useState(() =>
     normalizeProcessConfig(),
   );
@@ -239,6 +255,8 @@ export function useChat() {
   }, [messages]);
 
   const placeHolderMessage = useMemo(() => {
+    // The inline intake card is its own "waiting on you" cue — no spinner.
+    if (pendingQuestions) return null;
     if (workflowStatus?.running && workflowStatus.message) {
       return workflowStatus.message;
     }
@@ -247,7 +265,7 @@ export function useChat() {
       return rawPlaceHolderMessage;
     }
     return workflowRunning || streaming ? rawPlaceHolderMessage : null;
-  }, [rawPlaceHolderMessage, streaming, workflowRunning, workflowStatus]);
+  }, [rawPlaceHolderMessage, streaming, workflowRunning, workflowStatus, pendingQuestions]);
 
   // ── Reset when user logs out ───────────────────────────────────────────────
   useEffect(() => {
@@ -435,6 +453,14 @@ export function useChat() {
     );
   }, []);
 
+  const handleQuestionRequest = useCallback(({ chatId, messageId, questions, notes }) => {
+    if (chatId !== activeChatIdRef.current) return;
+    setStreaming(false);
+    setWorkflowRunning(false);
+    setWorkflowStatus(null);
+    setPendingQuestions({ messageId, questions: questions || [], notes: notes || "" });
+  }, []);
+
   useWebSocket({
     onToken:            handleToken,
     onDone:             handleDone,
@@ -442,6 +468,7 @@ export function useChat() {
     onArtifact:         handleArtifact,
     onArtifactAccepted: handleArtifactAccepted,
     onWorkflowStatus:   handleWorkflowStatus,
+    onQuestionRequest:  handleQuestionRequest,
     onConnected:        () => setWsConnected(true),
     onDisconnected:     () => setWsConnected(false),
   });
@@ -845,6 +872,35 @@ export function useChat() {
   const openArtifactRef = useRef(null);
   useEffect(() => { openArtifactRef.current = openArtifact; }, [openArtifact]);
 
+  const pendingQuestionsRef = useRef(null);
+  useEffect(() => { pendingQuestionsRef.current = pendingQuestions; }, [pendingQuestions]);
+
+  const submitQuestionAnswers = useCallback((answers) => {
+    const chatId = activeChatIdRef.current;
+    if (!chatId) return;
+    const pq = pendingQuestionsRef.current;
+    if (!AGENT_MOCK_MODE) {
+      wsService.sendQuestionAnswers(chatId, pq?.messageId || "", answers || []);
+    }
+    setPendingQuestions(null);
+    setWorkflowRunning(!AGENT_MOCK_MODE);
+    setWorkflowStatus(null);
+
+    const summary = formatAnswerSummary(answers);
+    if (summary) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `intake_${uid()}`,
+          role: "assistant",
+          agentName: "Visionary Agent",
+          content: summary,
+          streaming: false,
+        },
+      ]);
+    }
+  }, []);
+
   const sendArtifactFeedback = useCallback((action, comment = "") => {
     const art    = openArtifactRef.current;
     if (!art) return;
@@ -903,5 +959,7 @@ export function useChat() {
     cancelStream,
     sendArtifactFeedback,
     handleStartProcess,
+    pendingQuestions,
+    submitQuestionAnswers,
   };
 }

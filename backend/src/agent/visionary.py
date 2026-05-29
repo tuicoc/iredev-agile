@@ -5,8 +5,23 @@ VisionaryAgent reads a project intent and produces a lean Product Vision.
 Downstream agents (Agenda, Interviewer, EndUser, Distiller) consume the
 roles, assumptions, concerns, and scope.
 
-Execution: three sequential extract_structured passes governed by
-``vision_mode`` in WorkflowState.
+Execution: an optional intake pass (Pass 0) followed by three
+sequential extract_structured passes governed by ``vision_mode`` in
+WorkflowState.
+
+- Pass 0 — INTAKE QUESTIONS (separate entry point,
+  ``generate_intake_questions``): authors 0–4 questions that both
+  CLARIFY the intent (resolve a genuine fork already in it) and EXPAND
+  it (offer candidate features, capabilities, audiences, or directions
+  the intent did not name but that plausibly enrich it). Each question
+  carries 2–4 agent-written options plus an always-available free-text
+  answer; the human picks, combines, or declines. The chosen answers are
+  folded into ``vision_intake_summary`` and read by every pass below as
+  STATED input, so the downstream vision is built on a richer,
+  user-confirmed intent rather than on guesses — and the later passes
+  run more expansively because the intent they start from is wider. An
+  empty question set means nothing the answer would change; the gate
+  auto-skips.
 
 - Pass 1 — STATED + IMPLIED READ (always runs): input → description,
   intent_summary, target_outcome, known_signals, roles, notes. Roles
@@ -112,6 +127,27 @@ class ProductVision(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Pass 0 intake schema (clarify + expand the intent before the vision is built)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class IntakeOption(BaseModel):
+    label: str = Field(description="The visible answer — concise, a few words. A recognisable direction: a live reading of an open fork (clarify) or a concrete candidate feature / direction to adopt (expand).")
+    description: str = Field(description="One line on what adopting this answer would commit the vision toward — the decision it settles or the capability it adds. Not a paraphrase of the label.")
+
+
+class IntakeQuestion(BaseModel):
+    header: str = Field(description="Short chip label (a few words) naming the open decision or the direction this question explores.")
+    question: str = Field(description="One question that either clarifies a genuine fork in the intent or offers an expansion the writer can adopt. Plain language, answerable by the person who wrote the intent.")
+    multi_select: bool = Field(description="true when the options can be adopted together (common for expansion, where the writer may want several); false when the answer is a single one-of choice.")
+    options: List[IntakeOption] = Field(default_factory=list, description="2–4 distinct, mutually distinguishable directions. Not exhaustive — the writer can always answer freely or decline.")
+
+
+class IntakeQuestionSet(BaseModel):
+    notes: str = Field(description="Reviewer-facing: which forks were clarified, which expansions were offered and why, and what was dropped as idle, settled, out-of-vision, or speculative.")
+    questions: List[IntakeQuestion] = Field(default_factory=list, description="0–4 questions. Empty is correct when nothing you could ask or offer would change or enrich the vision.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Per-pass shapes
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -137,6 +173,91 @@ class InferredPass(BaseModel):
     assumptions: List[Assumption] = Field(default_factory=list, description="NEW assumptions tagged lens=inferred only. Do not re-emit Pass 2 assumptions.")
     concerns: List[Concern] = Field(default_factory=list, description="NEW concerns tagged lens=inferred only. Do not re-emit Pass 2 concerns.")
     scope: List[Boundary] = Field(default_factory=list, description="NEW boundaries tagged lens=inferred only. Do not re-emit Pass 2 boundaries.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pass 0 prompt — CLARIFY + EXPAND THE INTENT
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Format guards (deterministic, applied in Python — not prompt teaching).
+# The interface shows a short questionnaire with a handful of options each;
+# these caps keep the artifact inside what the UI renders, they do NOT shape
+# how many questions the agent should reason its way to.
+_MAX_INTAKE_QUESTIONS = 4
+_MAX_INTAKE_OPTIONS = 4
+
+_INTAKE_BODY = """\
+PASS 0 OF 4 — CLARIFY AND EXPAND THE INTENT
+
+Before the vision is built, you may put a short questionnaire to the
+person who wrote the intent. Its purpose is to make the intent RICHER
+before the later passes read it — in two ways:
+
+  • CLARIFY — resolve a genuine fork the intent leaves open, where the
+    answer would change the vision: which role is central, which
+    direction a strategic choice takes, where a boundary sits, what the
+    target outcome really is.
+
+  • EXPAND — offer candidate features, capabilities, audiences, or
+    directions the intent did not name but that plausibly belong to a
+    product of this shape, so the writer can adopt the ones they want.
+    This is the higher-value half: a sparse intent is an invitation to
+    propose, not a contract to stay inside. Reason outward to what this
+    product could become, then let the writer choose.
+
+Every answer the writer gives becomes STATED input the later passes read
+directly. So a question well spent either turns an inference into a fact
+(clarify) or hands the writer a wider intent to build on (expand). The
+later passes still do their own reading and inference; your job here is
+to widen and sharpen what they start from — the richer the intent leaves
+this pass, the more expansively they can work.
+
+
+THE PRODUCT DOES NOT EXIST YET. Clarify and expand the INTENT — the
+decisions and directions the first release could take. Do not ask the
+writer to predict how finished users will react, and do not ask about
+implementation the vision does not own (architecture, vendor, stack,
+estimate, deadline).
+
+
+WHAT EARNS A QUESTION. A CLARIFY question earns its place when a real
+fork is open AND the answer would move a vision decision — a fork has a
+losing alternative you can name. If every answer leads to the same
+vision, or the intent already settles the matter, drop it. An EXPAND
+question earns its place when you can name a concrete, plausible
+direction the product could take that the writer has not committed to: a
+feature, a capability, an adjacent audience, a scope the intent could
+grow into. A direction a product of this shape would genuinely face
+earns a place; speculative padding no one would build does not.
+
+
+WRITING OPTIONS. Each option is one distinct, recognisable direction —
+for a clarify question, the live readings of the fork; for an expand
+question, concrete candidate features or directions the writer can opt
+into. The `description` says what adopting that option would commit the
+vision toward, not a paraphrase of the label. Options on one question
+must be mutually distinguishable — if two collapse to the same vision,
+merge them. You are never building an exhaustive menu: the writer can
+always answer in their own words or decline, so offer the strong
+candidates and stop. Set `multi_select` true when the options can be
+adopted together (the common case for EXPAND, where the writer may want
+several); false when the answer is a single one-of choice.
+
+
+HOW MANY. As many as genuinely enrich the intent and no more. Fewer is
+honest — a sharp, already-rich intent may earn one or none; a sparse one
+usually earns more, weighted toward expansion. Do not pad to a number,
+and do not invent uncertainty the intent does not carry. Returning zero
+questions is correct only when nothing you could ask or offer would
+change or enrich the vision.
+
+
+WRITING notes. One reviewer-facing paragraph: which forks you chose to
+clarify and the vision decision each moves; which directions you chose to
+offer for expansion and why each plausibly belongs to this product's
+shape; anything you considered and dropped as idle, already-settled,
+out-of-vision, or speculative padding.
+"""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -573,8 +694,11 @@ class VisionaryAgent(BaseAgent):
         signal: str,
         feedback: Optional[str],
         prev_summary: Optional[str] = None,
+        intake: Optional[str] = None,
     ) -> str:
         text = f"Project intent:\n{signal}"
+        if intake:
+            text += f"\n\n{intake}"
         if feedback:
             if prev_summary:
                 text += (
@@ -636,11 +760,12 @@ class VisionaryAgent(BaseAgent):
         signal: str,
         feedback: Optional[str],
         prev_summary: Optional[str],
+        intake: Optional[str] = None,
     ) -> ReadingPass:
         return self.extract_structured(
             schema=ReadingPass,
             system_prompt=self._system(_READ_BODY, feedback_mode=bool(feedback)),
-            user_prompt=self._user_prompt(signal, feedback, prev_summary),
+            user_prompt=self._user_prompt(signal, feedback, prev_summary, intake),
             include_memory=False,
         )
 
@@ -650,6 +775,7 @@ class VisionaryAgent(BaseAgent):
         reading: ReadingPass,
         feedback: Optional[str],
         prev_summary: Optional[str],
+        intake: Optional[str] = None,
     ) -> ForksPass:
         body = _FORKS_BODY.format(
             reading=json.dumps(reading.model_dump(), indent=2, ensure_ascii=False),
@@ -657,7 +783,7 @@ class VisionaryAgent(BaseAgent):
         return self.extract_structured(
             schema=ForksPass,
             system_prompt=self._system(body, feedback_mode=bool(feedback)),
-            user_prompt=self._user_prompt(signal, feedback, prev_summary),
+            user_prompt=self._user_prompt(signal, feedback, prev_summary, intake),
             include_memory=False,
         )
 
@@ -668,6 +794,7 @@ class VisionaryAgent(BaseAgent):
         forks: ForksPass,
         feedback: Optional[str],
         prev_summary: Optional[str],
+        intake: Optional[str] = None,
     ) -> InferredPass:
         body = _INFERRED_BODY.format(
             reading=json.dumps(reading.model_dump(), indent=2, ensure_ascii=False),
@@ -676,7 +803,7 @@ class VisionaryAgent(BaseAgent):
         return self.extract_structured(
             schema=InferredPass,
             system_prompt=self._system(body, feedback_mode=bool(feedback)),
-            user_prompt=self._user_prompt(signal, feedback, prev_summary),
+            user_prompt=self._user_prompt(signal, feedback, prev_summary, intake),
             include_memory=False,
         )
 
@@ -798,6 +925,97 @@ class VisionaryAgent(BaseAgent):
         for i, b in enumerate(vision.scope, 1):
             b.id = f"OOS-{i:02d}"
 
+    # ── Intake (Pass 0) — clarify + expand the intent ───────────────────────
+
+    def generate_intake_questions(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Author 0–4 clarify/expand questions for the human (Pass 0).
+
+        Produces artifacts["vision_intake_questions"]. The graph's intake
+        gate presents them in an AskUserQuestion-style UI; the answers are
+        folded into vision_intake_summary and read by Pass 1/2/3 as stated
+        input. An empty question set makes the gate auto-skip.
+        """
+        signal = (state.get("project_description") or "").strip()
+        if not signal:
+            logger.warning("[VisionaryAgent] project_description missing; no intake questions.")
+            qset = IntakeQuestionSet(notes="No project intent provided.", questions=[])
+        else:
+            try:
+                qset = self.extract_structured(
+                    schema=IntakeQuestionSet,
+                    system_prompt=self._system(_INTAKE_BODY),
+                    user_prompt=self._user_prompt(signal, None),
+                    include_memory=False,
+                )
+            except Exception as exc:
+                logger.error("[VisionaryAgent] Intake generation failed: %s", exc, exc_info=True)
+                qset = IntakeQuestionSet(notes=f"Intake generation failed: {exc}", questions=[])
+
+        questions = self._sanitise_intake_questions(qset.questions)
+
+        artifacts = dict(state.get("artifacts") or {})
+        artifacts["vision_intake_questions"] = {
+            "questions": [q.model_dump() for q in questions],
+            "notes": qset.notes,
+            "created_at": datetime.now().isoformat(),
+            "status": "pending_answer",
+        }
+        logger.info(
+            "[VisionaryAgent] Intake questions ready — %d question(s)%s.",
+            len(questions),
+            " (auto-skip: none earned a place)" if not questions else "",
+        )
+        return {"artifacts": artifacts}
+
+    @staticmethod
+    def _sanitise_intake_questions(
+        questions: List["IntakeQuestion"],
+    ) -> List["IntakeQuestion"]:
+        """Format guard (deterministic, not prompt teaching): keep at most
+        _MAX_INTAKE_QUESTIONS questions, each with 2–_MAX_INTAKE_OPTIONS
+        non-empty options. A question with fewer than two real options is
+        not answerable as a choice, so it is dropped."""
+        kept: List[IntakeQuestion] = []
+        for q in questions or []:
+            opts = [o for o in (q.options or []) if (o.label or "").strip()]
+            if len(opts) < 2:
+                logger.warning(
+                    "[VisionaryAgent] Dropping intake question with <2 options: %r",
+                    getattr(q, "question", "?"),
+                )
+                continue
+            q.options = opts[:_MAX_INTAKE_OPTIONS]
+            kept.append(q)
+            if len(kept) >= _MAX_INTAKE_QUESTIONS:
+                break
+        return kept
+
+    @staticmethod
+    def format_intake_summary(answers: List[Dict[str, Any]]) -> str:
+        """Fold the human's intake answers into a stated-input block for the
+        passes. Each answer dict: {header, question, selected:[labels],
+        custom_text, skipped}. Returns "" when nothing was actually answered."""
+        lines: List[str] = []
+        for a in answers or []:
+            if not isinstance(a, dict) or a.get("skipped"):
+                continue
+            question = (a.get("question") or a.get("header") or "").strip()
+            selected = [str(s).strip() for s in (a.get("selected") or []) if str(s).strip()]
+            custom = (a.get("custom_text") or "").strip()
+            parts = selected + ([custom] if custom else [])
+            if not question or not parts:
+                continue
+            header = (a.get("header") or "").strip()
+            label = f"{header} — {question}" if header else question
+            lines.append(f"- {label}\n  → {'; '.join(parts)}")
+        if not lines:
+            return ""
+        return (
+            "USER CLARIFICATIONS (the person who wrote the intent answered these "
+            "directly — treat as confirmed, stated input, not inference):\n"
+            + "\n".join(lines)
+        )
+
     # ── Entry point ────────────────────────────────────────────────────────
 
     def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -808,6 +1026,10 @@ class VisionaryAgent(BaseAgent):
 
         feedback = (state.get("product_vision_feedback") or "").strip() or None
         mode = self._resolve_mode(state)
+        # Pass 0 answers (clarify + expand), folded into a stated-input block by
+        # the intake gate. Read by every pass so the vision is built on the
+        # richer, user-confirmed intent rather than on guesses.
+        intake = (state.get("vision_intake_summary") or "").strip() or None
 
         # Pull the generation_summary from the previous run (survives rejection
         # because state["product_vision"] is not cleared — only
@@ -823,15 +1045,15 @@ class VisionaryAgent(BaseAgent):
         )
 
         try:
-            reading = self._pass1(signal, feedback, prev_summary)
+            reading = self._pass1(signal, feedback, prev_summary, intake)
             self._enforce_lens_pass1(reading)
 
-            forks = self._pass2(signal, reading, feedback, prev_summary)
+            forks = self._pass2(signal, reading, feedback, prev_summary, intake)
             self._enforce_lens_pass2(forks)
 
             inferred: Optional[InferredPass] = None
             if mode == "coverage":
-                inferred = self._pass3(signal, reading, forks, feedback, prev_summary)
+                inferred = self._pass3(signal, reading, forks, feedback, prev_summary, intake)
                 self._enforce_lens_pass3(inferred)
 
             vision = self._assemble(reading, forks, inferred, mode)

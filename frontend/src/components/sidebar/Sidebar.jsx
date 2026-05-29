@@ -42,8 +42,8 @@ function ChatRow({ chat, isActive, onSelect, onDelete }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{ backgroundColor: isActive ? S.active : hovered ? S.hover : "transparent" }}
-      className="flex items-center gap-2 pl-8 pr-2 py-[6px] rounded-lg
-                 cursor-pointer text-[12px] transition-colors duration-100"
+      className="flex items-center gap-2 pl-8 pr-2 py-[7px] rounded-lg
+                 cursor-pointer text-[14px] transition-colors duration-100"
     >
       <span className="flex-1 truncate leading-snug" style={{ color: isActive ? S.text : S.muted }}>
         {chat.title}
@@ -56,7 +56,7 @@ function ChatRow({ chat, isActive, onSelect, onDelete }) {
           onMouseEnter={e => e.currentTarget.style.color = "#E53E3E"}
           onMouseLeave={e => e.currentTarget.style.color = S.muted}
         >
-          <Trash2 size={11} />
+          <Trash2 size={13} />
         </button>
       )}
     </div>
@@ -77,7 +77,7 @@ function RenameInput({ value, onSave, onCancel }) {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={handleKey}
-        className="flex-1 min-w-0 rounded px-1.5 py-0.5 text-[12px] focus:outline-none"
+        className="flex-1 min-w-0 rounded px-1.5 py-0.5 text-[14px] focus:outline-none"
         style={{
           background: S.inputBg,
           border: `1px solid ${S.brand}60`,
@@ -85,10 +85,10 @@ function RenameInput({ value, onSave, onCancel }) {
         }}
       />
       <button onClick={() => text.trim() && onSave(text.trim())} style={{ color: S.brand }} className="flex-shrink-0">
-        <Check size={12} />
+        <Check size={14} />
       </button>
       <button onClick={onCancel} style={{ color: S.muted }} className="flex-shrink-0">
-        <X size={12} />
+        <X size={14} />
       </button>
     </div>
   );
@@ -111,7 +111,8 @@ function BaseChatList({ baseProject, activeChatId, onSelectChat }) {
   if (!baseProject || chats.length === 0) return null;
 
   return (
-    <div className="mb-1">
+    <div className="mt-2">
+      <div className="h-px mx-1 my-2" style={{ background: S.border }} />
       {chats.map((chat) => (
         <ChatRow
           key={chat.id}
@@ -121,7 +122,6 @@ function BaseChatList({ baseProject, activeChatId, onSelectChat }) {
           onDelete={handleDelete}
         />
       ))}
-      <div className="h-px mx-1 my-2" style={{ background: S.border }} />
     </div>
   );
 }
@@ -166,7 +166,7 @@ function ProjectFolder({
     <>
       <div
         className="group flex items-center gap-1.5 px-2 py-[7px] rounded-lg
-                   cursor-pointer text-[13px] transition-colors duration-100 select-none"
+                   cursor-pointer text-[15px] transition-colors duration-100 select-none"
         style={{ backgroundColor: rowBg, color: S.text }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -178,7 +178,7 @@ function ProjectFolder({
           style={{ color: S.muted }}
         >
           <ChevronRight
-            size={12}
+            size={14}
             className={`transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
           />
         </button>
@@ -186,8 +186,8 @@ function ProjectFolder({
         {/* Folder icon */}
         <div className="flex-shrink-0 flex items-center justify-center w-5 h-5">
           {isExpanded || isActive
-            ? <FolderOpen size={15} style={{ color: S.text }} />
-            : <Folder     size={15} style={{ color: hovered ? S.text : S.icon }} />
+            ? <FolderOpen size={17} style={{ color: S.text }} />
+            : <Folder     size={17} style={{ color: hovered ? S.text : S.icon }} />
           }
         </div>
 
@@ -215,7 +215,7 @@ function ProjectFolder({
               className="p-1 rounded transition-colors"
               style={{ color: S.muted }}
             >
-              <MoreHorizontal size={13} />
+              <MoreHorizontal size={15} />
             </button>
             {showMenu && (
               <>
@@ -226,18 +226,18 @@ function ProjectFolder({
                 >
                   <button
                     onClick={(e) => { e.stopPropagation(); setRenaming(true); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] transition-colors hover:bg-[#F3F3F3]"
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[14px] transition-colors hover:bg-[#F3F3F3]"
                     style={{ color: S.text }}
                   >
-                    <Pencil size={11} style={{ color: S.muted }} /> Rename
+                    <Pencil size={13} style={{ color: S.muted }} /> Rename
                   </button>
                   <div className="h-px my-1" style={{ background: S.border }} />
                   <button
                     onClick={(e) => { e.stopPropagation(); onDelete(project.id); setShowMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px]
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[14px]
                                text-red-500 hover:bg-red-50 transition-colors"
                   >
-                    <Trash2 size={11} /> Delete
+                    <Trash2 size={13} /> Delete
                   </button>
                 </div>
               </>
@@ -251,10 +251,10 @@ function ProjectFolder({
           {loadingChats ? (
             <div className="flex items-center gap-2 pl-8 py-1.5">
               <LoadingSpinner size={10} style={{ color: S.brand }} />
-              <span className="text-[11px]" style={{ color: S.muted }}>Loading…</span>
+              <span className="text-[13px]" style={{ color: S.muted }}>Loading…</span>
             </div>
           ) : chats.length === 0 ? (
-            <div className="pl-8 py-1.5 text-[11px] italic" style={{ color: S.muted }}>No processes yet</div>
+            <div className="pl-8 py-1.5 text-[13px] italic" style={{ color: S.muted }}>No processes yet</div>
           ) : (
             chats.map((chat) => (
               <ChatRow
@@ -281,14 +281,14 @@ function NewProjectForm({ onSave, onCancel }) {
   }
   return (
     <div className="flex items-center gap-1.5 px-2 py-1.5 mb-1">
-      <Folder size={13} style={{ color: S.icon }} className="flex-shrink-0" />
+      <Folder size={16} style={{ color: S.icon }} className="flex-shrink-0" />
       <input
         autoFocus
         placeholder="Project name…"
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={handleKey}
-        className="flex-1 rounded-lg px-2 py-1 text-[12px] focus:outline-none"
+        className="flex-1 rounded-lg px-2 py-1 text-[14px] focus:outline-none"
         style={{
           background: S.inputBg,
           border: `1px solid ${S.brand}50`,
@@ -301,10 +301,10 @@ function NewProjectForm({ onSave, onCancel }) {
         className="flex-shrink-0 disabled:opacity-30"
         style={{ color: S.brand }}
       >
-        <Check size={13} />
+        <Check size={15} />
       </button>
       <button onClick={onCancel} className="flex-shrink-0" style={{ color: S.muted }}>
-        <X size={13} />
+        <X size={15} />
       </button>
     </div>
   );
@@ -418,9 +418,9 @@ export function Sidebar({ activeChatId, activeProjectId, onNewChat, onOpenProjec
               className="w-[26px] h-[26px] rounded-full flex items-center justify-center flex-shrink-0"
               style={{ background: "linear-gradient(135deg, #E07840 0%, #C04898 100%)" }}
             >
-              <span className="text-white text-[10px] font-semibold">C</span>
+              <span className="text-white text-[12px] font-semibold">C</span>
             </div>
-            <span className="text-[13px] font-semibold" style={{ color: S.text }}>CARA</span>
+            <span className="text-[16px] font-semibold" style={{ color: S.text }}>CARA</span>
           </div>
           <Tooltip text="Close sidebar">
             <button
@@ -430,7 +430,7 @@ export function Sidebar({ activeChatId, activeProjectId, onNewChat, onOpenProjec
               onMouseEnter={e => e.currentTarget.style.backgroundColor = S.hover}
               onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
             >
-              <PanelLeftClose size={15} />
+              <PanelLeftClose size={17} />
             </button>
           </Tooltip>
         </div>
@@ -439,13 +439,13 @@ export function Sidebar({ activeChatId, activeProjectId, onNewChat, onOpenProjec
         <div className="px-2 pb-2">
           <button
             className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg
-                       text-[13px] transition-colors"
+                       text-[15px] transition-colors"
             style={{ color: S.text }}
             onMouseEnter={e => e.currentTarget.style.backgroundColor = S.hover}
             onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
             onClick={onNewChat}
           >
-            <Plus size={14} style={{ color: S.icon }} />
+            <Plus size={17} style={{ color: S.icon }} />
             New chat
           </button>
         </div>
@@ -453,13 +453,13 @@ export function Sidebar({ activeChatId, activeProjectId, onNewChat, onOpenProjec
         {/* Search */}
         <div className="px-2 pb-2">
           <div className="relative">
-            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: S.muted }} />
+            <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: S.muted }} />
             <input
               type="text"
               placeholder="Search projects…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full pl-7 pr-3 py-1.5 rounded-lg text-[12px] focus:outline-none transition-all"
+              className="w-full pl-8 pr-3 py-1.5 rounded-lg text-[14px] focus:outline-none transition-all"
               style={{
                 background: "#FAFAFA",
                 border: `1px solid ${S.inputBorder}`,
@@ -473,26 +473,19 @@ export function Sidebar({ activeChatId, activeProjectId, onNewChat, onOpenProjec
         <div className="flex-1 overflow-y-auto px-2 pb-2">
           {/* Projects section header */}
           <div className="flex items-center justify-between px-1 mb-1">
-            <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: S.muted }}>Projects</span>
+            <span className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: S.muted }}>Projects</span>
             <Tooltip text="New project">
               <button
                 onClick={() => setCreatingProject(true)}
-                className="w-5 h-5 flex items-center justify-center rounded-md transition-colors"
+                className="w-6 h-6 flex items-center justify-center rounded-md transition-colors"
                 style={{ color: S.muted }}
                 onMouseEnter={e => { e.currentTarget.style.backgroundColor = S.hover; e.currentTarget.style.color = S.text; }}
                 onMouseLeave={e => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = S.muted; }}
               >
-                <Plus size={12} />
+                <Plus size={15} />
               </button>
             </Tooltip>
           </div>
-
-          {/* Flat list for base-project chats (no folder) */}
-          <BaseChatList
-            baseProject={baseProject}
-            activeChatId={activeChatId}
-            onSelectChat={onSelectChat}
-          />
 
           {creatingProject && (
             <NewProjectForm
@@ -509,10 +502,10 @@ export function Sidebar({ activeChatId, activeProjectId, onNewChat, onOpenProjec
 
           {!loadingProjects && filteredProjects.length === 0 && !creatingProject && (
             <div className="px-3 py-8 text-center">
-              <div className="text-[12px]" style={{ color: S.muted }}>No projects yet</div>
+              <div className="text-[14px]" style={{ color: S.muted }}>No projects yet</div>
               <button
                 onClick={() => setCreatingProject(true)}
-                className="mt-2 text-[12px] hover:underline"
+                className="mt-2 text-[14px] hover:underline"
                 style={{ color: S.brand }}
               >
                 Create your first project
@@ -535,6 +528,13 @@ export function Sidebar({ activeChatId, activeProjectId, onNewChat, onOpenProjec
               onCreateChat={onCreateChat}
             />
           ))}
+
+          {/* Flat list for base-project chats (no folder) */}
+          <BaseChatList
+            baseProject={baseProject}
+            activeChatId={activeChatId}
+            onSelectChat={onSelectChat}
+          />
         </div>
 
         {/* Bottom — user + actions */}
@@ -548,11 +548,11 @@ export function Sidebar({ activeChatId, activeProjectId, onNewChat, onOpenProjec
               className="w-[26px] h-[26px] rounded-full flex items-center justify-center flex-shrink-0 ring-2"
               style={{ background: "#7A7A7A", ringColor: S.border }}
             >
-              <span className="text-white text-[10px] font-semibold">
+              <span className="text-white text-[12px] font-semibold">
                 {(user?.name || user?.email || "U")[0].toUpperCase()}
               </span>
             </div>
-            <span className="text-[11.5px] truncate flex-1" style={{ color: S.text }}>
+            <span className="text-[13px] truncate flex-1" style={{ color: S.text }}>
               {user?.email || "user@example.com"}
             </span>
             <Tooltip text="Settings">
@@ -564,7 +564,7 @@ export function Sidebar({ activeChatId, activeProjectId, onNewChat, onOpenProjec
                 onMouseEnter={e => { e.currentTarget.style.backgroundColor = S.active; e.currentTarget.style.color = S.text; }}
                 onMouseLeave={e => { e.currentTarget.style.backgroundColor = "transparent"; e.currentTarget.style.color = S.muted; }}
               >
-                <Settings size={12} />
+                <Settings size={14} />
               </button>
             </Tooltip>
             <Tooltip text="Sign out">
@@ -576,7 +576,7 @@ export function Sidebar({ activeChatId, activeProjectId, onNewChat, onOpenProjec
                 onMouseEnter={e => { e.currentTarget.style.color = "#E53E3E"; e.currentTarget.style.backgroundColor = "#FFF5F5"; }}
                 onMouseLeave={e => { e.currentTarget.style.color = S.muted; e.currentTarget.style.backgroundColor = "transparent"; }}
               >
-                <LogOut size={12} />
+                <LogOut size={14} />
               </button>
             </Tooltip>
           </div>
