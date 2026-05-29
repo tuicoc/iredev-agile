@@ -1,4 +1,6 @@
+import { useState } from "react";
 import {
+  ChevronDown,
   ClipboardList,
   ShieldAlert,
   Target,
@@ -117,41 +119,159 @@ function CompactList({ items, emptyLabel }) {
 }
 
 function CoverageList({ coverage, planned }) {
+  const [isOpen, setIsOpen] = useState(false);
   const rows = asArray(coverage);
   const plannedRows = asArray(planned);
   if (!rows.length && !plannedRows.length) return null;
 
+  const total = rows.length + plannedRows.length;
+
   return (
-    <div className="border-t border-[#E8E8E8] px-3 py-2.5 space-y-2">
-      <div className="text-[10px] font-semibold text-[#6B6B6B] uppercase tracking-wide">
-        Coverage ({rows.length + plannedRows.length})
-      </div>
-      {plannedRows.length > 0 && (
-        <div>
-          <div className="mb-1.5 text-[10px] font-semibold text-[#A0A0A0]">Planned</div>
-          <ul className="space-y-1">
-            {plannedRows.map((entry, index) => (
-              <li key={index} className="flex gap-2 text-[10.5px] leading-relaxed text-[#3A3A3A]">
-                <span className="font-mono text-[#B86F50]">–</span>
-                <span>{text(entry)}</span>
-              </li>
-            ))}
-          </ul>
+    <div className="border-t border-[#E8E8E8] px-3 py-2.5">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-2 text-left"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <span className="text-[10px] font-semibold text-[#6B6B6B] uppercase tracking-wide">
+          Coverage ({total})
+        </span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 text-[#8A8A8A] transition-transform ${
+            isOpen ? "rotate-180" : ""
+          }`}
+          aria-hidden="true"
+        />
+      </button>
+
+      {isOpen && (
+        <div className="mt-2 space-y-2">
+          {plannedRows.length > 0 && (
+            <div>
+              <div className="mb-1.5 text-[10px] font-semibold text-[#A0A0A0]">Planned</div>
+              <ul className="space-y-1">
+                {plannedRows.map((entry, index) => (
+                  <li key={index} className="flex gap-2 text-[10.5px] leading-relaxed text-[#3A3A3A]">
+                    <span className="font-mono text-[#B86F50]">–</span>
+                    <span>{text(entry)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {rows.map((entry, index) => (
+            <div key={index} className="rounded-lg border border-[#E8E8E8] bg-[#F7F7F7] px-2.5 py-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Tag tone={statusTone(entry.status)}>{entry.status}</Tag>
+                <span className="font-medium text-[#3A3A3A]">{entry.point}</span>
+              </div>
+              {entry.evidence && (
+                <p className="mt-1 text-[10px] leading-relaxed text-[#6B6B6B]">
+                  {entry.evidence}
+                </p>
+              )}
+            </div>
+          ))}
         </div>
       )}
-      {rows.map((entry, index) => (
-        <div key={index} className="rounded-lg border border-[#E8E8E8] bg-[#F7F7F7] px-2.5 py-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Tag tone={statusTone(entry.status)}>{entry.status}</Tag>
-            <span className="font-medium text-[#3A3A3A]">{entry.point}</span>
-          </div>
-          {entry.evidence && (
-            <p className="mt-1 text-[10px] leading-relaxed text-[#6B6B6B]">
-              {entry.evidence}
-            </p>
+    </div>
+  );
+}
+
+function SignalsGapsList({ signals, gaps }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const signalRows = asArray(signals);
+  const gapRows = asArray(gaps);
+  if (!signalRows.length && !gapRows.length) return null;
+
+  const total = signalRows.length + gapRows.length;
+
+  return (
+    <div className="border-t border-[#E8E8E8] px-3 py-2.5">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-2 text-left"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <span className="text-[10px] font-semibold text-[#6B6B6B] uppercase tracking-wide">
+          Signals & Gaps ({total})
+        </span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 text-[#8A8A8A] transition-transform ${
+            isOpen ? "rotate-180" : ""
+          }`}
+          aria-hidden="true"
+        />
+      </button>
+
+      {isOpen && (
+        <div className="mt-2 space-y-2.5">
+          {signalRows.length > 0 && (
+            <div>
+              <div className="mb-1.5 text-[10px] font-semibold text-[#A0A0A0]">Signals</div>
+              <CompactList items={signalRows} emptyLabel="No signals found." />
+            </div>
+          )}
+          {gapRows.length > 0 && (
+            <div>
+              <div className="mb-1.5 text-[10px] font-semibold text-[#A0A0A0]">Gaps</div>
+              <CompactList items={gapRows} emptyLabel="No gaps found." />
+            </div>
           )}
         </div>
-      ))}
+      )}
+    </div>
+  );
+}
+
+function DialogueList({ turns, stakeholder, topic, closeRule }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const rows = asArray(turns);
+  if (!rows.length) return null;
+
+  return (
+    <div className="border-t border-[#E8E8E8] px-3 py-2.5">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-2 text-left"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <span className="text-[10px] font-semibold text-[#6B6B6B] uppercase tracking-wide">
+          Dialogue ({rows.length})
+        </span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 text-[#8A8A8A] transition-transform ${
+            isOpen ? "rotate-180" : ""
+          }`}
+          aria-hidden="true"
+        />
+      </button>
+
+      {isOpen && (
+        <div className="mt-2.5 space-y-3">
+          {rows.map((turn, turnIndex) => (
+            <div key={turnIndex} className="space-y-2">
+              <ChatBubble
+                side="left"
+                speaker="Interviewer Agent"
+                topic={topic}
+                closeRule={closeRule}
+                content={turn.question}
+              />
+              <ChatBubble
+                side="right"
+                speaker={`${stakeholder} (EndUser Agent)`}
+                topic={topic}
+                closeRule={closeRule}
+                content={turn.answer}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -198,57 +318,16 @@ function InterviewItem({ item, index }) {
             {item.answer}
           </p>
         )}
-
-        {turns.length > 0 && (
-          <div className="rounded-lg border border-[#E8E8E8] bg-[#F8F8F8] px-3 py-3">
-            <div className="mb-2.5 text-[10px] font-semibold text-[#6B6B6B] uppercase tracking-wide">
-              Dialogue ({turns.length})
-            </div>
-            <div className="space-y-3">
-              {turns.map((turn, turnIndex) => (
-                <div key={turnIndex} className="space-y-2">
-                  <ChatBubble
-                    side="left"
-                    speaker="Interviewer Agent"
-                    topic={topic}
-                    closeRule={closeRule}
-                    content={turn.question}
-                  />
-                  <ChatBubble
-                    side="right"
-                    speaker={`${stakeholder} (EndUser Agent)`}
-                    topic={topic}
-                    closeRule={closeRule}
-                    content={turn.answer}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
+      <DialogueList
+        turns={turns}
+        stakeholder={stakeholder}
+        topic={topic}
+        closeRule={closeRule}
+      />
       <CoverageList coverage={item.coverage} planned={coveragePoints} />
-
-      {(asArray(item.signals).length > 0 || asArray(item.gaps).length > 0) && (
-        <div className="border-t border-[#E8E8E8] px-3 py-2.5 space-y-2.5">
-          <div className="text-[10px] font-semibold text-[#6B6B6B] uppercase tracking-wide">
-            Signals & Gaps
-          </div>
-          {asArray(item.signals).length > 0 && (
-            <div>
-              <div className="mb-1.5 text-[10px] font-semibold text-[#A0A0A0]">Signals</div>
-              <CompactList items={item.signals} emptyLabel="No signals found." />
-            </div>
-          )}
-          {asArray(item.gaps).length > 0 && (
-            <div>
-              <div className="mb-1.5 text-[10px] font-semibold text-[#A0A0A0]">Gaps</div>
-              <CompactList items={item.gaps} emptyLabel="No gaps found." />
-            </div>
-          )}
-        </div>
-      )}
+      <SignalsGapsList signals={item.signals} gaps={item.gaps} />
 
     </article>
   );

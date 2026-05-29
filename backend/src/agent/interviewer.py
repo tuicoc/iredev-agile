@@ -191,6 +191,15 @@ No friction without a verdict before close. Skipping silently
 because you did not drill is a defect — explicit gap is the
 honest record.
 
+Before you log a gap, check whether the friction is really an
+open DECISION the role lives with today — how they choose, what
+rule they follow, what they fall back on when it is unclear. When
+it is, ask one more question about how they handle it today and
+what they expect: a decision the role lives can yield evidence
+that informs it, which is worth more downstream than an
+unresolved gap. Log the gap only after that one follow-up comes
+back empty.
+
 
 CLOSURE — EVIDENCE SATURATION
 
