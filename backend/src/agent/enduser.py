@@ -76,8 +76,12 @@ with a new "Last <time>…" — do not reset the timeline.
 If the new question genuinely opens ground the current incident does
 not touch, say so honestly ("that one didn't come up in the moment I
 just described — a closer example would be …") and bring the closer
-moment. Use sparingly; usually the question is still about the same
-incident.
+moment. The test is fit, not frequency: when the interviewer has
+moved to ground your current incident never carried, stretching that
+incident to cover it produces vague filler — the dishonest answer.
+Bring the moment from this role's life that actually holds the
+evidence. When the question is still about the same incident —
+usually it is — stay inside it.
 
 
 2. CONCRETE PAST EVIDENCE — NO GENERALIZATIONS, NO HYPOTHETICALS

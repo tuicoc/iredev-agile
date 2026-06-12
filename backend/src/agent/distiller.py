@@ -5,7 +5,7 @@ Map-reduce synthesis turning interview evidence into a structured
 RequirementList. Pass 2 is split so the LLM never juggles preserve-
 vs-merge pressure in the same call:
 
-  Pass 1 (EXTRACT)        — TALK-DRIVEN, BATCHED BY PERSPECTIVE.
+  Pass 1 (EXTRACT)        — EVIDENCE-DRIVEN, BATCHED BY PERSPECTIVE.
                             Records sharing one role go in one LLM
                             call. Pass 1 owns ONE concern: read the
                             records like a structured observation of
@@ -14,11 +14,18 @@ vs-merge pressure in the same call:
                             evidence supports — every friction,
                             workaround, wish, or revealed need that
                             points at a product-side mechanism is a
-                            candidate. Duplicates and near-siblings
-                            are EXPECTED here; Pass 2A folds them.
-                            Each item's trace_refs cite source units
-                            (turn ids, assumption-evidence ids, rule
-                            ids, vision ids) so every proposal is
+                            candidate. The evidence spans two strata:
+                            the lived talk AND the designed frictions
+                            each record carried into the interview
+                            (kept with the interviewer's per-friction
+                            verdict). A designed friction the dialogue
+                            never walked still proposes obligations —
+                            dialogue adds; silence never subtracts.
+                            Duplicates and near-siblings are EXPECTED
+                            here; Pass 2A folds them. Each item's
+                            trace_refs cite source units (turn ids,
+                            friction ids, assumption-evidence ids,
+                            rule ids, vision ids) so every proposal is
                             auditable. Perspective groups run in
                             parallel.
 
@@ -96,7 +103,7 @@ RequirementType = Literal["functional", "non_functional", "system", "out_of_scop
 # record at a specific sub-id; vision ids match canonical prefixes;
 # vision paths are stable strings. Anything else is rejected so the
 # "no bare item ids" rule holds at the schema boundary.
-_SOURCE_UNIT_RE = re.compile(r"^EL-\d{3}-(?:T\d{2,}|ASM\d{2,}|RULE)$")
+_SOURCE_UNIT_RE = re.compile(r"^EL-\d{3}-(?:T\d{2,}|F\d{2,}|ASM\d{2,}|RULE)$")
 _VISION_ID_RE = re.compile(r"^(?:ASM|ROLE|CONCERN|OOS)-\d{2,}$")
 
 T = TypeVar("T")
@@ -136,8 +143,10 @@ class Requirement(BaseModel):
     rationale: str = Field(description="One short evidence-grounded sentence.")
     trace_refs: List[str] = Field(default_factory=list, description=(
         "Source-unit ids and vision ids that anchor this obligation in evidence. Valid forms: "
-        "EL-NNN-TNN (talk turn), EL-NNN-ASMNN (assumption evidence), EL-NNN-RULE (closure "
-        "summary), ASM-NN / ROLE-NN / CONCERN-NN / OOS-NN (vision ids), or stable paths "
+        "EL-NNN-TNN (talk turn), EL-NNN-FNN (probe friction — designed or discovered; cite it "
+        "when the obligation reasons from the friction itself rather than from a turn that "
+        "answered it), EL-NNN-ASMNN (assumption evidence), EL-NNN-RULE (closure summary), "
+        "ASM-NN / ROLE-NN / CONCERN-NN / OOS-NN (vision ids), or stable paths "
         "starting with 'ProductVision.'. No bare item ids (EL-NNN alone is invalid)."
     ))
     acceptance_criteria: List[str] = Field(default_factory=list, description=(
@@ -153,10 +162,11 @@ class Requirement(BaseModel):
         "confirmed: obligation directly grounded in stated evidence — input intent named it, "
         "a stakeholder utterance in the talk explicitly described it, or a vision assumption "
         "was verified by interview. inferred: your synthesis from context — symptom→cause "
-        "translation, product-side translation of role process, or a boundary that follows "
-        "logically from multiple turns of talk without being directly stated. Inference is "
-        "legitimate work when evidence supports it; do not avoid inferring just to label "
-        "everything confirmed."
+        "translation, product-side translation of role process, a boundary that follows "
+        "logically from multiple turns of talk without being directly stated, or an "
+        "obligation reasoned from a designed friction or vision pain point the dialogue "
+        "never walked. Inference is legitimate work when evidence supports it; do not "
+        "avoid inferring just to label everything confirmed."
     ))
 
     # ── Implementation Parity axes ──────────────────────────────────────────
@@ -232,8 +242,9 @@ class PerspectiveExtraction(BaseModel):
     obligations are proposed broadly — overlapping candidates are
     expected and not a defect; consolidating duplicates is not this
     step's job. Trace_refs cite specific source units (turn ids
-    EL-NNN-TNN, assumption-evidence ids EL-NNN-ASMNN, rule ids
-    EL-NNN-RULE, and vision ids) so every item is auditable.
+    EL-NNN-TNN, friction ids EL-NNN-FNN, assumption-evidence ids
+    EL-NNN-ASMNN, rule ids EL-NNN-RULE, and vision ids) so every item
+    is auditable.
     """
     perspective: str = Field(description=(
         "The shared role name across every record in this batch."
@@ -401,12 +412,28 @@ cannot ground an obligation, that absence is a gap to surface — never
 a requirement to invent.
 
 
-EVIDENCE LEADS, VISION BOUNDS. The interview is the authority for what
-the product does; infer positive obligations from it freely. The
-vision is the authority for the product's limits — what it must
-respect and what it must leave to others. From the vision take
-constraints and exclusions, not new capabilities the interview never
-implied.
+TWO STRATA OF EVIDENCE — DIALOGUE ADDS, SILENCE NEVER SUBTRACTS. The
+evidence reaches you in two strata. The designed stratum is what was
+prepared before anyone spoke: the vision's roles, concerns, and
+assumption-forks, and the scene and frictions each interview record
+was built to probe — pain points already derived from the vision,
+real evidence in their own right. The lived stratum is what the
+dialogue itself put on record: the talk, the stance evidence, the
+closure rules. Where the lived stratum speaks it leads — it confirms,
+sharpens, corrects, and above all opens ground nobody designed: the
+workaround, actor, rule, or consequence no plan anticipated. Ground
+the dialogue volunteered beyond the design is the most valuable
+evidence in the corpus, precisely because no one could have written
+it down in advance — follow it as far as it implies obligations.
+Where the lived stratum is silent — a designed friction the dialogue
+never walked, a concern no answer touched — the designed stratum
+still obligates: reason from the designed pain point exactly as you
+would have from the answer it was written to elicit, and mark the
+result inferred. A dialogue can refine or contradict the design;
+failing to mention something erases nothing. The vision keeps one
+exclusive authority: the product's limits — from its scope take
+constraints and exclusions, and never invent a capability no stratum
+implies.
 
 
 PRODUCT-SIDE AND BUILDABLE. A requirement speaks as the product or a
@@ -473,9 +500,12 @@ _PASS_EXTRACT = """\
 THIS PASS — OBLIGATIONS FROM ONE PERSPECTIVE'S EVIDENCE
 
 You see every interview record from one role, plus the compact Product
-Vision. Your purpose is to build, from this evidence, the broadest
-honest set of distinct product obligations the described life implies,
-and to hold nothing back for fear of overlap. A later pass folds true
+Vision. Each record carries both strata: the designed scene and
+frictions it was built to probe — each friction with the interviewer's
+verdict on whether the dialogue reached it — and the lived talk itself.
+Your purpose is to build, from the whole corpus, the broadest honest
+set of distinct product obligations the described life implies, and to
+hold nothing back for fear of overlap. A later pass folds true
 duplicates and another settles gaps and conflicts; here, the only loss
 that cannot be recovered is a real obligation never proposed, so reason
 expansively.
@@ -487,9 +517,14 @@ usually implies several distinct mechanisms — such as a surface to act
 on, a state to track, a rule to enforce, a recovery when something
 fails, a signal that makes status visible, something worth recording,
 or a property the result must hold. Follow each one the evidence
-implies. Let the evidence's real density decide how many obligations
-you draw; a thin record yields few and a rich one many. Never aim at a
-number, and never thin the list because it is growing.
+implies: what the talk lived through, what the talk opened beyond the
+designed frictions, and what a designed friction still carries when the
+dialogue never walked it — for those, reason from the friction as you
+would have from the answer it was written to elicit, cite the
+friction's id, and mark the obligation inferred. Let the corpus's real
+density decide how many obligations you draw; a thin record yields few
+and a rich one many. Never aim at a number, and never thin the list
+because it is growing.
 
 Think the carve-up through in the reasoning field first, then list the
 obligations. You ensure each is distinct from the others, is grounded
@@ -553,7 +588,7 @@ the vision's limits, settle the gaps, and settle the conflicts.
 
 From the vision, add an obligation only where it genuinely narrows or
 excludes something no current item already carries — a limit the
-product must respect. A positive capability the interview never
+product must respect. A positive capability no stratum of the evidence
 implied is invention, not a vision constraint, so leave it out. The
 prompt hands you the vision ids no current item references, so the
 candidates to weigh are few.
@@ -781,18 +816,24 @@ class DistillerAgent(BaseAgent):
     def _slim_interview_item(item: Dict[str, Any]) -> Dict[str, Any]:
         """Slim one interview record to just what the distiller needs.
 
-        Kept: id, perspective, scene, frictions_to_probe, talk (raw Q/A
-        turns), assumption_evidence (stance + evidence only), rule.
+        Kept: id, perspective, scene, frictions (each designed probe
+        point with a citable EL-NNN-FNN id and the interviewer's
+        coverage verdict, plus any friction the dialogue discovered
+        beyond the design), talk (raw Q/A turns), assumption_evidence
+        (stance + evidence only), rule.
 
-        Talk is the primary evidence. Pass 1 re-extracts atomic facts
-        directly from dialogue. The interviewer's per-turn signal
-        atomization is no longer fed — distiller's stronger model in
-        batch mode does the extraction more reliably from talk than
-        from an interviewer's lossy pre-extraction.
+        Talk is the deepest evidence where it exists; Pass 1 re-extracts
+        atomic facts directly from dialogue. Frictions are kept as
+        first-class evidence units in their own right — a designed
+        friction the dialogue never walked still names a real pain point
+        derived from the vision, and Pass 1 reasons from it directly.
+        The verdict tells Pass 1 which stratum grounds each friction:
+        the talk (covered / covered_by_prior) or the friction itself
+        (gap / unprobed).
 
-        Dropped: status, close_when, coverage, signals (entirely
-        removed from pipeline), assumption_evidence's implication field
-        — meta or interviewer-side guesses that bias synthesis.
+        Dropped: status, close_when, signals (entirely removed from
+        pipeline), assumption_evidence's implication field — meta or
+        interviewer-side guesses that bias synthesis.
         """
         item_id = item.get("id") or item.get("item") or "EL"
         rule = (item.get("rule") or "").strip()
@@ -822,11 +863,52 @@ class DistillerAgent(BaseAgent):
             and (entry.get("question") or "").strip()
             and (entry.get("answer") or "").strip()
         ]
+
+        # Frictions with the interviewer's verdict folded in. Designed
+        # frictions come from the agenda; coverage entries matching no
+        # designed point are frictions the dialogue DISCOVERED — both get
+        # citable EL-NNN-FNN ids. Matching is by normalised point text
+        # (whitespace / trailing period / case), pure data movement.
+        def _norm(text: Any) -> str:
+            return re.sub(r"\s+", " ", str(text or "")).strip().rstrip(".").lower()
+
+        verdicts: Dict[str, Dict[str, Any]] = {}
+        for entry in item.get("coverage") or []:
+            if isinstance(entry, dict) and _norm(entry.get("point")):
+                verdicts.setdefault(_norm(entry.get("point")), entry)
+
+        frictions: List[Dict[str, Any]] = []
+        seen_points: set = set()
+        for raw_friction in item.get("frictions_to_probe") or item.get("coverage_points") or []:
+            friction_text = str(raw_friction or "").strip()
+            if not friction_text or _norm(friction_text) in seen_points:
+                continue
+            seen_points.add(_norm(friction_text))
+            verdict = verdicts.get(_norm(friction_text)) or {}
+            frictions.append({
+                "id": f"{item_id}-F{len(frictions) + 1:02d}",
+                "friction": friction_text,
+                "origin": "designed",
+                "dialogue_verdict": str(verdict.get("status") or "unprobed"),
+                "verdict_evidence": str(verdict.get("evidence") or ""),
+            })
+        for key, entry in verdicts.items():
+            if key in seen_points:
+                continue
+            seen_points.add(key)
+            frictions.append({
+                "id": f"{item_id}-F{len(frictions) + 1:02d}",
+                "friction": str(entry.get("point") or "").strip(),
+                "origin": "discovered",
+                "dialogue_verdict": str(entry.get("status") or ""),
+                "verdict_evidence": str(entry.get("evidence") or ""),
+            })
+
         return {
             "id": item_id,
             "perspective": item.get("perspective"),
             "scene": item.get("scene") or item.get("context"),
-            "frictions_to_probe": item.get("frictions_to_probe") or item.get("coverage_points") or [],
+            "frictions": frictions,
             "talk": talk_turns,
             "assumption_evidence": assumption_evidence,
             "rule": {"id": f"{item_id}-RULE", "text": rule} if rule else None,
@@ -843,6 +925,9 @@ class DistillerAgent(BaseAgent):
             for turn in record.get("talk") or []:
                 if isinstance(turn, dict) and turn.get("id"):
                     known.add(turn["id"])
+            for friction in record.get("frictions") or []:
+                if isinstance(friction, dict) and friction.get("id"):
+                    known.add(friction["id"])
             for entry in record.get("assumption_evidence") or []:
                 if isinstance(entry, dict) and entry.get("id"):
                     known.add(entry["id"])
@@ -1141,9 +1226,12 @@ class DistillerAgent(BaseAgent):
                     f"PERSPECTIVE BATCH:\n{self._json(batch_payload)}\n\n"
                     "Return a PerspectiveExtraction whose perspective equals the "
                     "batch perspective. Build the broadest set of distinct "
-                    "product obligations this evidence implies, each grounded in "
-                    "the source units it cites (turn ids EL-NNN-TNN, assumption-"
-                    "evidence ids EL-NNN-ASMNN, rule ids EL-NNN-RULE, vision ids). "
+                    "product obligations this evidence implies — both strata: "
+                    "the lived talk and every friction, including those whose "
+                    "dialogue_verdict shows the talk never walked them. Ground "
+                    "each obligation in the source units it cites (turn ids "
+                    "EL-NNN-TNN, friction ids EL-NNN-FNN, assumption-evidence "
+                    "ids EL-NNN-ASMNN, rule ids EL-NNN-RULE, vision ids). "
                     "Do not fold near-duplicates and do not emit out_of_scope "
                     "items."
                 ),

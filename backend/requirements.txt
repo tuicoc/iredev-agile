@@ -36,3 +36,4 @@ watchdog
 semver
 pypdf
 psycopg[binary]
+markitdown[pdf]

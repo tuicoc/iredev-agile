@@ -729,10 +729,23 @@ export function useChat() {
   );
 
   const sendMessage = useCallback(
-    async (text, processConfigOverride = null) => {
-      if (!text.trim() || streaming) return;
+    async (text, processConfigOverride = null, attachments = []) => {
+      // attachments: [{ filename, markdown }] — PDFs already converted by the
+      // backend (MarkItDown). They ride along on process start only.
+      const docs = Array.isArray(attachments)
+        ? attachments.filter((a) => a?.markdown)
+        : [];
+      if ((!text.trim() && docs.length === 0) || streaming) return;
       setError(null);
       const trimmed = text.trim();
+      const attachmentNote = docs.length
+        ? `Attached: ${docs.map((d) => d.filename).join(", ")}`
+        : "";
+      const displayContent =
+        trimmed && attachmentNote
+          ? `${trimmed}\n\n${attachmentNote}`
+          : trimmed || attachmentNote;
+      const titleSource = trimmed || docs[0]?.filename || "New Process";
       const processConfig = normalizeProcessConfig(
         processConfigOverride || activeProcessConfig,
       );
@@ -745,7 +758,7 @@ export function useChat() {
 
       // Create a new chat if none is active
       if (!chatId) {
-        const title  = trimmed.slice(0, 50) + (trimmed.length > 50 ? "…" : "");
+        const title  = titleSource.slice(0, 50) + (titleSource.length > 50 ? "…" : "");
         const tempId = `temp_${uid()}`;
         setActiveChatId(tempId);
         chatId = tempId;
@@ -775,7 +788,7 @@ export function useChat() {
         !hasRequirementUserTurn;
 
       const localId = `local_${uid()}`;
-      setMessages((prev) => [...prev, { id: localId, role: "user", content: trimmed }]);
+      setMessages((prev) => [...prev, { id: localId, role: "user", content: displayContent }]);
       setStreaming(true);
       setWorkflowRunning(startsRequirementProcess);
       setWorkflowStatus(null);
@@ -784,14 +797,15 @@ export function useChat() {
       }
 
       try {
-        const saved = await apiSendMessage(chatId, trimmed, currentSubChat);
+        const saved = await apiSendMessage(chatId, displayContent, currentSubChat);
         setMessages((prev) => prev.map((m) => (m.id === localId ? saved : m)));
         if (startsRequirementProcess) {
           saveChatProcessConfig(chatId, processConfig);
           await startReq(
             {
-              projectName: trimmed.slice(0, 50),
+              projectName: titleSource.slice(0, 50),
               projectDescription: trimmed,
+              ...(docs.length ? { attachedDocuments: docs } : {}),
               ...processConfigToStartPayload(processConfig),
             },
             chatId,

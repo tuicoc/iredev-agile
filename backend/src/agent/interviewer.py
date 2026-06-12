@@ -63,7 +63,7 @@ def _significant_words(text: str) -> List[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class CoverageEntry(BaseModel):
-    point: str = Field(description="Agenda coverage point being judged.")
+    point: str = Field(description="Friction being judged: a designed frictions_to_probe entry, or a friction the dialogue discovered (stated as a probe point in the interviewer's words).")
     status: CoverageStatus = Field(description="covered when the stakeholder's CURRENT answer settled the point. covered_by_prior when an episode from the SAME perspective in a prior agenda item already settled the same lived ground (no new question needed). gap when probed but not settled. skipped when prior evidence or item scope makes more probing unnecessary.")
     evidence: str = Field(description="Brief evidence text: stakeholder fact for covered; cited prior-episode trigger+decision for covered_by_prior; failed probe reason for gap; prior-evidence or scope reason for skipped. Required for every entry.")
 
@@ -82,7 +82,7 @@ class ELRecord(BaseModel):
     scene: str = Field(description="Lived scene the agenda item described.")
     close_when: str = Field(description="Stop condition used by the interviewer.")
     frictions_to_probe: List[str] = Field(default_factory=list, description="Frictions the agenda item asked the interviewer to drill.")
-    coverage: List[CoverageEntry] = Field(default_factory=list, description="Per-friction verdict.")
+    coverage: List[CoverageEntry] = Field(default_factory=list, description="Per-friction verdict — designed frictions plus any the dialogue discovered.")
     assumption_evidence: List[AssumptionEvidenceEntry] = Field(default_factory=list, description="Evidence about each vision assumption the answer touched.")
     gaps: List[str] = Field(default_factory=list, description="Frictions drilled but unresolved.")
     rule: Optional[str] = Field(default=None, description="Closure summary when the item settled.")
@@ -111,8 +111,9 @@ YOUR JOB
 You are running a CRITICAL-INCIDENT INTERVIEW. The agenda gives
 you a scene + a list of frictions worth landing in evidence.
 Your job: invite the role to recount a specific past incident,
-drill that incident until each friction has a concrete moment
-on record, then close. The stakeholder is reactive — they only
+drill it until each designed friction has a concrete moment on
+record AND the dialogue has stopped opening ground worth
+drilling, then close. The stakeholder is reactive — they only
 answer. YOU decide what to ask, when to drill, when to pivot,
 when to close.
 
@@ -167,12 +168,24 @@ of you fails even if it is well-phrased in the abstract.
 
 FRICTION COVERAGE
 
-The agenda's `frictions_to_probe` is a checklist of what should
-land in evidence before you close — not a serial walk. Move
-through frictions in the order the dialogue invites; when an
-answer surfaces a friction further down the list, follow it;
-when the role surfaces a friction the agenda did not list,
-drill it too.
+The agenda's `frictions_to_probe` is the floor of this
+conversation, not its ceiling — it is what could be foreseen
+before anyone spoke, and the reason to run a live interview at
+all is the ground nobody foresaw. It is a checklist of what
+should land in evidence before you close — not a serial walk.
+Move through frictions in the order the dialogue invites; when
+an answer surfaces a friction further down the list, follow it.
+
+DISCOVERED GROUND outranks the next designed friction. Read
+every answer for the opening it leaves: an actor, rule,
+workaround, dependency, consequence, or constraint the agenda
+never named. While such an opening is live, drill it before
+returning to the designed list — it is evidence only this
+dialogue can produce. Record each discovered friction as its
+own coverage entry exactly like a designed one (point = the
+discovered friction stated in your words; status and evidence
+as usual), so downstream synthesis receives it as first-class
+evidence instead of losing it in the transcript.
 
 A friction is COMPLETE in the coverage list when:
   - covered — the dialogue put a specific past incident on
@@ -206,8 +219,21 @@ CLOSURE — EVIDENCE SATURATION
 Close when evidence has saturated, not when a turn count has
 been hit. Saturation = the last two answers stopped surfacing
 lived detail you would write down; the next question you can
-think to ask is a rephrase of an earlier one. When you reach
-that state, close via record_answer with done=true:
+think to ask is a rephrase of an earlier one.
+
+Saturation is a property of the DIALOGUE, never of the
+checklist. Every designed friction holding a verdict does not
+by itself close an item: one rich incident can cover the whole
+designed list in a few turns while the role's answers are still
+opening new ground — closing there forfeits exactly the
+evidence the interview exists to find. The designed list bounds
+what you MUST cover before closing, not what you MAY. The same
+holds for turns saved by covered_by_prior: they are budget
+re-invested in deeper drilling and discovered ground, never a
+reason to finish early.
+
+When you reach genuine saturation, close via record_answer with
+done=true:
 
 - If a pending answer is in hand, that is the standard close.
 - If no fresh answer is pending and the minimum-evidence
@@ -254,8 +280,9 @@ class InterviewerAgent(BaseAgent):
                 "(distiller) reads the talk turns directly, so this tool "
                 "does not take a separate signals payload.\n\n"
                 "Use in three situations:\n"
-                "  - Pending answer: yes — judge whether the answer "
-                "saturates the frictions; set done=true to close or "
+                "  - Pending answer: yes — judge coverage and whether the "
+                "DIALOGUE has saturated (not merely whether every designed "
+                "friction has a verdict); set done=true to close or "
                 "done=false to keep drilling.\n"
                 "  - Prior-coverage short-circuit — every friction is "
                 "already settled by an earlier item with the same "
@@ -416,25 +443,6 @@ class InterviewerAgent(BaseAgent):
             seen.add(key)
             result.append(value)
         return result
-
-    @staticmethod
-    def _coverage_complete(
-        coverage_points: Optional[List[str]],
-        coverage: Optional[List[Dict[str, Any]]],
-    ) -> bool:
-        points = [point.strip() for point in coverage_points or [] if point.strip()]
-        if not points:
-            return False
-        settled = {
-            str(entry.get("point") or "").strip().lower()
-            for entry in coverage or []
-            if (
-                str(entry.get("status") or "").strip().lower()
-                in {"covered", "covered_by_prior", "gap", "skipped"}
-                and str(entry.get("evidence") or "").strip()
-            )
-        }
-        return all(point.lower() in settled for point in points)
 
     @staticmethod
     def _has_meaningful_coverage(
@@ -750,13 +758,12 @@ class InterviewerAgent(BaseAgent):
                 item.gaps = self._append_unique_text(list(item.gaps), [point])
 
         settled_rule = rule.strip()
-        coverage_complete = self._coverage_complete(
-            getattr(item, "coverage_points", []),
-            getattr(item, "coverage", []),
-        )
+        # Closure is the model's saturation judgment, never a checklist
+        # consequence: a fully-verdicted designed friction list must not
+        # force an item shut while the dialogue is still opening new
+        # ground. The max-turn budget below caps the worst case.
         requested_done = bool(
-            (done and self._has_meaningful_coverage(getattr(item, "coverage", [])))
-            or coverage_complete
+            done and self._has_meaningful_coverage(getattr(item, "coverage", []))
         )
         turns_recorded = len(getattr(item, "talk", []) or [])
         min_turns = self._min_turns_for_item(item)

@@ -124,8 +124,9 @@ WORKFLOW_PHASES: List[PhaseDefinition] = [
                     "VisionaryAgent.generate_intake_questions authors 0–4 questions that "
                     "both clarify the project intent and expand it with candidate features / "
                     "directions. Each question carries 2–4 options plus a free-text answer. "
-                    "An empty set means nothing the answer would change — the next gate "
-                    "auto-skips so the flow proceeds straight to the vision."
+                    "Coverage (Infer) mode only — fidelity (Extract) mode emits an empty set "
+                    "without an LLM call. An empty set means nothing the answer would change "
+                    "— the next gate auto-skips so the flow proceeds straight to the vision."
                 ),
             ),
             # 0b. Human answers the intake questions (Node: review_intake_questions_turn)

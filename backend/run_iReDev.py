@@ -290,6 +290,34 @@ def parse_args() -> argparse.Namespace:
         help="Automatically approve all HITL gates without prompting.",
     )
     p.add_argument(
+        "--skip-interview-from-vision",
+        action="store_true",
+        help=(
+            "TEST-ONLY: visionary → (VisionDistillerAgent, no dialogue) → "
+            "requirement_list → Sprint → Analyst. Skips agenda + interview; "
+            "requirements are inferred from the Product Vision's pain points."
+        ),
+    )
+    p.add_argument(
+        "--skip-interview-from-agenda",
+        action="store_true",
+        help=(
+            "TEST-ONLY: visionary → agenda → (VisionAgendaDistillerAgent, no "
+            "dialogue) → requirement_list → Sprint → Analyst. Skips interview only; "
+            "requirements are inferred from the agenda's lived scenes + vision."
+        ),
+    )
+    p.add_argument(
+        "--from-artifacts",
+        action="store_true",
+        help=(
+            "With --skip-interview-*: skip Phase A generation and LOAD the "
+            "existing reviewed_product_vision (and reviewed_elicitation_agenda "
+            "for the agenda variant) from the artifact dir — so ablation and "
+            "full runs can be compared against the exact same vision + agenda."
+        ),
+    )
+    p.add_argument(
         "--mode",
         type=str,
         default="fidelity",
@@ -717,12 +745,7 @@ def build_initial_state(args, preloaded_artifacts=None):
         project_desc = args.project.read()
         args.project.close()
     else:
-        project_desc = (
-            "We need a course-registration system for university students. "
-            "Students should be able to browse available courses, register for "
-            "up to 5 courses per semester, view their schedule, and receive "
-            "notifications about enrollment deadlines."
-        )
+        project_desc = ""
 
     state: Dict[str, Any] = {}
 
@@ -731,6 +754,20 @@ def build_initial_state(args, preloaded_artifacts=None):
         pd_from_record = interview_record.get("project_description")
         if pd_from_record:
             project_desc = pd_from_record
+        elif not project_desc:
+            # No --project and no interview record: keep the description the
+            # seeded vision was built from, so a debug-start stays on the
+            # original project instead of the hardcoded demo default.
+            seeded_vision = (
+                preloaded_artifacts.get("reviewed_product_vision")
+                or preloaded_artifacts.get("product_vision")
+                or {}
+            )
+            project_desc = str(
+                seeded_vision.get("project_description")
+                or seeded_vision.get("description")
+                or ""
+            )
         artifacts = preloaded_artifacts
 
         # Seed the agent’s own state fields so it doesn’t re‑run bootstrap steps
@@ -756,6 +793,14 @@ def build_initial_state(args, preloaded_artifacts=None):
         artifacts = {}
         needs_srs = False
         interview_complete = False
+
+    if not project_desc:
+        project_desc = (
+            "We need a course-registration system for university students. "
+            "Students should be able to browse available courses, register for "
+            "up to 5 courses per semester, view their schedule, and receive "
+            "notifications about enrollment deadlines."
+        )
 
     state.update({
         "session_id":          args.session,
@@ -885,11 +930,204 @@ def run_workflow(initial_state, config, args):
 
     return final_artifacts
 
+
+# ---------------------------------------------------------------------------
+# Skip-interview TEST flow (only runs with --skip-interview-from-*)
+#
+# Self-contained: builds the upstream artifacts with the REAL graph, distils a
+# requirement_list directly via a no-interview DistillerAgent variant, then
+# re-enters the REAL graph at the requirement_list review gate so Sprint +
+# Analyst run normally. The production graph / supervisor / distiller are not
+# touched, and none of this executes unless a --skip-interview-* flag is passed.
+# ---------------------------------------------------------------------------
+def _write_skip_artifact(artifact_dir: Path, name: str, session: str, content: Dict[str, Any]) -> None:
+    """Write one artifact JSON into the artifact dir so --start-at can seed it."""
+    path = artifact_dir / f"{name}_{session}.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(content, f, ensure_ascii=False, indent=2)
+    print(f"  seeded {path.name}")
+
+
+def run_skip_interview_flow(args) -> Dict[str, Any]:
+    """Produce a backlog WITHOUT running the multi-turn interview.
+
+    Phase A runs the REAL graph to the upstream artifact:
+      --skip-interview-from-vision  → stop at reviewed_product_vision
+      --skip-interview-from-agenda  → stop at reviewed_elicitation_agenda
+    A no-interview DistillerAgent variant then synthesises requirement_list
+    directly from those artifacts — same "resolve the past pain point" mechanism,
+    no dialogue. Phase B re-enters the REAL graph at the requirement_list review
+    gate so Sprint + Analyst run exactly as in the main flow.
+    """
+    import copy
+    from src.agent.distiller_no_interview import (
+        VisionAgendaDistillerAgent,
+        VisionDistillerAgent,
+    )
+
+    mode = "vision" if args.skip_interview_from_vision else "agenda"
+    end_artifact = (
+        "reviewed_product_vision" if mode == "vision"
+        else "reviewed_elicitation_agenda"
+    )
+
+    # ── Phase A — produce OR load vision (+ agenda) ─────────────────────────
+    upstream_label = (
+        "product vision" if mode == "vision"
+        else "product vision + elicitation agenda"
+    )
+    if getattr(args, "from_artifacts", False):
+        # Controlled-comparison mode: load the upstream artifacts a previous
+        # run already produced, so every variant (vision-only / vision+agenda
+        # / full) is measured against the exact same vision + agenda.
+        section(
+            f"SKIP-INTERVIEW [{mode}] — Phase A: load existing "
+            f"{upstream_label} from artifact dir"
+        )
+        load_dir = resolve_artifact_dir(args.artifact_dir)
+        manifest_target = (
+            "elicitation_agenda_artifact" if mode == "vision" else "interview_record"
+        )
+        arts_a = build_artifacts(manifest_target, args.session, load_dir)
+        if args.project:
+            project_desc = args.project.read()
+            args.project.close()
+        else:
+            loaded_vision = (
+                arts_a.get("reviewed_product_vision")
+                or arts_a.get("product_vision")
+                or {}
+            )
+            project_desc = str(
+                loaded_vision.get("project_description")
+                or loaded_vision.get("description")
+                or ""
+            )
+    else:
+        section(f"SKIP-INTERVIEW [{mode}] — Phase A: produce {upstream_label}")
+        phase_a = copy.copy(args)
+        phase_a.start_at = None
+        phase_a.end_at = end_artifact
+        init_a = build_initial_state(phase_a)
+        project_desc = init_a.get("project_description", "")
+        config_a = {"configurable": {"thread_id": f"skip_a_{uuid.uuid4().hex}", "recursion_limit": 100}}
+        arts_a = run_workflow(init_a, config_a, phase_a)
+
+    vision = arts_a.get("reviewed_product_vision") or arts_a.get("product_vision")
+    if not vision:
+        print("[ERROR] Phase A produced no product vision. Aborting skip-interview run.")
+        sys.exit(1)
+    agenda = arts_a.get("reviewed_elicitation_agenda") or arts_a.get("elicitation_agenda_artifact")
+    if mode == "agenda" and not agenda:
+        print("[ERROR] Phase A produced no elicitation agenda. Aborting.")
+        sys.exit(1)
+
+    # ── Direct distil — no dialogue ─────────────────────────────────────────
+    section(f"SKIP-INTERVIEW [{mode}] — Distil requirement_list directly (no interview)")
+    distill_artifacts: Dict[str, Any] = {"reviewed_product_vision": vision}
+    if mode == "agenda":
+        distill_artifacts["reviewed_elicitation_agenda"] = agenda
+    distill_state = {
+        "session_id": args.session,
+        "project_description": project_desc,
+        "product_vision": vision,
+        "artifacts": distill_artifacts,
+    }
+    agent = VisionDistillerAgent() if mode == "vision" else VisionAgendaDistillerAgent()
+    updates = agent.build_requirement_list(distill_state)
+    requirement_list = (updates.get("artifacts") or {}).get("requirement_list")
+    if not requirement_list:
+        print("[ERROR] No-interview distiller produced no requirement_list. Aborting.")
+        for e in updates.get("errors") or []:
+            print(f"    • {e}")
+        sys.exit(1)
+    display_requirement_list(requirement_list)
+
+    # ── Seed artifacts on disk so the real graph can resume at review ───────
+    artifact_dir = resolve_artifact_dir(args.artifact_dir)
+    print(f"\nSeeding artifacts into {artifact_dir} for Phase B:")
+    stub_record = {
+        "project_description": project_desc,
+        "items": [],
+        "note": (
+            "stub — interview skipped; requirement_list derived directly by "
+            f"{type(agent).__name__}"
+        ),
+    }
+    _write_skip_artifact(artifact_dir, "requirement_list", args.session, requirement_list)
+    # Seed the approved sentinel too, so Phase B starts at Sprint shaping (step 9a)
+    # rather than the requirement_list review gate. Starting after the gate means
+    # no reject/conflict path can re-run the PRODUCTION distiller on the stub
+    # interview_record — every downstream reject re-runs only Sprint/Analyst.
+    _write_skip_artifact(
+        artifact_dir, "requirement_list_approved", args.session,
+        {
+            **requirement_list,
+            "status": "approved",
+            "review_notes": "auto-approved (skip-interview test flow)",
+        },
+    )
+    _write_skip_artifact(artifact_dir, "interview_record", args.session, stub_record)
+    _write_skip_artifact(
+        artifact_dir, "reviewed_interview_record", args.session,
+        {**stub_record, "status": "approved"},
+    )
+    if mode == "vision":
+        # No agenda was built, but the requirement_list_approved manifest requires
+        # an elicitation_agenda_artifact file. Seed a harmless empty stub — the
+        # downstream Sprint/Analyst agents never read it. In --from-artifacts
+        # mode a REAL agenda for this same vision may already sit on disk;
+        # keep it instead of stubbing it out.
+        agenda_file = artifact_dir / f"elicitation_agenda_artifact_{args.session}.json"
+        if getattr(args, "from_artifacts", False) and agenda_file.exists():
+            print(f"  kept existing {agenda_file.name}")
+        else:
+            _write_skip_artifact(
+                artifact_dir, "elicitation_agenda_artifact", args.session,
+                {"items": [], "notes": "stub — agenda skipped (skip-interview-from-vision)"},
+            )
+
+    # ── Phase B — resume the real graph at Sprint shaping (step 9a) ─────────
+    section(
+        f"SKIP-INTERVIEW [{mode}] — Phase B: shape stories → backlog → AC "
+        f"(real Sprint + Analyst)"
+    )
+    phase_b = copy.copy(args)
+    phase_b.start_at = "user_story_draft"
+    phase_b.project = None  # consumed in Phase A; stub record carries project_description
+    preloaded = build_artifacts("user_story_draft", args.session, artifact_dir)
+    init_b = build_initial_state(phase_b, preloaded)
+    config_b = {"configurable": {"thread_id": f"skip_b_{uuid.uuid4().hex}", "recursion_limit": 100}}
+    return run_workflow(init_b, config_b, phase_b)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
     args = parse_args()
+
+    # TEST-ONLY skip-interview flows. Self-contained: they manage their own two
+    # phases and return, so the normal flow below is never reached or affected.
+    if getattr(args, "skip_interview_from_vision", False) or getattr(args, "skip_interview_from_agenda", False):
+        if args.skip_interview_from_vision and args.skip_interview_from_agenda:
+            print("[ERROR] Use only ONE of --skip-interview-from-vision / --skip-interview-from-agenda.")
+            sys.exit(1)
+        if args.start_at:
+            print("[ERROR] --skip-interview-* manages its own start/end; do not combine with --start-at.")
+            sys.exit(1)
+        if args.reset_db and os.path.exists(args.db):
+            os.remove(args.db)
+        final_artifacts = run_skip_interview_flow(args)
+        section("Workflow complete")
+        produced = [k for k in final_artifacts if k != "session_id"]
+        print(f"  Final artifacts: {', '.join(produced) if produced else '(none)'}")
+        errors = final_artifacts.get("errors") or []
+        if errors:
+            print(f"\n  Accumulated errors ({len(errors)}):")
+            for e in errors:
+                print(f"    • {e}")
+        return
 
     if args.reset_db and os.path.exists(args.db):
         os.remove(args.db)
