@@ -7,6 +7,9 @@
 //   - Enter to send, Shift+Enter for newline
 //   - While streaming: shows a "Stop" button instead of Send
 //   - onCancel() is called when the user clicks Stop
+//   - Paperclip (process-start composer only): uploads a PDF, backend converts
+//     it to Markdown via MarkItDown; ready attachments are passed to onSend
+//     and become part of the Visionary's input signal
 // =============================================================================
 import { createElement, useState, useEffect, useRef } from "react";
 import {
@@ -16,12 +19,17 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  FileText,
+  Loader2,
   Minus,
+  Paperclip,
   Plus,
   Square,
   Users,
+  X,
 } from "lucide-react";
 import { Tooltip } from "../ui";
+import { convertProcessFile } from "../../services/chatService";
 import {
   MODEL_OPTIONS,
   VISION_MODE_OPTIONS,
@@ -235,6 +243,52 @@ function ProcessConfigToggle({ config, locked, expanded, onToggle }) {
   );
 }
 
+function AttachmentChip({ attachment, onRemove }) {
+  const isError = attachment.status === "error";
+  const isConverting = attachment.status === "converting";
+
+  return (
+    <div
+      className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[12px] ${
+        isError
+          ? "border-[#E8B4B4] bg-[#FDF3F3] text-[#A04545]"
+          : "border-[#E5E5E5] bg-[#F8F8F8] text-[#3A3A3A]"
+      }`}
+    >
+      {isConverting ? (
+        <Loader2 size={13} className="flex-shrink-0 animate-spin text-[#B86F50]" />
+      ) : (
+        <FileText
+          size={13}
+          className={`flex-shrink-0 ${isError ? "text-[#A04545]" : "text-[#B86F50]"}`}
+        />
+      )}
+      <span className="max-w-[180px] truncate font-medium">{attachment.filename}</span>
+      {isConverting && <span className="text-[#A0A0A0]">converting…</span>}
+      {isError && (
+        <span className="max-w-[200px] truncate" title={attachment.error}>
+          {attachment.error}
+        </span>
+      )}
+      {attachment.status === "ready" && attachment.truncated && (
+        <span className="text-[#A0A0A0]">(truncated)</span>
+      )}
+      <button
+        type="button"
+        onClick={onRemove}
+        className={`flex-shrink-0 rounded-full p-0.5 transition-colors ${
+          isError
+            ? "text-[#A04545] hover:bg-[#F2DCDC]"
+            : "text-[#A0A0A0] hover:bg-[#E8E8E8] hover:text-[#3A3A3A]"
+        }`}
+        aria-label={`Remove ${attachment.filename}`}
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+}
+
 export function ChatInput({
   onSend,
   disabled,
@@ -247,7 +301,9 @@ export function ChatInput({
 }) {
   const [text, setText] = useState("");
   const [configOpen, setConfigOpen] = useState(false);
+  const [attachments, setAttachments] = useState([]);
   const taRef = useRef(null);
+  const fileRef = useRef(null);
   const currentProcessConfig = normalizeProcessConfig(processConfig);
 
   // Auto-grow textarea to fit content
@@ -266,15 +322,67 @@ export function ChatInput({
     }
   }
 
+  async function handleFilePick(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ""; // allow re-selecting the same file later
+    for (const file of files) {
+      const id = `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      setAttachments((prev) => [
+        ...prev,
+        { id, filename: file.name, status: "converting" },
+      ]);
+      try {
+        const res = await convertProcessFile(file);
+        setAttachments((prev) =>
+          prev.map((a) =>
+            a.id === id
+              ? {
+                  ...a,
+                  status: "ready",
+                  filename: res.filename || a.filename,
+                  markdown: res.markdown,
+                  truncated: !!res.truncated,
+                }
+              : a,
+          ),
+        );
+      } catch (err) {
+        setAttachments((prev) =>
+          prev.map((a) =>
+            a.id === id
+              ? { ...a, status: "error", error: err?.message || "Conversion failed" }
+              : a,
+          ),
+        );
+      }
+    }
+  }
+
+  function removeAttachment(id) {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }
+
   function submit() {
-    if (!text.trim() || inputDisabled) return;
-    onSend(text, currentProcessConfig);
+    if (!canSend) return;
+    onSend(
+      text,
+      currentProcessConfig,
+      readyAttachments.map(({ filename, markdown }) => ({ filename, markdown })),
+    );
     setConfigOpen(false);
     setText("");
+    setAttachments([]);
   }
 
   const inputDisabled = disabled || isStreaming;
   const effectiveConfigOpen = configOpen && showProcessControls && !configLocked;
+  // Attachments feed the process start (project_description), so the paperclip
+  // only appears while this composer can still start a process.
+  const showAttach = showProcessControls && !configLocked;
+  const readyAttachments = attachments.filter((a) => a.status === "ready");
+  const converting = attachments.some((a) => a.status === "converting");
+  const canSend =
+    (text.trim() || readyAttachments.length > 0) && !inputDisabled && !converting;
 
   return (
     <div className="px-4 pb-5 pt-2 flex-shrink-0">
@@ -302,6 +410,18 @@ export function ChatInput({
                        disabled:opacity-60"
           />
 
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-4 pb-2.5">
+              {attachments.map((att) => (
+                <AttachmentChip
+                  key={att.id}
+                  attachment={att}
+                  onRemove={() => removeAttachment(att.id)}
+                />
+              ))}
+            </div>
+          )}
+
           <div className="border-t border-[#E8E8E8] px-3 py-3">
             {effectiveConfigOpen && (
               <ProcessSettingsPanel
@@ -321,33 +441,60 @@ export function ChatInput({
               ) : (
                 <span />
               )}
-              {isStreaming ? (
-                <Tooltip text="Stop generating">
-                  <button
-                    onClick={onCancel}
-                    className="w-8 h-8 flex items-center justify-center rounded-full
-                               bg-[#1A1A1A] hover:bg-[#3A3A3A]
-                               text-white transition-colors shadow-sm"
-                  >
-                    <Square size={12} fill="currentColor" />
-                  </button>
-                </Tooltip>
-              ) : (
-                <Tooltip text="Send message">
-                  <button
-                    onClick={submit}
-                    disabled={!text.trim() || inputDisabled}
-                    className={`w-8 h-8 flex items-center justify-center rounded-full
-                                transition-all duration-150 ${
-                                  text.trim() && !inputDisabled
-                                    ? "bg-[#B86F50] hover:bg-[#A76145] text-white shadow-sm"
-                                    : "bg-[#EFEFEF] text-[#A8A8A8] cursor-not-allowed"
-                                }`}
-                  >
-                    <ArrowUp size={15} strokeWidth={2.5} />
-                  </button>
-                </Tooltip>
-              )}
+              <div className="flex items-center gap-1.5">
+                {showAttach && (
+                  <>
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      multiple
+                      className="hidden"
+                      onChange={handleFilePick}
+                    />
+                    <Tooltip text="Attach PDF">
+                      <button
+                        type="button"
+                        onClick={() => fileRef.current?.click()}
+                        disabled={inputDisabled}
+                        className="w-8 h-8 flex items-center justify-center rounded-full
+                                   text-[#6B6B6B] hover:bg-[#F0F0F0] hover:text-[#1A1A1A]
+                                   transition-colors disabled:opacity-50
+                                   disabled:cursor-not-allowed"
+                      >
+                        <Paperclip size={15} />
+                      </button>
+                    </Tooltip>
+                  </>
+                )}
+                {isStreaming ? (
+                  <Tooltip text="Stop generating">
+                    <button
+                      onClick={onCancel}
+                      className="w-8 h-8 flex items-center justify-center rounded-full
+                                 bg-[#1A1A1A] hover:bg-[#3A3A3A]
+                                 text-white transition-colors shadow-sm"
+                    >
+                      <Square size={12} fill="currentColor" />
+                    </button>
+                  </Tooltip>
+                ) : (
+                  <Tooltip text="Send message">
+                    <button
+                      onClick={submit}
+                      disabled={!canSend}
+                      className={`w-8 h-8 flex items-center justify-center rounded-full
+                                  transition-all duration-150 ${
+                                    canSend
+                                      ? "bg-[#B86F50] hover:bg-[#A76145] text-white shadow-sm"
+                                      : "bg-[#EFEFEF] text-[#A8A8A8] cursor-not-allowed"
+                                  }`}
+                    >
+                      <ArrowUp size={15} strokeWidth={2.5} />
+                    </button>
+                  </Tooltip>
+                )}
+              </div>
             </div>
           </div>
         </div>

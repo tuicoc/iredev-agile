@@ -10,7 +10,9 @@ sequential extract_structured passes governed by ``vision_mode`` in
 WorkflowState.
 
 - Pass 0 — INTAKE QUESTIONS (separate entry point,
-  ``generate_intake_questions``): authors 0–4 questions that both
+  ``generate_intake_questions``; only when ``vision_mode == "coverage"``
+  — fidelity/Extract mode emits an empty set with no LLM call, so the
+  gate auto-skips): authors 0–4 questions that both
   CLARIFY the intent (resolve a genuine fork already in it) and EXPAND
   it (offer candidate features, capabilities, audiences, or directions
   the intent did not name but that plausibly enrich it). Each question
@@ -939,13 +941,26 @@ class VisionaryAgent(BaseAgent):
     def generate_intake_questions(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Author 0–4 clarify/expand questions for the human (Pass 0).
 
+        Coverage ("Infer") mode only. Fidelity ("Extract") mode reads the
+        intent as given rather than interrogating it, so the question set is
+        emitted empty and the gate auto-skips — deterministic Python, no LLM
+        call.
+
         Produces artifacts["vision_intake_questions"]. The graph's intake
         gate presents them in an AskUserQuestion-style UI; the answers are
         folded into vision_intake_summary and read by Pass 1/2/3 as stated
         input. An empty question set makes the gate auto-skip.
         """
         signal = (state.get("project_description") or "").strip()
-        if not signal:
+        if self._resolve_mode(state) == "fidelity":
+            logger.info(
+                "[VisionaryAgent] vision_mode=fidelity (Extract) — intake questions skipped."
+            )
+            qset = IntakeQuestionSet(
+                notes="Intake skipped: extract (fidelity) mode reads the intent as given.",
+                questions=[],
+            )
+        elif not signal:
             logger.warning("[VisionaryAgent] project_description missing; no intake questions.")
             qset = IntakeQuestionSet(notes="No project intent provided.", questions=[])
         else:

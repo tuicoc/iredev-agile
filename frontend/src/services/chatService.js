@@ -28,7 +28,7 @@
 // Auth functions work with access_token (in RAM) + refresh_token (HttpOnly
 // cookie). They never read or write localStorage — that's apiClient's job.
 // =============================================================================
-import { get, post, put, del } from "./apiClient";
+import { get, post, put, del, request } from "./apiClient";
 import { setAccessToken, clearAccessToken } from "./tokenStore";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -92,3 +92,10 @@ export const sendMessage   = (chatId, content, subChat) => post(`/api/chats/${ch
 export const saveAssistantMessage = (chatId, content, subChat = 0) =>
   post(`/api/chats/${chatId}/${subChat}/messages`, { role: "assistant", content });
 export const startReq      = (config, chat_id)          => post(`/api/chats/process/start/${chat_id}`, { ...config });
+
+/** Upload a PDF and get it back as Markdown ({ filename, markdown, charCount, truncated }). */
+export const convertProcessFile = (file) => {
+  const form = new FormData();
+  form.append("file", file);
+  return request("/api/chats/process/convert-file", { method: "POST", body: form });
+};

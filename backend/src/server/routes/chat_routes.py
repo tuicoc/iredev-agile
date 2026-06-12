@@ -8,8 +8,11 @@
 #   GET    /api/chats/<chat_id>/<sub>/messages   List messages
 #   POST   /api/chats/<chat_id>/<sub>/messages   Save a user message
 #   POST   /api/chats/process/start/<chat_id>    Start requirement process
+#   POST   /api/chats/process/convert-file       PDF → Markdown (MarkItDown)
 # =============================================================================
 
+import io
+import os
 import uuid
 import re
 from flask import Blueprint, request, jsonify
@@ -29,6 +32,11 @@ chat_bp = Blueprint("chat", __name__)
 
 _MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9._:/+\-]+$")
 _MAX_INTERVIEW_TURNS = 1000
+
+# Attached-document limits: raw upload size, and how much converted Markdown
+# is carried into project_description (the Visionary's input signal).
+_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+_MAX_DOC_CHARS = 120_000
 
 
 def _parse_max_turns(value) -> int:
@@ -79,6 +87,33 @@ def _normalise_llm_overrides(data: dict) -> dict:
     if interview_model:
         overrides["interview"] = {"model": interview_model}
     return overrides
+
+
+def _normalise_attached_documents(raw) -> list[dict]:
+    """Validate the attachedDocuments payload: [{filename, markdown}, ...]."""
+    if not isinstance(raw, list):
+        return []
+    docs = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        markdown = str(entry.get("markdown") or "").strip()
+        if not markdown:
+            continue
+        filename = os.path.basename(str(entry.get("filename") or "")).strip() or "document.pdf"
+        docs.append({"filename": filename, "markdown": markdown[:_MAX_DOC_CHARS]})
+    return docs
+
+
+def _compose_project_description(text: str, docs: list[dict]) -> str:
+    """Merge typed description + converted documents into one Visionary signal."""
+    blocks = [text] if text else []
+    for doc in docs:
+        blocks.append(
+            f"--- Attached document: {doc['filename']} (converted to Markdown) ---\n"
+            f"{doc['markdown']}"
+        )
+    return "\n\n".join(blocks)
 
 
 # =============================================================================
@@ -188,8 +223,13 @@ def start(current_user, chat_id):
     req_id = str(uuid.uuid4())
     data = request.get_json(silent=True) or {}
     projDescr = data.get("projectDescription", "").strip()
-    if not projDescr:
-        return jsonify({"error": "Validation error", "message": "Project Description is required."}), 400
+    attached_docs = _normalise_attached_documents(data.get("attachedDocuments"))
+    if not projDescr and not attached_docs:
+        return jsonify({
+            "error": "Validation error",
+            "message": "Project Description or an attached document is required.",
+        }), 400
+    projDescr = _compose_project_description(projDescr, attached_docs)
 
     max_turns = _parse_max_turns(data.get("maxIterations", 150))
     vision_mode = _parse_vision_mode(data.get("visionMode") or data.get("vision_mode"))
@@ -229,12 +269,13 @@ def start(current_user, chat_id):
         "_workflow_started_message": False,
     }
     logger.info(
-        "Starting requirement process chat=%s request=%s vision_mode=%s max_turns=%s llm=%s",
+        "Starting requirement process chat=%s request=%s vision_mode=%s max_turns=%s llm=%s docs=%d",
         chat_id,
         req_id,
         vision_mode,
         max_turns,
         llm_overrides,
+        len(attached_docs),
     )
 
     task = executor.submit(
@@ -249,3 +290,73 @@ def start(current_user, chat_id):
             "llmOverrides": llm_overrides,
         },
     }
+
+
+@chat_bp.route("/process/convert-file", methods=["POST"])
+@require_auth
+def convert_process_file(current_user):
+    """
+    POST /api/chats/process/convert-file
+    multipart/form-data: file=<pdf>
+
+    Converts an uploaded PDF to Markdown with Microsoft MarkItDown so the
+    frontend can attach it to /process/start as attachedDocuments. The
+    converted text becomes part of project_description — the Visionary's
+    input signal — so no agent-side changes are needed.
+    """
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return jsonify({"error": "Validation error", "message": "A file is required."}), 400
+
+    filename = os.path.basename(upload.filename)
+    if os.path.splitext(filename)[1].lower() != ".pdf":
+        return jsonify({"error": "Validation error", "message": "Only PDF files are supported."}), 400
+
+    raw = upload.read(_MAX_UPLOAD_BYTES + 1)
+    if len(raw) > _MAX_UPLOAD_BYTES:
+        return jsonify({
+            "error": "Validation error",
+            "message": f"File exceeds the {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
+        }), 413
+    if not raw.startswith(b"%PDF"):
+        return jsonify({"error": "Validation error", "message": "File is not a valid PDF."}), 400
+
+    try:
+        # Imported lazily: pulls in pdfminer et al., only needed on this route.
+        from markitdown import MarkItDown, StreamInfo
+
+        result = MarkItDown(enable_plugins=False).convert_stream(
+            io.BytesIO(raw),
+            stream_info=StreamInfo(extension=".pdf", mimetype="application/pdf"),
+        )
+        markdown = (result.text_content or "").strip()
+    except Exception:
+        logger.exception("MarkItDown conversion failed for %s", filename)
+        return jsonify({
+            "error": "Conversion error",
+            "message": "Could not convert this PDF. It may be corrupted or password-protected.",
+        }), 422
+
+    if not markdown:
+        return jsonify({
+            "error": "Conversion error",
+            "message": "No extractable text found — the PDF may be a scanned image.",
+        }), 422
+
+    truncated = len(markdown) > _MAX_DOC_CHARS
+    if truncated:
+        # Keep total length ≤ _MAX_DOC_CHARS so the re-slice in
+        # _normalise_attached_documents never cuts the marker.
+        marker = "\n\n[Document truncated for processing]"
+        markdown = markdown[: _MAX_DOC_CHARS - len(marker)].rstrip() + marker
+
+    logger.info(
+        "Converted %s for user=%s: %d chars%s",
+        filename, current_user["id"], len(markdown), " (truncated)" if truncated else "",
+    )
+    return jsonify({
+        "filename": filename,
+        "markdown": markdown,
+        "charCount": len(markdown),
+        "truncated": truncated,
+    }), 200

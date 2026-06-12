@@ -110,8 +110,12 @@ export async function request(path, options = {}, _isRetry = false) {
   const url         = `${API_BASE_URL}${path}`
   const accessToken = getAccessToken()
 
+  // FormData bodies must NOT get a manual Content-Type — the browser sets
+  // multipart/form-data with the correct boundary itself.
+  const isFormData = options.body instanceof FormData
+
   const headers = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     ...options.headers,
   }
