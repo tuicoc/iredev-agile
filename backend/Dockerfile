@@ -23,4 +23,4 @@ COPY . .
 EXPOSE 8000
 
 # Run the Flask app and bind it to 0.0.0.0 so Docker can route traffic to it
-CMD ["python", "-m", "flask", "run"]
+CMD ["python", "-m", "src.server.app"]
